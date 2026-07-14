@@ -1,4 +1,6 @@
+
 # Alkame-Nifty50
+
 
 **NIFTY 50 Intraday Market Intelligence Engine**
 *Human-in-the-loop · Calibration-gated · Event-aware*
