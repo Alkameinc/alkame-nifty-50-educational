@@ -24,6 +24,7 @@ from config import (
     configure_logging,
 )
 from data_fetcher import DataFetcher
+from health_monitor import registry as health_registry
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -161,6 +162,11 @@ class GlobalRiskMonitor:
         Missing tickers are excluded from the composite rather than crashing
         the whole computation — degrades gracefully.
         """
+        now = datetime.now()
+        if hasattr(self, "_cached_reading") and hasattr(self, "_cached_time"):
+            if (now - self._cached_time).total_seconds() < 300: # 5 minutes
+                return self._cached_reading
+
         driver_zscores: Dict[str, float] = {}
         try:
             global_data = self.data_fetcher.fetch_global_tickers()
@@ -174,6 +180,7 @@ class GlobalRiskMonitor:
 
             if not driver_zscores:
                 logger.error("No global risk drivers available at all — returning NORMAL as a safe default.")
+                health_registry.report("global_risk_monitor", ok=False, detail="No global risk drivers available")
                 return GlobalRiskReading(
                     timestamp=datetime.now(), composite_zscore=0.0, risk_level=RISK_LEVEL_NORMAL,
                     dominant_driver=None, driver_details={},
@@ -191,19 +198,27 @@ class GlobalRiskMonitor:
                 level = RISK_LEVEL_NORMAL
 
             banner = self._build_banner_message(level, dominant_driver, driver_zscores)
-
-            return GlobalRiskReading(
+            health_registry.report("global_risk_monitor", ok=True)
+            
+            result = GlobalRiskReading(
                 timestamp=datetime.now(), composite_zscore=composite, risk_level=level,
                 dominant_driver=dominant_driver, driver_details=driver_zscores, banner_message=banner,
             )
+            self._cached_reading = result
+            self._cached_time = now
+            return result
 
         except Exception as e:
             logger.error(f"Failed computing composite global risk: {e}")
-            return GlobalRiskReading(
+            health_registry.report("global_risk_monitor", ok=False, detail="Failed computing composite risk", error=str(e))
+            result = GlobalRiskReading(
                 timestamp=datetime.now(), composite_zscore=0.0, risk_level=RISK_LEVEL_NORMAL,
                 dominant_driver=None, driver_details={},
                 banner_message=f"Global risk monitor error — defaulting to NORMAL. ({e})",
             )
+            self._cached_reading = result
+            self._cached_time = now
+            return result
 
     @staticmethod
     def _build_banner_message(level: str, dominant_driver: Optional[str], driver_zscores: Dict[str, float]) -> str:

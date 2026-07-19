@@ -16,14 +16,13 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 # 3. Local imports
 from config import (
     MODELS_DIR,
-    PREDICTION_HORIZON_BARS,
-    PREDICTION_DEADBAND_PCT,
+    HORIZON_CONFIG,
+    HORIZON_INTRADAY,
     LABEL_CLASSES,
     MODEL_RANDOM_SEED,
     MODEL_N_ESTIMATORS,
     MODEL_MAX_DEPTH,
     MODEL_LEARNING_RATE,
-    MIN_TRAINING_SAMPLES_PER_STOCK,
     TIME_SERIES_SPLIT_TEST_FRACTION,
     ensure_directories,
     configure_logging,
@@ -38,7 +37,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 MODEL_FILE_SUFFIX = "_model.joblib"
 METADATA_FILE_SUFFIX = "_metadata.json"
+LEVEL_MODEL_FILE_SUFFIX = "_level_model.joblib"
+LEVEL_METADATA_FILE_SUFFIX = "_level_metadata.json"
 
+LEVEL_LABEL_CLASSES = ["MA", "SUPPORT", "RESISTANCE", "USER_COST", "NONE"]
 
 @dataclass
 class TrainingResult:
@@ -72,8 +74,94 @@ class ModelTrainer:
     # -----------------------------------------------------------------
     # Dataset preparation
     # -----------------------------------------------------------------
-    def build_labels(self, df: pd.DataFrame, horizon: int = PREDICTION_HORIZON_BARS,
-                      deadband_pct: float = PREDICTION_DEADBAND_PCT) -> pd.Series:
+    def compute_adaptive_deadband(self, df: pd.DataFrame, horizon_bars: int, deadband_pct_default: float) -> pd.Series:
+        """
+        Uses a rolling standard deviation of historical backward returns over the last 500 bars
+        multiplied by 0.5 to define the UP/FLAT/DOWN threshold dynamically.
+        Caps this adaptive deadband at a minimum of deadband_pct_default.
+        """
+        backward_returns = (df["Close"] - df["Close"].shift(horizon_bars)) / df["Close"].shift(horizon_bars) * 100.0
+        rolling_std = backward_returns.rolling(window=500, min_periods=50).std()
+        
+        adaptive_deadband = rolling_std * 0.5
+        adaptive_deadband = adaptive_deadband.clip(lower=deadband_pct_default)
+        return adaptive_deadband.fillna(deadband_pct_default)
+
+    def simulate_user_cost(self, df: pd.DataFrame, seed: int = MODEL_RANDOM_SEED) -> None:
+        """
+        Synthetically generates a 'user_avg_cost' for historical data so the model
+        can learn the 'USER_COST' outcome. 50% chance of having a position. If position
+        exists, cost is between -15% and +15% of current price.
+        Mutates df in place (both unlagged and _feat lagged columns).
+        """
+        rng = np.random.default_rng(seed)
+        mask = rng.random(len(df)) > 0.5
+        
+        df["has_position"] = mask.astype(float)
+        random_pcts = rng.uniform(-15.0, 15.0, size=len(df))
+        df["pct_from_user_avg_cost"] = np.where(mask, random_pcts, 0.0)
+        
+        df[f"has_position{ML_SAFE_SUFFIX}"] = df["has_position"].shift(1)
+        df[f"pct_from_user_avg_cost{ML_SAFE_SUFFIX}"] = df["pct_from_user_avg_cost"].shift(1)
+
+    def build_price_level_labels(self, df: pd.DataFrame, horizon: str = HORIZON_INTRADAY) -> pd.Series:
+        """
+        Simulates the future price path to see WHICH reference level is hit FIRST.
+        Returns one of: MA, SUPPORT, RESISTANCE, USER_COST, NONE.
+        """
+        try:
+            horizon_bars = HORIZON_CONFIG[horizon]["horizon_bars"]
+            price = df["Close"].values
+            # Compute absolute levels from the unlagged percentage features
+            ma = price / (1 + df["pct_from_ma"].values / 100.0)
+            sup = price / (1 + df["pct_from_support_band"].values / 100.0)
+            res = price / (1 + df["pct_from_resistance_band"].values / 100.0)
+            has_pos = df["has_position"].values > 0
+            usr = price / (1 + df["pct_from_user_avg_cost"].values / 100.0)
+
+            highs = df["High"].values
+            lows = df["Low"].values
+            N = len(df)
+            
+            labels = np.full(N, "NONE", dtype=object)
+            
+            for i in range(N - horizon_bars):
+                end = i + 1 + horizon_bars
+                h_win = highs[i+1:end]
+                l_win = lows[i+1:end]
+                
+                # Priority order: USER_COST, SUPPORT, RESISTANCE, MA
+                targets = [
+                    ("USER_COST", usr[i] if has_pos[i] else np.nan),
+                    ("SUPPORT", sup[i]),
+                    ("RESISTANCE", res[i]),
+                    ("MA", ma[i])
+                ]
+                
+                first_hit_idx = horizon_bars + 1
+                hit_label = "NONE"
+                
+                for label, level in targets:
+                    if np.isnan(level) or level == 0.0:
+                        continue
+                    hits = np.where((l_win <= level) & (h_win >= level))[0]
+                    if len(hits) > 0:
+                        first_hit = hits[0]
+                        if first_hit < first_hit_idx:
+                            first_hit_idx = first_hit
+                            hit_label = label
+                
+                labels[i] = hit_label
+                
+            # Final rows have no valid future
+            labels_series = pd.Series(labels, index=df.index)
+            labels_series.iloc[-horizon_bars:] = np.nan
+            return labels_series
+        except Exception as e:
+            logger.error(f"Failed building price level labels: {e}")
+            return pd.Series(np.nan, index=df.index)
+
+    def build_labels(self, df: pd.DataFrame, horizon: str = HORIZON_INTRADAY) -> pd.Series:
         """
         Forward-looking label: this is the one place in the whole system where
         looking into the future is CORRECT and required — a supervised label
@@ -83,10 +171,15 @@ class ModelTrainer:
         lagged before it gets here.
         """
         try:
-            future_return_pct = (df["Close"].shift(-horizon) - df["Close"]) / df["Close"] * 100.0
+            horizon_bars = HORIZON_CONFIG[horizon]["horizon_bars"]
+            deadband_pct = HORIZON_CONFIG[horizon]["deadband_pct_default"]
+            
+            adaptive_deadband = self.compute_adaptive_deadband(df, horizon_bars, deadband_pct)
+            
+            future_return_pct = (df["Close"].shift(-horizon_bars) - df["Close"]) / df["Close"] * 100.0
             labels = pd.Series("FLAT", index=df.index)
-            labels[future_return_pct > deadband_pct] = "UP"
-            labels[future_return_pct < -deadband_pct] = "DOWN"
+            labels[future_return_pct > adaptive_deadband] = "UP"
+            labels[future_return_pct < -adaptive_deadband] = "DOWN"
             # Rows near the end of the dataset have no future to look at — label is invalid there
             labels[future_return_pct.isna()] = np.nan
             return labels
@@ -95,33 +188,42 @@ class ModelTrainer:
             return pd.Series(np.nan, index=df.index)
 
     def prepare_dataset(
-        self, stock_df: pd.DataFrame, index_df: Optional[pd.DataFrame] = None
+        self, stock_df: pd.DataFrame, index_df: Optional[pd.DataFrame] = None, horizon: str = HORIZON_INTRADAY,
+        label_type: str = "direction"
     ) -> Optional[Tuple[pd.DataFrame, pd.Series, List[str]]]:
         """
         Runs feature engineering, selects ONLY '_feat' (ML-safe, lagged)
         columns as X, builds the forward-looking label as y, and drops rows
-        with any NaN (warmup period at the start, label horizon at the end).
+        with any NaN.
+        If label_type == "level", simulates user cost and builds price level labels.
         """
         try:
-            engineered = self.feature_engineer.engineer_features(stock_df, index_df)
+            engineered = self.feature_engineer.engineer_features_for_horizon(stock_df, index_df, horizon=horizon)
             if engineered is None or engineered.empty:
                 logger.error("Feature engineering returned no data — cannot prepare dataset.")
                 return None
+
+            if label_type == "level":
+                self.simulate_user_cost(engineered)
 
             feature_columns = [c for c in engineered.columns if c.endswith(ML_SAFE_SUFFIX)]
             if not feature_columns:
                 logger.error("No ML-safe ('_feat') columns found — refusing to train on raw columns.")
                 return None
 
-            # Defensive check: make absolutely sure nothing raw/unlagged is in here.
             raw_leak = [c for c in feature_columns if not c.endswith(ML_SAFE_SUFFIX)]
             assert not raw_leak, f"Non-lagged column(s) detected in feature set: {raw_leak}"
 
-            labels = self.build_labels(engineered)
+            if label_type == "level":
+                labels = self.build_price_level_labels(engineered, horizon=horizon)
+            else:
+                labels = self.build_labels(engineered, horizon=horizon)
+                
             X = engineered[feature_columns].copy()
             y = labels.copy()
 
             combined = pd.concat([X, y.rename("label")], axis=1).dropna()
+            
             if combined.empty:
                 logger.error("No rows remain after dropping NaN (warmup/label horizon) — dataset too short.")
                 return None
@@ -167,51 +269,59 @@ class ModelTrainer:
         return model
 
     @staticmethod
-    def evaluate(model: GradientBoostingClassifier, X_test: pd.DataFrame, y_test: pd.Series) -> Dict:
+    def evaluate(model: GradientBoostingClassifier, X_test: pd.DataFrame, y_test: pd.Series, label_classes: List[str] = LABEL_CLASSES) -> Dict:
         preds = model.predict(X_test)
         accuracy = accuracy_score(y_test, preds)
-        report = classification_report(y_test, preds, labels=LABEL_CLASSES, output_dict=True, zero_division=0)
-        cm = confusion_matrix(y_test, preds, labels=LABEL_CLASSES).tolist()
+        report = classification_report(y_test, preds, labels=label_classes, output_dict=True, zero_division=0)
+        cm = confusion_matrix(y_test, preds, labels=label_classes).tolist()
         return {"accuracy": accuracy, "classification_report": report, "confusion_matrix": cm}
 
-    def _model_path(self, symbol: str) -> Path:
-        return MODELS_DIR / f"{symbol}{MODEL_FILE_SUFFIX}"
+    def _model_path(self, symbol: str, horizon: str, is_level: bool = False) -> Path:
+        suffix = LEVEL_MODEL_FILE_SUFFIX if is_level else MODEL_FILE_SUFFIX
+        return MODELS_DIR / f"{symbol}_{horizon}{suffix}"
 
-    def _metadata_path(self, symbol: str) -> Path:
-        return MODELS_DIR / f"{symbol}{METADATA_FILE_SUFFIX}"
+    def _metadata_path(self, symbol: str, horizon: str, is_level: bool = False) -> Path:
+        suffix = LEVEL_METADATA_FILE_SUFFIX if is_level else METADATA_FILE_SUFFIX
+        return MODELS_DIR / f"{symbol}_{horizon}{suffix}"
 
     def save_model(self, symbol: str, model: GradientBoostingClassifier, feature_columns: List[str],
-                   metrics: Dict) -> None:
+                   metrics: Dict, horizon: str = HORIZON_INTRADAY, is_level: bool = False) -> None:
         try:
             ensure_directories()
-            joblib.dump(model, self._model_path(symbol))
+            joblib.dump(model, self._model_path(symbol, horizon, is_level))
+            
+            lbl_classes = LEVEL_LABEL_CLASSES if is_level else LABEL_CLASSES
+            
             metadata = {
                 "symbol": symbol,
+                "horizon": horizon,
+                "is_level_model": is_level,
                 "trained_at": datetime.now().isoformat(),
                 "feature_columns": feature_columns,
-                "label_classes": LABEL_CLASSES,
-                "prediction_horizon_bars": PREDICTION_HORIZON_BARS,
-                "deadband_pct": PREDICTION_DEADBAND_PCT,
+                "label_classes": lbl_classes,
+                "prediction_horizon_bars": HORIZON_CONFIG[horizon]["horizon_bars"],
+                "deadband_pct": HORIZON_CONFIG[horizon]["deadband_pct_default"],
                 "test_accuracy": metrics["accuracy"],
             }
             f = None
             try:
-                f = open(self._metadata_path(symbol), "w", encoding="utf-8")
+                f = open(self._metadata_path(symbol, horizon, is_level), "w", encoding="utf-8")
                 json.dump(metadata, f, indent=2)
             finally:
                 if f is not None:
                     f.close()
-            logger.info(f"Saved model + metadata for {symbol} to {MODELS_DIR}")
+            mdl_type = "level model" if is_level else "direction model"
+            logger.info(f"Saved {mdl_type} + metadata for {symbol} ({horizon}) to {MODELS_DIR}")
         except Exception as e:
-            logger.error(f"Failed saving model for {symbol}: {e}")
+            logger.error(f"Failed saving model for {symbol} ({horizon}): {e}")
             raise
 
-    def load_model(self, symbol: str) -> Optional[Tuple[GradientBoostingClassifier, Dict]]:
-        model_path = self._model_path(symbol)
-        metadata_path = self._metadata_path(symbol)
+    def load_model(self, symbol: str, horizon: str = HORIZON_INTRADAY, is_level: bool = False) -> Optional[Tuple[GradientBoostingClassifier, Dict]]:
+        model_path = self._model_path(symbol, horizon, is_level)
+        metadata_path = self._metadata_path(symbol, horizon, is_level)
         try:
             if not model_path.exists() or not metadata_path.exists():
-                logger.error(f"No saved model found for {symbol} at {model_path}. Run training first.")
+                logger.error(f"No saved model found for {symbol} ({horizon}) at {model_path}. Run training first.")
                 return None
             model = joblib.load(model_path)
             f = None
@@ -223,18 +333,20 @@ class ModelTrainer:
                     f.close()
             return model, metadata
         except Exception as e:
-            logger.error(f"Failed loading model for {symbol}: {e}")
+            logger.error(f"Failed loading model for {symbol} ({horizon}): {e}")
             return None
 
     # -----------------------------------------------------------------
     # Orchestration
     # -----------------------------------------------------------------
     def train_for_symbol(
-        self, symbol: str, stock_df: pd.DataFrame, index_df: Optional[pd.DataFrame] = None
+        self, symbol: str, stock_df: pd.DataFrame, index_df: Optional[pd.DataFrame] = None,
+        horizon: str = HORIZON_INTRADAY, is_level: bool = False
     ) -> TrainingResult:
         """Full pipeline for one stock: prepare -> split -> train -> evaluate -> save."""
         try:
-            prepared = self.prepare_dataset(stock_df, index_df)
+            label_type = "level" if is_level else "direction"
+            prepared = self.prepare_dataset(stock_df, index_df, horizon=horizon, label_type=label_type)
             if prepared is None:
                 return TrainingResult(
                     symbol=symbol, trained_at=datetime.now().isoformat(), n_train_samples=0,
@@ -243,8 +355,9 @@ class ModelTrainer:
                 )
             X, y, feature_columns = prepared
 
-            if len(X) < MIN_TRAINING_SAMPLES_PER_STOCK:
-                msg = f"Only {len(X)} usable samples for {symbol}, need >= {MIN_TRAINING_SAMPLES_PER_STOCK}."
+            min_training_samples = HORIZON_CONFIG[horizon]["min_training_samples"]
+            if len(X) < min_training_samples:
+                msg = f"Only {len(X)} usable samples for {symbol} ({horizon}), need >= {min_training_samples}."
                 logger.error(msg)
                 return TrainingResult(
                     symbol=symbol, trained_at=datetime.now().isoformat(), n_train_samples=len(X),
@@ -262,8 +375,9 @@ class ModelTrainer:
                 )
 
             model = self.train(X_train, y_train)
-            metrics = self.evaluate(model, X_test, y_test)
-            self.save_model(symbol, model, feature_columns, metrics)
+            lbl_classes = LEVEL_LABEL_CLASSES if is_level else LABEL_CLASSES
+            metrics = self.evaluate(model, X_test, y_test, label_classes=lbl_classes)
+            self.save_model(symbol, model, feature_columns, metrics, horizon=horizon, is_level=is_level)
 
             return TrainingResult(
                 symbol=symbol, trained_at=datetime.now().isoformat(), n_train_samples=len(X_train),
@@ -359,23 +473,28 @@ if __name__ == "__main__":
               "the real contract this phase must prove is the structural guarantees below.")
 
         # Save/load round trip check
-        loaded = trainer.load_model(test_symbol)
+        loaded = trainer.load_model(test_symbol, horizon=HORIZON_INTRADAY)
         load_ok = loaded is not None
         print(f"Model save/load round trip: {'OK' if load_ok else 'FAILED'}")
 
         predictions_match = False
         if load_ok:
             loaded_model, metadata = loaded
-            prepared = trainer.prepare_dataset(stock_df, index_df)
+            prepared = trainer.prepare_dataset(stock_df, index_df, horizon=HORIZON_INTRADAY)
             if prepared is not None:
                 X, y, _ = prepared
                 _, X_test, _, _ = trainer.time_based_split(X, y)
                 preds_loaded = loaded_model.predict(X_test)
                 # Re-load independently from disk again to prove it's the persisted artifact, not the in-memory object
-                reloaded_model = joblib.load(trainer._model_path(test_symbol))
+                reloaded_model = joblib.load(trainer._model_path(test_symbol, HORIZON_INTRADAY))
                 preds_direct = reloaded_model.predict(X_test)
                 predictions_match = np.array_equal(preds_loaded, preds_direct)
         print(f"Loaded model produces identical predictions on reload: {predictions_match}")
+        
+        # Check adaptive deadband test
+        db_adaptive = trainer.compute_adaptive_deadband(stock_df, horizon_bars=6, deadband_pct_default=0.15)
+        adaptive_ok = db_adaptive is not None and len(db_adaptive) == len(stock_df)
+        print(f"Adaptive deadband computation: {'OK' if adaptive_ok else 'FAILED'}")
 
         # PASS/FAIL is gated on the structural guarantees this phase actually promises —
         # chronological split integrity (enforced by an assertion inside train_for_symbol,
@@ -383,11 +502,27 @@ if __name__ == "__main__":
         # and save/load fidelity. Raw accuracy on a made-up synthetic pattern is printed
         # above for visibility only and deliberately does NOT gate pass/fail — that would
         # be testing the toy data generator's learnability, not this file's correctness.
+        # Test level model training
+        print("\n=== LEVEL MODEL TRAINING SELF-TEST ===")
+        level_result = trainer.train_for_symbol(test_symbol, stock_df, index_df, is_level=True)
+        print(f"Level Training success: {level_result.success}")
+        
+        # Check that it simulated user cost (has_position should have variance)
+        simulated_ok = False
+        prepared_level = trainer.prepare_dataset(stock_df, index_df, label_type="level")
+        if prepared_level is not None:
+            X_lvl, y_lvl, _ = prepared_level
+            if "has_position_feat" in X_lvl.columns:
+                simulated_ok = X_lvl["has_position_feat"].nunique() > 1
+        print(f"User cost simulation varied has_position: {simulated_ok}")
+        
         overall_pass = (
             result.success
             and all(c.endswith(ML_SAFE_SUFFIX) for c in result.feature_columns)
             and load_ok
             and predictions_match
+            and level_result.success
+            and simulated_ok
         )
         print("STATUS: PASS" if overall_pass else "STATUS: FAIL — see details above")
 

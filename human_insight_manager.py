@@ -12,6 +12,7 @@ from typing import List, Optional
 # 3. Local imports
 from config import DB_PATH, ensure_directories, configure_logging
 from predictor import PredictionSignal
+from health_monitor import registry as health_registry
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -138,9 +139,11 @@ class HumanInsightManager:
             conn.commit()
             note_id = cursor.lastrowid
             logger.info(f"Added note #{note_id} for {symbol}: {note_text[:60]}")
+            health_registry.report("human_insight_manager", ok=True, detail=f"Added note for {symbol}")
             return note_id
         except Exception as e:
             logger.error(f"Failed adding note for {symbol}: {e}")
+            health_registry.report("human_insight_manager", ok=False, detail="Failed adding note", error=str(e))
             return None
         finally:
             if conn is not None:
@@ -164,9 +167,11 @@ class HumanInsightManager:
                     (limit,),
                 )
             rows = cursor.fetchall()
+            health_registry.report("human_insight_manager", ok=True)
             return [NoteRecord(*row) for row in rows]
         except Exception as e:
             logger.error(f"Failed fetching notes for symbol={symbol}: {e}")
+            health_registry.report("human_insight_manager", ok=False, detail="Failed fetching notes", error=str(e))
             return []
         finally:
             if conn is not None:
@@ -195,9 +200,11 @@ class HumanInsightManager:
                 f"Recorded override #{override_id} for {symbol}: {original_action} -> {overridden_action} "
                 f"(reason: {reason[:60]})"
             )
+            health_registry.report("human_insight_manager", ok=True, detail=f"Recorded override for {symbol}")
             return override_id
         except Exception as e:
             logger.error(f"Failed recording override for {symbol}: {e}")
+            health_registry.report("human_insight_manager", ok=False, detail="Failed recording override", error=str(e))
             return None
         finally:
             if conn is not None:
@@ -221,9 +228,11 @@ class HumanInsightManager:
                     (limit,),
                 )
             rows = cursor.fetchall()
+            health_registry.report("human_insight_manager", ok=True)
             return [OverrideRecord(*row) for row in rows]
         except Exception as e:
             logger.error(f"Failed fetching overrides for symbol={symbol}: {e}")
+            health_registry.report("human_insight_manager", ok=False, detail="Failed fetching overrides", error=str(e))
             return []
         finally:
             if conn is not None:
@@ -272,9 +281,11 @@ class HumanInsightManager:
             conn.commit()
             feedback_id = cursor.lastrowid
             logger.info(f"Recorded feedback #{feedback_id} for {symbol} ({original_action}): helpful={was_helpful}")
+            health_registry.report("human_insight_manager", ok=True, detail=f"Recorded feedback for {symbol}")
             return feedback_id
         except Exception as e:
             logger.error(f"Failed recording feedback for {symbol}: {e}")
+            health_registry.report("human_insight_manager", ok=False, detail="Failed recording feedback", error=str(e))
             return None
         finally:
             if conn is not None:
@@ -302,9 +313,11 @@ class HumanInsightManager:
             for row in rows:
                 helpful = None if row[4] is None else bool(row[4])
                 records.append(FeedbackRecord(row[0], row[1], row[2], row[3], helpful, row[5], row[6]))
+            health_registry.report("human_insight_manager", ok=True)
             return records
         except Exception as e:
             logger.error(f"Failed fetching feedback for symbol={symbol}: {e}")
+            health_registry.report("human_insight_manager", ok=False, detail="Failed fetching feedback", error=str(e))
             return []
         finally:
             if conn is not None:

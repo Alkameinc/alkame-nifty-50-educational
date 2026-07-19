@@ -17,9 +17,13 @@ from config import (
     INR_WEAKNESS_HURT_SECTORS,
     MONSOON_SENSITIVE_SECTORS,
     RATE_SENSITIVE_SECTORS,
+    EVENT_IMPACT_HORIZON,
+    HORIZON_INTRADAY,
+    HORIZON_30D,
     configure_logging,
 )
 from macro_calendar import MacroCalendar, MacroEvent
+from health_monitor import registry as health_registry
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -47,6 +51,9 @@ MACRO_EVENT_TYPE_TO_SECTORS = {
     "FESTIVE_WINDOW": None,   # sector comes from the macro event's own sector_hint field
     "MONSOON_STATUS": MONSOON_SENSITIVE_SECTORS,
     "FDI_FLOW_RELEASE": ["ALL"],
+    "GEOPOLITICAL": ["ALL"],
+    "QUARTERLY_EARNINGS": None,
+    "REGULATORY_CHANGE": None,
     "MACRO_OTHER": None,
 }
 
@@ -83,6 +90,7 @@ class Event:
     headline_or_label: str = ""
     sentiment_score: Optional[float] = None
     magnitude_estimate: str = "MEDIUM"   # "LOW" | "MEDIUM" | "HIGH"
+    impact_horizon: str = HORIZON_INTRADAY
     raw: Optional[dict] = field(default=None, repr=False)
 
     def needs_human_review(self, low_confidence_threshold: float = 0.5) -> bool:
@@ -146,19 +154,26 @@ class EventClassifier:
                 headline_or_label=macro_event.label,
                 sentiment_score=None,
                 magnitude_estimate="HIGH" if macro_event.event_type in
-                    {"RBI_POLICY", "UNION_BUDGET", "ELECTION"} else "MEDIUM",
+                    {"RBI_POLICY", "UNION_BUDGET", "ELECTION", "GEOPOLITICAL"} else "MEDIUM",
+                impact_horizon=EVENT_IMPACT_HORIZON.get(macro_event.event_type, HORIZON_30D),
                 raw=None,
             )
+            health_registry.report("event_classifier", ok=True)
+            return evt
         except Exception as e:
             logger.error(f"Failed classifying macro event {macro_event}: {e}")
+            health_registry.report("event_classifier", ok=False, detail="Failed classifying macro event", error=str(e))
             return self._fallback_event("MACRO", macro_event.label)
 
     def get_active_macro_events_classified(self, check_date: Optional[date] = None) -> List[Event]:
         try:
             raw_events = self.macro_calendar.get_active_macro_events(check_date)
-            return [self.classify_macro_event(e) for e in raw_events]
+            res = [self.classify_macro_event(e) for e in raw_events]
+            health_registry.report("event_classifier", ok=True)
+            return res
         except Exception as e:
             logger.error(f"Failed getting active classified macro events: {e}")
+            health_registry.report("event_classifier", ok=False, detail="Failed getting active classified macro events", error=str(e))
             return []
 
     # -----------------------------------------------------------------
@@ -186,10 +201,14 @@ class EventClassifier:
                 headline_or_label=str(label),
                 sentiment_score=None,
                 magnitude_estimate="MEDIUM",
+                impact_horizon=EVENT_IMPACT_HORIZON.get(category, EVENT_IMPACT_HORIZON.get("CORPORATE_ANNOUNCEMENT", HORIZON_INTRADAY)),
                 raw=raw,
             )
+            health_registry.report("event_classifier", ok=True)
+            return evt
         except Exception as e:
             logger.error(f"Failed classifying corporate event {corporate_event}: {e}")
+            health_registry.report("event_classifier", ok=False, detail="Failed classifying corporate event", error=str(e))
             return self._fallback_event("CORPORATE", str(corporate_event))
 
     # -----------------------------------------------------------------
@@ -235,10 +254,14 @@ class EventClassifier:
                 headline_or_label=title,
                 sentiment_score=news_article.get("sentiment_score"),
                 magnitude_estimate="HIGH" if scope == SCOPE_MARKET else "MEDIUM",
+                impact_horizon=EVENT_IMPACT_HORIZON.get("NEWS_HEADLINE", HORIZON_INTRADAY),
                 raw=news_article,
             )
+            health_registry.report("event_classifier", ok=True)
+            return evt
         except Exception as e:
             logger.error(f"Failed classifying news event {news_article}: {e}")
+            health_registry.report("event_classifier", ok=False, detail="Failed classifying news event", error=str(e))
             return self._fallback_event("NEWS", news_article.get("title", ""))
 
     @staticmethod
@@ -268,6 +291,7 @@ class EventClassifier:
             headline_or_label=label,
             sentiment_score=None,
             magnitude_estimate="LOW",
+            impact_horizon=EVENT_IMPACT_HORIZON.get("CLASSIFICATION_ERROR", HORIZON_INTRADAY),
             raw=None,
         )
 
@@ -286,8 +310,10 @@ class EventClassifier:
                 results.append(self.classify_corporate_event(c))
             for n in (news_articles or []):
                 results.append(self.classify_news_event(n))
+            health_registry.report("event_classifier", ok=True)
         except Exception as e:
             logger.error(f"Failed classifying event batch: {e}")
+            health_registry.report("event_classifier", ok=False, detail="Failed classifying event batch", error=str(e))
         return results
 
 
