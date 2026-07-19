@@ -43,3 +43,15 @@
 2026-07-16 01:42:26,694 | INFO     | data_fetcher | Fetched OHLCV for 9/9 global tickers.
 2026-07-16 01:42:28,223 | WARNING  | data_fetcher | RELIANCE data is STALE: last bar is 617.5 minutes old (threshold=15m)
 2026-07-16 01:42:28,259 | INFO     | history_manager | Saved prediction #6 for RELIANCE (HOLD).
+2026-07-18 13:46:18,237 | INFO     | __main__ | Running app.py self-test...
+2026-07-18 13:46:18,253 | INFO     | __main__ | app.py self-test (pure logic) passed.
+2026-07-18 13:46:19,403 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-18 13:46:19,424 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-18 13:46:35,479 | INFO     | data_fetcher | Fetched OHLCV for 9/9 global tickers.
+2026-07-18 13:46:36,603 | INFO     | history_manager | Resolved prediction #6: predicted=FLAT, actual=FLAT, correct=True
+2026-07-18 13:46:36,628 | INFO     | history_manager | Resolved prediction #5: predicted=FLAT, actual=FLAT, correct=True
+2026-07-18 13:46:36,651 | INFO     | history_manager | Resolved prediction #4: predicted=FLAT, actual=FLAT, correct=True
+2026-07-18 13:46:36,674 | INFO     | history_manager | Resolved prediction #3: predicted=FLAT, actual=FLAT, correct=True
+2026-07-18 13:46:36,676 | INFO     | scheduler | Resolved 4 pending prediction(s) for RELIANCE.
+2026-07-18 13:46:36,678 | WARNING  | data_fetcher | RELIANCE data is STALE: last bar is 1341.6 minutes old (threshold=15m)
+2026-07-18 13:46:36,696 | INFO     | history_manager | Saved prediction #8 for RELIANCE (HOLD).
