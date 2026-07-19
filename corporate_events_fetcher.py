@@ -15,6 +15,7 @@ from config import (
     ensure_directories,
     configure_logging,
 )
+from health_monitor import registry as health_registry
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -78,6 +79,7 @@ class CorporateEventsFetcher:
             try:
                 time.sleep(NSE_RATE_LIMIT_DELAY_SECONDS)
                 result = fn(*args, **kwargs)
+                health_registry.report("corporate_events_fetcher", ok=True, detail=f"Fetched {fn_name}")
                 return result
             except Exception as e:
                 last_error = e
@@ -85,6 +87,7 @@ class CorporateEventsFetcher:
                 if attempt < MAX_RETRIES:
                     time.sleep(RETRY_BACKOFF_SECONDS * attempt)
         logger.error(f"All {MAX_RETRIES} attempts failed for {fn_name}: {last_error}")
+        health_registry.report("corporate_events_fetcher", ok=False, detail=f"All {MAX_RETRIES} attempts failed for {fn_name}", error=str(last_error))
         return []
 
     def fetch_announcements(
@@ -165,6 +168,7 @@ class CorporateEventsFetcher:
                 results[symbol] = self.fetch_all_for_symbol(symbol)
             except Exception as e:
                 logger.error(f"Failed fetching corporate events for {symbol}: {e}")
+                health_registry.report("corporate_events_fetcher", ok=False, detail=f"Failed fetching for {symbol}", error=str(e))
                 results[symbol] = []
         total_events = sum(len(v) for v in results.values())
         logger.info(f"Fetched {total_events} corporate event(s) across {len(NIFTY50_SYMBOLS)} symbols.")
@@ -188,6 +192,7 @@ class CorporateEventsFetcher:
                 })
         except Exception as e:
             logger.error(f"Failed normalizing {category} events for {symbol}: {e}")
+            health_registry.report("corporate_events_fetcher", ok=False, detail=f"Failed normalizing {category} for {symbol}", error=str(e))
         return normalized
 
 

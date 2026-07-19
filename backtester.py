@@ -8,9 +8,10 @@ import numpy as np
 import pandas as pd
 
 # 3. Local imports
-from config import SLIPPAGE_BPS, TRANSACTION_COST_BPS, PREDICTION_HORIZON_BARS, configure_logging
+from config import SLIPPAGE_BPS, TRANSACTION_COST_BPS, PREDICTION_HORIZON_BARS, HORIZON_CONFIG, HORIZON_INTRADAY, ALL_HORIZONS, configure_logging
 from ensemble_manager import EnsembleManager
 from runtime_validator import RuntimeValidator, CalibrationResult, EdgeCheckResult, LiveGateResult
+from history_manager import HistoryManager
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ CLASS_TO_DIRECTION = {"UP": 1, "DOWN": -1, "FLAT": 0}
 @dataclass
 class BacktestResult:
     symbol: str
+    horizon: str
     n_test_predictions: int
     n_trades_taken: int
     strategy_cumulative_return_pct: float
@@ -52,22 +54,24 @@ class Backtester:
     """
 
     def __init__(self, ensemble_manager: Optional[EnsembleManager] = None,
-                 runtime_validator: Optional[RuntimeValidator] = None):
+                 runtime_validator: Optional[RuntimeValidator] = None,
+                 history_manager: Optional[HistoryManager] = None):
         self.ensemble_manager = ensemble_manager or EnsembleManager()
         self.runtime_validator = runtime_validator or RuntimeValidator()
+        self.history_manager = history_manager or HistoryManager()
 
     @staticmethod
-    def _forward_return_pct(close: pd.Series, horizon: int = PREDICTION_HORIZON_BARS) -> pd.Series:
-        return (close.shift(-horizon) - close) / close * 100.0
+    def _forward_return_pct(close: pd.Series, horizon_bars: int) -> pd.Series:
+        return (close.shift(-horizon_bars) - close) / close * 100.0
 
     def run_backtest_for_symbol(
-        self, symbol: str, stock_df: pd.DataFrame, index_df: pd.DataFrame,
+        self, symbol: str, stock_df: pd.DataFrame, index_df: pd.DataFrame, horizon: str = HORIZON_INTRADAY
     ) -> BacktestResult:
         try:
-            train_result = self.ensemble_manager.train_ensemble_for_symbol(symbol, stock_df, index_df)
+            train_result = self.ensemble_manager.train_ensemble_for_symbol(symbol, stock_df, index_df, horizon=horizon)
             if not train_result.success:
                 return BacktestResult(
-                    symbol=symbol, n_test_predictions=0, n_trades_taken=0,
+                    symbol=symbol, horizon=horizon, n_test_predictions=0, n_trades_taken=0,
                     strategy_cumulative_return_pct=0.0, baseline_cumulative_return_pct=0.0, alpha_pct=0.0,
                     edge_check_status="NO_EDGE", calibration_status="INSUFFICIENT_DATA", calibration_ece=None,
                     is_live_worthy=False, success=False,
@@ -75,10 +79,10 @@ class Backtester:
                 )
 
             # Recover the exact same chronological test split the ensemble was evaluated on.
-            prepared = self.ensemble_manager.model_trainer.prepare_dataset(stock_df, index_df)
+            prepared = self.ensemble_manager.model_trainer.prepare_dataset(stock_df, index_df, horizon=horizon)
             if prepared is None:
                 return BacktestResult(
-                    symbol=symbol, n_test_predictions=0, n_trades_taken=0,
+                    symbol=symbol, horizon=horizon, n_test_predictions=0, n_trades_taken=0,
                     strategy_cumulative_return_pct=0.0, baseline_cumulative_return_pct=0.0, alpha_pct=0.0,
                     edge_check_status="NO_EDGE", calibration_status="INSUFFICIENT_DATA", calibration_ece=None,
                     is_live_worthy=False, success=False, error="Dataset preparation failed for backtest.",
@@ -88,24 +92,25 @@ class Backtester:
 
             if len(X_test) == 0:
                 return BacktestResult(
-                    symbol=symbol, n_test_predictions=0, n_trades_taken=0,
+                    symbol=symbol, horizon=horizon, n_test_predictions=0, n_trades_taken=0,
                     strategy_cumulative_return_pct=0.0, baseline_cumulative_return_pct=0.0, alpha_pct=0.0,
                     edge_check_status="NO_EDGE", calibration_status="INSUFFICIENT_DATA", calibration_ece=None,
                     is_live_worthy=False, success=False, error="Test set is empty — nothing to backtest.",
                 )
 
-            ensemble_predictions = self.ensemble_manager.predict(symbol, X_test)
+            ensemble_predictions = self.ensemble_manager.predict(symbol, X_test, horizon=horizon)
             if ensemble_predictions is None:
                 return BacktestResult(
-                    symbol=symbol, n_test_predictions=0, n_trades_taken=0,
+                    symbol=symbol, horizon=horizon, n_test_predictions=0, n_trades_taken=0,
                     strategy_cumulative_return_pct=0.0, baseline_cumulative_return_pct=0.0, alpha_pct=0.0,
                     edge_check_status="NO_EDGE", calibration_status="INSUFFICIENT_DATA", calibration_ece=None,
                     is_live_worthy=False, success=False, error="Ensemble prediction failed on test set.",
                 )
 
             # Actual forward returns for the stock (for P&L) and the index (for baseline), same horizon.
-            stock_forward_return = self._forward_return_pct(stock_df["Close"]).reindex(X_test.index)
-            index_forward_return = self._forward_return_pct(index_df["Close"]).reindex(X_test.index)
+            horizon_bars = HORIZON_CONFIG[horizon]["horizon_bars"]
+            stock_forward_return = self._forward_return_pct(stock_df["Close"], horizon_bars).reindex(X_test.index)
+            index_forward_return = self._forward_return_pct(index_df["Close"], horizon_bars).reindex(X_test.index)
 
             total_cost_pct = (SLIPPAGE_BPS + TRANSACTION_COST_BPS) / 100.0  # bps -> %
 
@@ -145,10 +150,21 @@ class Backtester:
             calibration_df = pd.DataFrame(calibration_rows)
             calibration_result = self.runtime_validator.compute_calibration(calibration_df)
 
+
             gate = self.runtime_validator.validate_before_live(calibration_result, edge_result)
 
+            if self.history_manager:
+                self.history_manager.save_backtest_result(
+                    symbol, horizon, edge_result.strategy_cumulative_return_pct,
+                    edge_result.baseline_cumulative_return_pct, edge_result.alpha_pct,
+                    edge_result.status, calibration_result.status,
+                    calibration_result.expected_calibration_error,
+                    (gate.safe_to_show_calibrated_confidence and gate.safe_to_treat_as_live_edge)
+                )
+
             return BacktestResult(
-                symbol=symbol, n_test_predictions=len(X_test), n_trades_taken=n_trades_taken,
+                symbol=symbol, horizon=horizon, n_test_predictions=len(X_test), n_trades_taken=n_trades_taken,
+
                 strategy_cumulative_return_pct=edge_result.strategy_cumulative_return_pct,
                 baseline_cumulative_return_pct=edge_result.baseline_cumulative_return_pct,
                 alpha_pct=edge_result.alpha_pct, edge_check_status=edge_result.status,
@@ -161,22 +177,26 @@ class Backtester:
         except Exception as e:
             logger.error(f"Backtest failed for {symbol}: {e}")
             return BacktestResult(
-                symbol=symbol, n_test_predictions=0, n_trades_taken=0,
+                symbol=symbol, horizon=horizon, n_test_predictions=0, n_trades_taken=0,
                 strategy_cumulative_return_pct=0.0, baseline_cumulative_return_pct=0.0, alpha_pct=0.0,
                 edge_check_status="NO_EDGE", calibration_status="INSUFFICIENT_DATA", calibration_ece=None,
                 is_live_worthy=False, success=False, error=str(e),
             )
 
+
     def run_backtest_for_all_symbols(
         self, symbol_data: Dict[str, Tuple[pd.DataFrame, pd.DataFrame]],
-    ) -> Dict[str, BacktestResult]:
+    ) -> Dict[str, Dict[str, BacktestResult]]:
         """symbol_data maps symbol -> (stock_df, index_df). Runs the full
-        per-symbol backtest for each and returns all results keyed by symbol."""
-        results: Dict[str, BacktestResult] = {}
+        per-symbol backtest for each and returns all results keyed by symbol and horizon."""
+        results: Dict[str, Dict[str, BacktestResult]] = {}
         for symbol, (stock_df, index_df) in symbol_data.items():
-            results[symbol] = self.run_backtest_for_symbol(symbol, stock_df, index_df)
-        n_live_worthy = sum(1 for r in results.values() if r.is_live_worthy)
-        logger.info(f"Backtested {len(results)} symbol(s); {n_live_worthy} currently live-worthy.")
+            results[symbol] = {}
+            for horizon in ALL_HORIZONS:
+                results[symbol][horizon] = self.run_backtest_for_symbol(symbol, stock_df, index_df, horizon=horizon)
+        
+        n_live_worthy = sum(1 for sym_res in results.values() for r in sym_res.values() if r.is_live_worthy)
+        logger.info(f"Backtested {len(results)} symbol(s) across {len(ALL_HORIZONS)} horizons; {n_live_worthy} total strategies currently live-worthy.")
         return results
 
 

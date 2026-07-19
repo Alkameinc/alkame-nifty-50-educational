@@ -19,12 +19,13 @@ from sklearn.preprocessing import StandardScaler
 # 3. Local imports
 from config import (
     MODELS_DIR,
+    HORIZON_CONFIG,
+    HORIZON_INTRADAY,
     LABEL_CLASSES,
     MODEL_RANDOM_SEED,
     MODEL_N_ESTIMATORS,
     MODEL_MAX_DEPTH,
     MODEL_LEARNING_RATE,
-    MIN_TRAINING_SAMPLES_PER_STOCK,
     ENSEMBLE_MODEL_TYPES,
     ENSEMBLE_RF_N_ESTIMATORS,
     ENSEMBLE_RF_MAX_DEPTH,
@@ -34,6 +35,7 @@ from config import (
 )
 from model_trainer import ModelTrainer
 from feature_engineer import ML_SAFE_SUFFIX
+from health_monitor import registry as health_registry
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -128,10 +130,11 @@ class EnsembleManager:
         return reindexed
 
     def train_ensemble_for_symbol(
-        self, symbol: str, stock_df: pd.DataFrame, index_df: Optional[pd.DataFrame] = None
+        self, symbol: str, stock_df: pd.DataFrame, index_df: Optional[pd.DataFrame] = None,
+        horizon: str = HORIZON_INTRADAY
     ) -> EnsembleTrainingResult:
         try:
-            prepared = self.model_trainer.prepare_dataset(stock_df, index_df)
+            prepared = self.model_trainer.prepare_dataset(stock_df, index_df, horizon=horizon)
             if prepared is None:
                 return EnsembleTrainingResult(
                     symbol=symbol, trained_at=datetime.now().isoformat(), n_train_samples=0,
@@ -141,8 +144,9 @@ class EnsembleManager:
                 )
             X, y, feature_columns = prepared
 
-            if len(X) < MIN_TRAINING_SAMPLES_PER_STOCK:
-                msg = f"Only {len(X)} usable samples for {symbol}, need >= {MIN_TRAINING_SAMPLES_PER_STOCK}."
+            min_training_samples = HORIZON_CONFIG[horizon]["min_training_samples"]
+            if len(X) < min_training_samples:
+                msg = f"Only {len(X)} usable samples for {symbol} ({horizon}), need >= {min_training_samples}."
                 logger.error(msg)
                 return EnsembleTrainingResult(
                     symbol=symbol, trained_at=datetime.now().isoformat(), n_train_samples=len(X),
@@ -190,8 +194,9 @@ class EnsembleManager:
             mean_agreement = float(np.mean(agreement_fraction_per_row))
 
             self._save_ensemble(symbol, fitted_models, feature_columns, per_model_accuracy,
-                                 ensemble_accuracy, mean_agreement)
+                                 ensemble_accuracy, mean_agreement, horizon=horizon)
 
+            health_registry.report("ensemble_manager", ok=True, detail=f"Trained ensemble for {symbol}")
             return EnsembleTrainingResult(
                 symbol=symbol, trained_at=datetime.now().isoformat(), n_train_samples=len(X_train),
                 n_test_samples=len(X_test), feature_columns=feature_columns,
@@ -201,27 +206,30 @@ class EnsembleManager:
 
         except Exception as e:
             logger.error(f"Ensemble training pipeline failed for {symbol}: {e}")
+            health_registry.report("ensemble_manager", ok=False, detail=f"Training failed for {symbol}", error=str(e))
             return EnsembleTrainingResult(
                 symbol=symbol, trained_at=datetime.now().isoformat(), n_train_samples=0,
                 n_test_samples=0, feature_columns=[], per_model_accuracy={}, ensemble_accuracy=0.0,
                 mean_agreement=0.0, success=False, error=str(e),
             )
 
-    def _ensemble_path(self, symbol: str) -> Path:
-        return MODELS_DIR / f"{symbol}{ENSEMBLE_FILE_SUFFIX}"
+    def _ensemble_path(self, symbol: str, horizon: str) -> Path:
+        return MODELS_DIR / f"{symbol}_{horizon}{ENSEMBLE_FILE_SUFFIX}"
 
-    def _ensemble_metadata_path(self, symbol: str) -> Path:
-        return MODELS_DIR / f"{symbol}{ENSEMBLE_METADATA_SUFFIX}"
+    def _ensemble_metadata_path(self, symbol: str, horizon: str) -> Path:
+        return MODELS_DIR / f"{symbol}_{horizon}{ENSEMBLE_METADATA_SUFFIX}"
 
     def _save_ensemble(
         self, symbol: str, fitted_models: Dict[str, object], feature_columns: List[str],
         per_model_accuracy: Dict[str, float], ensemble_accuracy: float, mean_agreement: float,
+        horizon: str = HORIZON_INTRADAY
     ) -> None:
         try:
             ensure_directories()
-            joblib.dump({"models": fitted_models, "classes": LABEL_CLASSES}, self._ensemble_path(symbol))
+            joblib.dump({"models": fitted_models, "classes": LABEL_CLASSES}, self._ensemble_path(symbol, horizon))
             metadata = {
                 "symbol": symbol,
+                "horizon": horizon,
                 "trained_at": datetime.now().isoformat(),
                 "feature_columns": feature_columns,
                 "label_classes": LABEL_CLASSES,
@@ -231,22 +239,22 @@ class EnsembleManager:
             }
             f = None
             try:
-                f = open(self._ensemble_metadata_path(symbol), "w", encoding="utf-8")
+                f = open(self._ensemble_metadata_path(symbol, horizon), "w", encoding="utf-8")
                 json.dump(metadata, f, indent=2)
             finally:
                 if f is not None:
                     f.close()
-            logger.info(f"Saved ensemble + metadata for {symbol} to {MODELS_DIR}")
+            logger.info(f"Saved ensemble + metadata for {symbol} ({horizon}) to {MODELS_DIR}")
         except Exception as e:
             logger.error(f"Failed saving ensemble for {symbol}: {e}")
             raise
 
-    def load_ensemble(self, symbol: str) -> Optional[Tuple[Dict[str, object], List[str], Dict]]:
-        ensemble_path = self._ensemble_path(symbol)
-        metadata_path = self._ensemble_metadata_path(symbol)
+    def load_ensemble(self, symbol: str, horizon: str = HORIZON_INTRADAY) -> Optional[Tuple[Dict[str, object], List[str], Dict]]:
+        ensemble_path = self._ensemble_path(symbol, horizon)
+        metadata_path = self._ensemble_metadata_path(symbol, horizon)
         try:
             if not ensemble_path.exists() or not metadata_path.exists():
-                logger.error(f"No saved ensemble found for {symbol} at {ensemble_path}. Train it first.")
+                logger.error(f"No saved ensemble found for {symbol} ({horizon}) at {ensemble_path}. Train it first.")
                 return None
             bundle = joblib.load(ensemble_path)
             f = None
@@ -261,10 +269,10 @@ class EnsembleManager:
             logger.error(f"Failed loading ensemble for {symbol}: {e}")
             return None
 
-    def predict(self, symbol: str, X: pd.DataFrame) -> Optional[List[EnsemblePrediction]]:
+    def predict(self, symbol: str, X: pd.DataFrame, horizon: str = HORIZON_INTRADAY) -> Optional[List[EnsemblePrediction]]:
         """Runs the saved ensemble on new feature rows (must already be the
         '_feat'-lagged columns matching what the ensemble was trained on)."""
-        loaded = self.load_ensemble(symbol)
+        loaded = self.load_ensemble(symbol, horizon=horizon)
         if loaded is None:
             return None
         models, classes, metadata = loaded
@@ -293,10 +301,12 @@ class EnsembleManager:
                     predicted_class=predicted_class, confidence=confidence,
                     agreement_fraction=agreement, per_model_votes=votes,
                 ))
+            health_registry.report("ensemble_manager", ok=True, detail=f"Predicted for {symbol}")
             return results
 
         except Exception as e:
             logger.error(f"Failed running ensemble prediction for {symbol}: {e}")
+            health_registry.report("ensemble_manager", ok=False, detail=f"Prediction failed for {symbol}", error=str(e))
             return None
 
 

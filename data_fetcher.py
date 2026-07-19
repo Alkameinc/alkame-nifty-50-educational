@@ -21,7 +21,12 @@ from config import (
     to_yfinance_ticker,
     ensure_directories,
     configure_logging,
+    DATA_STALENESS_THRESHOLD_TRADING_DAYS,
+    MARKET_OPEN_TIME,
+    MARKET_CLOSE_TIME,
+    MARKET_TIMEZONE,
 )
+from health_monitor import registry as health_registry
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -49,25 +54,31 @@ class DataFetcher:
         self.cache_dir = cache_dir
         ensure_directories()
 
-    def _cache_path(self, ticker: str) -> Path:
+    def _cache_path(self, ticker: str, interval: str = BAR_INTERVAL) -> Path:
         safe_name = ticker.replace("=", "_").replace("^", "IDX_").replace(".", "_")
-        return self.cache_dir / f"{safe_name}.csv"
+        return self.cache_dir / f"{safe_name}_{interval}.csv"
 
-    def _save_cache(self, ticker: str, df: pd.DataFrame) -> None:
+    def _save_cache(self, ticker: str, df: pd.DataFrame, interval: str = BAR_INTERVAL) -> None:
         try:
-            df.to_csv(self._cache_path(ticker))
+            df.to_csv(self._cache_path(ticker, interval=interval))
         except Exception as e:
-            logger.error(f"Failed to write cache for {ticker}: {e}")
+            logger.error(f"Failed to write cache for {ticker} ({interval}): {e}")
 
-    def _load_cache(self, ticker: str) -> Optional[pd.DataFrame]:
-        path = self._cache_path(ticker)
+    def _load_cache(self, ticker: str, interval: str = BAR_INTERVAL) -> Optional[pd.DataFrame]:
+        path = self._cache_path(ticker, interval=interval)
         try:
             if path.exists():
                 df = pd.read_csv(path, index_col=0, parse_dates=True)
-                logger.warning(f"Loaded stale CACHED data for {ticker} from {path}")
+                df.index = pd.to_datetime(df.index, utc=True)
+                if df.index.tz is not None:
+                    try:
+                        df.index = df.index.tz_convert("Asia/Kolkata")
+                    except Exception:
+                        pass
+                logger.warning(f"Loaded stale CACHED data for {ticker} ({interval}) from {path}")
                 return df
         except Exception as e:
-            logger.error(f"Failed to load cache for {ticker}: {e}")
+            logger.error(f"Failed to load cache for {ticker} ({interval}): {e}")
         return None
 
     def fetch_ohlcv(
@@ -81,6 +92,12 @@ class DataFetcher:
         only if both live fetch and cache fallback fail — callers must handle
         that case (e.g. by suppressing signals for that ticker).
         """
+        # FIRST: Check if we have a fresh cache
+        cached = self._load_cache(ticker, interval=interval)
+        if cached is not None and not self.check_staleness(cached, ticker):
+            logger.info(f"Using fresh cache for {ticker}")
+            return cached
+
         last_error = None
         for attempt in range(1, MAX_RETRIES + 1):
             try:
@@ -93,7 +110,8 @@ class DataFetcher:
                     raise ValueError(f"Missing expected columns {missing_cols} for {ticker}")
 
                 df = df[REQUIRED_COLUMNS].copy()
-                self._save_cache(ticker, df)
+                self._save_cache(ticker, df, interval=interval)
+                health_registry.report("data_fetcher", ok=True, detail=f"Fetched live data for {ticker}")
                 return df
 
             except Exception as e:
@@ -106,12 +124,41 @@ class DataFetcher:
                     time.sleep(RETRY_BACKOFF_SECONDS * attempt)
 
         logger.error(f"All {MAX_RETRIES} live fetch attempts failed for {ticker}: {last_error}")
-        cached = self._load_cache(ticker)
+        cached = self._load_cache(ticker, interval=interval)
         if cached is not None:
             return cached
 
-        logger.error(f"No cache available for {ticker} either — returning None.")
+        logger.error(f"No cache available for {ticker} ({interval}) either — returning None.")
+        health_registry.report("data_fetcher", ok=False, detail=f"No live or cached data for {ticker}", error=str(last_error))
         return None
+
+    def fetch_daily_ohlcv(self, ticker: str, period: str = "5y") -> Optional[pd.DataFrame]:
+        """Fetch full historical daily OHLCV bars for a single ticker."""
+        return self.fetch_ohlcv(ticker, interval="1d", period=period)
+
+    def fetch_daily_ohlcv_incremental(self, ticker: str, full_period: str = "5y") -> Optional[pd.DataFrame]:
+        """Fetch daily OHLCV bars using an incremental update strategy if cache exists."""
+        cached = self._load_cache(ticker, interval="1d")
+        if cached is None or cached.empty:
+            return self.fetch_daily_ohlcv(ticker, period=full_period)
+        
+        last_cached_date = cached.index[-1]
+        start_date = (last_cached_date + timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        try:
+            new_data = yf.Ticker(ticker).history(start=start_date, interval="1d", auto_adjust=False)
+            if new_data is not None and not new_data.empty:
+                missing_cols = [c for c in REQUIRED_COLUMNS if c not in new_data.columns]
+                if not missing_cols:
+                    new_data = new_data[REQUIRED_COLUMNS].copy()
+                    combined = pd.concat([cached, new_data]).sort_index()
+                    combined = combined[~combined.index.duplicated(keep='last')]
+                    self._save_cache(ticker, combined, interval="1d")
+                    return combined
+        except Exception as e:
+            logger.error(f"Incremental daily fetch failed for {ticker}, returning cached data: {e}")
+            
+        return cached
 
     def fetch_all_nifty50(
         self,
@@ -128,6 +175,18 @@ class DataFetcher:
             else:
                 logger.error(f"Skipping {ticker} entirely — no live or cached data available.")
         logger.info(f"Fetched OHLCV for {len(results)}/{len(NIFTY50_YFINANCE_TICKERS)} NIFTY50 tickers.")
+        return results
+
+    def fetch_all_nifty50_daily(self, period: str = "5y") -> Dict[str, pd.DataFrame]:
+        """Fetch daily OHLCV bars for all 50 NIFTY constituents incrementally."""
+        results: Dict[str, pd.DataFrame] = {}
+        for ticker in NIFTY50_YFINANCE_TICKERS:
+            df = self.fetch_daily_ohlcv_incremental(ticker, full_period=period)
+            if df is not None:
+                results[ticker] = df
+            else:
+                logger.error(f"Skipping {ticker} entirely — no live or cached daily data available.")
+        logger.info(f"Fetched daily OHLCV for {len(results)}/{len(NIFTY50_YFINANCE_TICKERS)} NIFTY50 tickers.")
         return results
 
     def fetch_global_tickers(
@@ -154,12 +213,24 @@ class DataFetcher:
         """Fetch the NIFTY 50 index itself — used as the baseline for edge/outperformance checks."""
         return self.fetch_ohlcv(NIFTY_INDEX_TICKER, interval=interval, period=period)
 
+    def is_market_open(self) -> bool:
+        try:
+            now = pd.Timestamp.now(tz=MARKET_TIMEZONE)
+            if now.weekday() >= 5: # Sat, Sun
+                return False
+            return MARKET_OPEN_TIME <= now.time() <= MARKET_CLOSE_TIME
+        except Exception:
+            return True # Safe default
+
     def check_staleness(self, df: pd.DataFrame, ticker: str) -> bool:
         """
         Returns True if the data is STALE (last bar older than the configured
         threshold). Callers should suppress signals for a ticker when this is True.
         """
         try:
+            if not self.is_market_open():
+                return False # Market is closed, so data from last close is valid, not stale
+
             if df is None or df.empty:
                 logger.warning(f"Staleness check: {ticker} has no data at all — treating as stale.")
                 return True
@@ -181,6 +252,43 @@ class DataFetcher:
         except Exception as e:
             logger.error(f"Failed staleness check for {ticker}: {e}")
             return True  # fail safe: treat unknown state as stale/unsafe
+
+    def check_staleness_daily(self, df: pd.DataFrame, ticker: str) -> bool:
+        """
+        Returns True if the daily data is STALE (last bar older than configured trading days).
+        """
+        try:
+            if df is None or df.empty:
+                logger.warning(f"Staleness check daily: {ticker} has no data at all — treating as stale.")
+                return True
+
+            last_ts = df.index[-1]
+            if last_ts.tzinfo is not None:
+                now = pd.Timestamp.now(tz=last_ts.tzinfo)
+            else:
+                now = pd.Timestamp.now()
+            
+            # Count trading days between last_ts and now
+            trading_days = 0
+            current = last_ts.normalize() + timedelta(days=1)
+            now_norm = now.normalize()
+            
+            while current <= now_norm:
+                if current.weekday() < 5:  # Monday to Friday
+                    trading_days += 1
+                current += timedelta(days=1)
+                
+            is_stale = trading_days > DATA_STALENESS_THRESHOLD_TRADING_DAYS
+            
+            if is_stale:
+                logger.warning(
+                    f"{ticker} daily data is STALE: last bar is {trading_days} trading days old "
+                    f"(threshold={DATA_STALENESS_THRESHOLD_TRADING_DAYS})"
+                )
+            return is_stale
+        except Exception as e:
+            logger.error(f"Failed daily staleness check for {ticker}: {e}")
+            return True
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +332,25 @@ if __name__ == "__main__":
         cache_ok = cached is not None and not cached.empty
         print(f"Cache read-back for {test_symbol}: {'OK' if cache_ok else 'FAILED'}")
 
-        overall_pass = single_ok and index_ok and gold_ok and cache_ok
+        # Test 6: Daily bar fetch
+        daily_df = fetcher.fetch_daily_ohlcv(test_symbol, period="1y")
+        daily_ok = daily_df is not None and not daily_df.empty
+        print(f"Daily ticker fetch ({test_symbol}): {'OK' if daily_ok else 'FAILED'}"
+              f" — rows={0 if daily_df is None else len(daily_df)}")
+        
+        # Test 7: Incremental daily fetch
+        daily_inc_df = fetcher.fetch_daily_ohlcv_incremental(test_symbol, full_period="1y")
+        inc_ok = daily_inc_df is not None and len(daily_inc_df) >= len(daily_df) if daily_df is not None else False
+        print(f"Incremental daily fetch ({test_symbol}): {'OK' if inc_ok else 'FAILED'}"
+              f" — rows={0 if daily_inc_df is None else len(daily_inc_df)}")
+        
+        # Test 8: Cache collision test
+        cache_5m = fetcher._cache_path(test_symbol, interval="5m").exists()
+        cache_1d = fetcher._cache_path(test_symbol, interval="1d").exists()
+        collision_ok = cache_5m and cache_1d
+        print(f"Cache collision test (distinct files exist): {'OK' if collision_ok else 'FAILED'}")
+        
+        overall_pass = single_ok and index_ok and gold_ok and cache_ok and daily_ok and inc_ok and collision_ok
         print("STATUS: PASS" if overall_pass else "STATUS: FAIL — see details above")
 
         if not overall_pass:

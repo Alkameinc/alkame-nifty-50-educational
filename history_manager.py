@@ -14,6 +14,7 @@ import pandas as pd
 from config import DB_PATH, ensure_directories, configure_logging
 from predictor import PredictionSignal
 from event_classifier import Event
+from health_monitor import registry as health_registry
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -29,6 +30,9 @@ TICKER_DELIMITER = ","  # affected_tickers stored as ',TICKER1,TICKER2,' so LIKE
 class PredictionRecord:
     id: int
     symbol: str
+    horizon: str
+    narrative: str
+    dca_ladder: str
     timestamp: str
     action: str
     model_predicted_class: str
@@ -84,6 +88,7 @@ class HistoryManager:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
+
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS predictions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -107,9 +112,23 @@ class HistoryManager:
                     outcome_resolved INTEGER DEFAULT 0,
                     outcome_correct INTEGER,
                     outcome_actual_class TEXT,
-                    resolved_at TEXT
+                    resolved_at TEXT,
+                    horizon TEXT DEFAULT 'INTRADAY',
+                    narrative TEXT,
+                    dca_ladder TEXT
                 )
             """)
+            # Try adding new columns if table already exists without them
+            try:
+                cursor.execute("ALTER TABLE predictions ADD COLUMN horizon TEXT DEFAULT 'INTRADAY'")
+            except: pass
+            try:
+                cursor.execute("ALTER TABLE predictions ADD COLUMN narrative TEXT")
+            except: pass
+            try:
+                cursor.execute("ALTER TABLE predictions ADD COLUMN dca_ladder TEXT")
+            except: pass
+
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -127,6 +146,22 @@ class HistoryManager:
                     recorded_at TEXT NOT NULL
                 )
             """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS backtest_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    horizon TEXT NOT NULL,
+                    strategy_cumulative_return_pct REAL NOT NULL,
+                    baseline_cumulative_return_pct REAL NOT NULL,
+                    alpha_pct REAL NOT NULL,
+                    edge_check_status TEXT NOT NULL,
+                    calibration_status TEXT NOT NULL,
+                    calibration_ece REAL,
+                    is_live_worthy INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(symbol, horizon)
+                )
+            """)
             conn.commit()
         except Exception as e:
             logger.error(f"Failed initializing history database at {self.db_path}: {e}")
@@ -138,32 +173,38 @@ class HistoryManager:
     # -----------------------------------------------------------------
     # Predictions
     # -----------------------------------------------------------------
-    def save_prediction(self, signal: PredictionSignal) -> Optional[int]:
+    def save_prediction(self, signal: PredictionSignal, narrative: Optional[str] = None, dca_ladder: Optional[dict] = None) -> Optional[int]:
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
+
+            dca_ladder_str = json.dumps(dca_ladder) if dca_ladder else None
             cursor.execute("""
                 INSERT INTO predictions (
                     symbol, timestamp, action, model_predicted_class, raw_confidence,
                     risk_adjusted_confidence, calibrated_confidence, agreement_fraction,
                     downside_summary, upside_summary, reasoning, global_risk_level,
-                    risk_toggle_enabled, is_safe_to_trade_live, data_stale, suppressed, suppression_reasons
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    risk_toggle_enabled, is_safe_to_trade_live, data_stale, suppressed, suppression_reasons,
+                    horizon, narrative, dca_ladder
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 signal.symbol, signal.timestamp.isoformat(), signal.action, signal.model_predicted_class,
                 signal.raw_confidence, signal.risk_adjusted_confidence, signal.calibrated_confidence,
                 signal.agreement_fraction, signal.downside_summary, signal.upside_summary,
                 json.dumps(signal.reasoning), signal.global_risk_level, int(signal.risk_toggle_enabled),
                 int(signal.is_safe_to_trade_live), int(signal.data_stale), int(signal.suppressed),
-                json.dumps(signal.suppression_reasons),
+                json.dumps(signal.suppression_reasons), signal.horizon, narrative, dca_ladder_str
             ))
+
             conn.commit()
             prediction_id = cursor.lastrowid
             logger.info(f"Saved prediction #{prediction_id} for {signal.symbol} ({signal.action}).")
+            health_registry.report("history_manager", ok=True, detail=f"Saved prediction for {signal.symbol}")
             return prediction_id
         except Exception as e:
             logger.error(f"Failed saving prediction for {signal.symbol}: {e}")
+            health_registry.report("history_manager", ok=False, detail="Failed saving prediction", error=str(e))
             return None
         finally:
             if conn is not None:
@@ -189,9 +230,11 @@ class HistoryManager:
             """, (correct, actual_class, datetime.now().isoformat(), prediction_id))
             conn.commit()
             logger.info(f"Resolved prediction #{prediction_id}: predicted={predicted_class}, actual={actual_class}, correct={bool(correct)}")
+            health_registry.report("history_manager", ok=True, detail=f"Resolved prediction {prediction_id}")
             return True
         except Exception as e:
             logger.error(f"Failed resolving outcome for prediction #{prediction_id}: {e}")
+            health_registry.report("history_manager", ok=False, detail="Failed resolving outcome", error=str(e))
             return False
         finally:
             if conn is not None:
@@ -205,7 +248,7 @@ class HistoryManager:
             cursor = conn.cursor()
             query = ("SELECT id, symbol, timestamp, action, model_predicted_class, raw_confidence, "
                       "risk_adjusted_confidence, calibrated_confidence, agreement_fraction, outcome_resolved, "
-                      "outcome_correct, outcome_actual_class, resolved_at FROM predictions WHERE 1=1")
+                      "outcome_correct, outcome_actual_class, resolved_at, horizon, narrative, dca_ladder FROM predictions WHERE 1=1")
             params = []
             if symbol:
                 query += " AND symbol = ?"
@@ -218,16 +261,23 @@ class HistoryManager:
             rows = cursor.fetchall()
             records = []
             for row in rows:
+
                 records.append(PredictionRecord(
                     id=row[0], symbol=row[1], timestamp=row[2], action=row[3], model_predicted_class=row[4],
                     raw_confidence=row[5], risk_adjusted_confidence=row[6], calibrated_confidence=row[7],
                     agreement_fraction=row[8], outcome_resolved=bool(row[9]),
                     outcome_correct=None if row[10] is None else bool(row[10]),
                     outcome_actual_class=row[11], resolved_at=row[12],
+                    horizon=row[13] if len(row) > 13 else 'INTRADAY',
+                    narrative=row[14] if len(row) > 14 else None,
+                    dca_ladder=row[15] if len(row) > 15 else None
                 ))
+
+            health_registry.report("history_manager", ok=True)
             return records
         except Exception as e:
             logger.error(f"Failed fetching predictions for symbol={symbol}: {e}")
+            health_registry.report("history_manager", ok=False, detail="Failed fetching predictions", error=str(e))
             return []
         finally:
             if conn is not None:
@@ -244,13 +294,17 @@ class HistoryManager:
             records = self.get_predictions(symbol=symbol, limit=100_000, only_unresolved=False)
             resolved = [r for r in records if r.outcome_resolved and r.outcome_correct is not None]
             if not resolved:
+                health_registry.report("history_manager", ok=True)
                 return pd.DataFrame(columns=["confidence", "correct"])
-            return pd.DataFrame({
+            df = pd.DataFrame({
                 "confidence": [r.risk_adjusted_confidence for r in resolved],
                 "correct": [r.outcome_correct for r in resolved],
             })
+            health_registry.report("history_manager", ok=True)
+            return df
         except Exception as e:
             logger.error(f"Failed building calibration dataset for symbol={symbol}: {e}")
+            health_registry.report("history_manager", ok=False, detail="Failed building calibration dataset", error=str(e))
             return pd.DataFrame(columns=["confidence", "correct"])
 
     # -----------------------------------------------------------------
@@ -276,9 +330,11 @@ class HistoryManager:
             conn.commit()
             row_id = cursor.lastrowid
             logger.info(f"Saved event #{row_id} ({event.event_type}, scope={event.scope}).")
+            health_registry.report("history_manager", ok=True, detail=f"Saved event {event.event_id}")
             return row_id
         except Exception as e:
             logger.error(f"Failed saving event {event.event_id}: {e}")
+            health_registry.report("history_manager", ok=False, detail="Failed saving event", error=str(e))
             return None
         finally:
             if conn is not None:
@@ -306,10 +362,48 @@ class HistoryManager:
                     scope=row[5], affected_tickers=tickers, sector=row[7], confidence_in_scope=row[8],
                     headline_or_label=row[9], sentiment_score=row[10], magnitude_estimate=row[11],
                 ))
+            health_registry.report("history_manager", ok=True)
             return records
         except Exception as e:
             logger.error(f"Failed fetching events for symbol={symbol}: {e}")
+            health_registry.report("history_manager", ok=False, detail="Failed fetching events", error=str(e))
             return []
+        finally:
+            if conn is not None:
+                conn.close()
+
+    # -----------------------------------------------------------------
+    # Backtest Metrics
+    # -----------------------------------------------------------------
+    def save_backtest_result(self, symbol: str, horizon: str, strategy_ret: float, base_ret: float, alpha: float, edge: str, calib: str, ece: Optional[float], live_worthy: bool) -> bool:
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO backtest_metrics (
+                    symbol, horizon, strategy_cumulative_return_pct, baseline_cumulative_return_pct,
+                    alpha_pct, edge_check_status, calibration_status, calibration_ece, is_live_worthy, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(symbol, horizon) DO UPDATE SET
+                    strategy_cumulative_return_pct=excluded.strategy_cumulative_return_pct,
+                    baseline_cumulative_return_pct=excluded.baseline_cumulative_return_pct,
+                    alpha_pct=excluded.alpha_pct,
+                    edge_check_status=excluded.edge_check_status,
+                    calibration_status=excluded.calibration_status,
+                    calibration_ece=excluded.calibration_ece,
+                    is_live_worthy=excluded.is_live_worthy,
+                    updated_at=excluded.updated_at
+            """, (
+                symbol, horizon, strategy_ret, base_ret, alpha, edge, calib, ece, int(live_worthy), datetime.now().isoformat()
+            ))
+            conn.commit()
+            health_registry.report("history_manager", ok=True, detail=f"Saved backtest metrics for {symbol} {horizon}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed saving backtest metrics for {symbol} {horizon}: {e}")
+            health_registry.report("history_manager", ok=False, detail="Failed saving backtest metrics", error=str(e))
+            return False
         finally:
             if conn is not None:
                 conn.close()
@@ -377,7 +471,7 @@ if __name__ == "__main__":
         )
         event_not_for_symbol = Event(
             event_id="EVT_TEST_2", source="CORPORATE", event_type="CORPORATE_ANNOUNCEMENT",
-            timestamp=datetime.now(), scope="STOCK", affected_tickers=["MARUTI", "TATAMOTORS"],
+            timestamp=datetime.now(), scope="STOCK", affected_tickers=["MARUTI", "TMPV"],
             sector="Auto", confidence_in_scope=1.0, headline_or_label="Board meeting for Maruti",
             sentiment_score=0.1, magnitude_estimate="MEDIUM",
         )

@@ -21,6 +21,7 @@ from config import (
     NIFTY50_SYMBOLS,
     configure_logging,
 )
+from health_monitor import registry as health_registry
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -191,10 +192,16 @@ class NewsSentimentFetcher:
         """
         articles = self._fetch_marketaux(symbol, company_name)
         if articles:
+            health_registry.report("news_sentiment_fetcher", ok=True, detail="served via marketaux")
             return articles
 
         logger.info(f"marketaux returned no results for {symbol}, falling back to Google News RSS.")
-        return self._fetch_google_rss(symbol, company_name)
+        rss_articles = self._fetch_google_rss(symbol, company_name)
+        if rss_articles:
+            health_registry.report("news_sentiment_fetcher", ok=True, detail="served via google_news_rss fallback")
+        else:
+            health_registry.report("news_sentiment_fetcher", ok=False, detail="both marketaux and google_news_rss failed")
+        return rss_articles
 
     def get_news_for_all_nifty50(self) -> Dict[str, List[Dict]]:
         """Fetch news for every NIFTY50 symbol. Intended for a scheduled cadence,
@@ -205,6 +212,7 @@ class NewsSentimentFetcher:
                 results[symbol] = self.get_news_for_symbol(symbol)
             except Exception as e:
                 logger.error(f"Failed fetching news for {symbol}: {e}")
+                health_registry.report("news_sentiment_fetcher", ok=False, detail=f"Failed fetching news for {symbol}", error=str(e))
                 results[symbol] = []
         total = sum(len(v) for v in results.values())
         logger.info(f"Fetched {total} news article(s) across {len(NIFTY50_SYMBOLS)} symbols.")

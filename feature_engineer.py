@@ -10,6 +10,7 @@ import pandas as pd
 # 3. Local imports
 from config import (
     BAR_INTERVAL,
+    HORIZON_INTRADAY,
     ORB_MINUTES,
     GAP_THRESHOLD_PCT,
     VOLUME_SPIKE_MULTIPLIER,
@@ -32,6 +33,7 @@ from config import (
     CORRELATION_BREAKDOWN_THRESHOLD,
     configure_logging,
 )
+from reference_level_engine import ReferenceLevelDeltas
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -308,7 +310,8 @@ class FeatureEngineer:
     # Master orchestration
     # -----------------------------------------------------------------
     def engineer_features(
-        self, stock_df: pd.DataFrame, index_df: Optional[pd.DataFrame] = None
+        self, stock_df: pd.DataFrame, index_df: Optional[pd.DataFrame] = None,
+        reference_deltas: Optional[ReferenceLevelDeltas] = None
     ) -> Optional[pd.DataFrame]:
         """
         Computes every technical feature for one stock's OHLCV DataFrame.
@@ -379,6 +382,23 @@ class FeatureEngineer:
             else:
                 logger.info("No index_df provided — skipping outperformance/correlation features.")
 
+            if reference_deltas is not None:
+                out["pct_from_ma"] = reference_deltas.pct_from_moving_average
+                out["pct_from_support_band"] = reference_deltas.pct_from_support_band
+                out["pct_from_resistance_band"] = reference_deltas.pct_from_resistance_band
+                if reference_deltas.pct_from_user_avg_cost is not None:
+                    out["pct_from_user_avg_cost"] = reference_deltas.pct_from_user_avg_cost
+                    out["has_position"] = 1.0
+                else:
+                    out["pct_from_user_avg_cost"] = 0.0
+                    out["has_position"] = 0.0
+            else:
+                out["pct_from_ma"] = 0.0
+                out["pct_from_support_band"] = 0.0
+                out["pct_from_resistance_band"] = 0.0
+                out["pct_from_user_avg_cost"] = 0.0
+                out["has_position"] = 0.0
+
             # ML-safe lagged versions: every numeric/boolean feature intended for
             # model_trainer.py gets an explicit '_feat' column shifted by exactly
             # one bar, so training never sees a bar's own not-yet-fully-realized value.
@@ -386,6 +406,8 @@ class FeatureEngineer:
                 "rsi", "macd_line", "macd_signal", "macd_histogram", "bb_upper", "bb_middle", "bb_lower",
                 "atr", "vwap", "ema_fast", "ema_slow", "orb_breakout", "gap_pct", "volume_ratio",
                 "outperformance_pct", "nifty_correlation",
+                "pct_from_ma", "pct_from_support_band", "pct_from_resistance_band",
+                "pct_from_user_avg_cost", "has_position",
             ]
             for col in ml_candidate_cols:
                 if col in out.columns:
@@ -396,6 +418,45 @@ class FeatureEngineer:
         except Exception as e:
             logger.error(f"Failed engineering features: {e}")
             return None
+
+    def engineer_features_for_horizon(
+        self, stock_df: pd.DataFrame, index_df: Optional[pd.DataFrame] = None,
+        reference_deltas: Optional[ReferenceLevelDeltas] = None,
+        horizon: str = HORIZON_INTRADAY
+    ) -> Optional[pd.DataFrame]:
+        """
+        Computes features tailored to a specific horizon. 
+        For daily and above, it drops intraday noise features (orb, vwap, gap)
+        and computes macro momentum features (1M, 3M rolling returns).
+        """
+        out = self.engineer_features(stock_df, index_df, reference_deltas)
+        if out is None:
+            return None
+            
+        if horizon == HORIZON_INTRADAY:
+            return out
+            
+        # For non-intraday horizons (daily bars), exclude intraday-specific features
+        intraday_cols = [
+            "orb_breakout", "orb_breakout_feat",
+            "orb_high", "orb_low",
+            "vwap", "vwap_feat",
+            "above_vwap", "vwap_cross_up", "vwap_cross_down",
+            "gap_pct", "gap_pct_feat", "gap_event"
+        ]
+        out.drop(columns=[c for c in intraday_cols if c in out.columns], inplace=True)
+        
+        # Add long-horizon features
+        # 1-month return (approx 21 trading days)
+        out["rolling_1m_return"] = out["Close"].pct_change(periods=21) * 100.0
+        # 3-month return (approx 63 trading days)
+        out["rolling_3m_return"] = out["Close"].pct_change(periods=63) * 100.0
+        
+        # Make them ML-safe
+        out[f"rolling_1m_return{ML_SAFE_SUFFIX}"] = out["rolling_1m_return"].shift(1)
+        out[f"rolling_3m_return{ML_SAFE_SUFFIX}"] = out["rolling_3m_return"].shift(1)
+        
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +509,11 @@ if __name__ == "__main__":
         expected_cols = [
             "rsi", "macd_line", "bb_upper", "atr", "vwap", "ema_fast", "orb_breakout",
             "gap_pct", "volume_ratio", "outperformance_pct", "nifty_correlation",
+            "pct_from_ma", "pct_from_support_band", "pct_from_resistance_band",
+            "pct_from_user_avg_cost", "has_position",
             "rsi_feat", "macd_line_feat", "vwap_feat",
+            "pct_from_ma_feat", "pct_from_support_band_feat", "pct_from_resistance_band_feat",
+            "pct_from_user_avg_cost_feat", "has_position_feat"
         ]
         missing_cols = [c for c in expected_cols if c not in features.columns]
         print(f"All expected columns present: {len(missing_cols) == 0}" +
@@ -484,7 +549,26 @@ if __name__ == "__main__":
         rsi_in_range = features["rsi"].dropna().between(0, 100).all()
         print(f"RSI within valid [0,100] range: {rsi_in_range}")
 
-        overall_pass = basic_ok and not missing_cols and no_lookahead and rsi_in_range
+        # --- Test engineer_features_for_horizon ---
+        # Generate enough data (at least 65 days) to test rolling returns
+        stock_df_long = _build_synthetic_ohlcv(n_days=70, bars_per_day=1, seed=42)
+        index_df_long = _build_synthetic_ohlcv(n_days=70, bars_per_day=1, seed=7)
+        index_df_long.index = stock_df_long.index
+        
+        features_long = engineer.engineer_features_for_horizon(
+            stock_df_long, index_df_long, horizon="30D"  # Any non-INTRADAY horizon
+        )
+        
+        horizon_ok = features_long is not None and not features_long.empty
+        print(f"Multi-horizon feature computation ran: {'OK' if horizon_ok else 'FAILED'}")
+        
+        intraday_excluded = "vwap_feat" not in features_long.columns and "gap_pct_feat" not in features_long.columns
+        print(f"Intraday features excluded for long horizon: {intraday_excluded}")
+        
+        rolling_present = "rolling_3m_return_feat" in features_long.columns
+        print(f"Long-horizon momentum features present: {rolling_present}")
+
+        overall_pass = basic_ok and not missing_cols and no_lookahead and rsi_in_range and horizon_ok and intraday_excluded and rolling_present
         print("STATUS: PASS" if overall_pass else "STATUS: FAIL — see details above")
 
         assert overall_pass, "One or more feature_engineer.py self-test checks failed"

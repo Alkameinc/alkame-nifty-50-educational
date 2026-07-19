@@ -14,9 +14,11 @@ from config import (
     CALIBRATION_ECE_THRESHOLD,
     EDGE_CHECK_MIN_ALPHA_PCT,
     SLIPPAGE_BPS,
+    SLIPPAGE_BPS,
     TRANSACTION_COST_BPS,
     configure_logging,
 )
+from health_monitor import registry as health_registry
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -136,6 +138,7 @@ class RuntimeValidator:
                 ece += (count / n_samples) * abs(mean_conf - empirical_acc)
 
             is_well_calibrated = ece <= self.ece_threshold
+            health_registry.report("runtime_validator", ok=True, detail="Calibration computed")
             return CalibrationResult(
                 status=STATUS_SUFFICIENT, n_samples=n_samples,
                 expected_calibration_error=ece, is_well_calibrated=is_well_calibrated, bins=bins,
@@ -143,6 +146,7 @@ class RuntimeValidator:
 
         except Exception as e:
             logger.error(f"Failed computing calibration: {e}")
+            health_registry.report("runtime_validator", ok=False, detail="Failed computing calibration", error=str(e))
             return CalibrationResult(
                 status=STATUS_INSUFFICIENT_DATA, n_samples=len(predictions_df) if predictions_df is not None else 0,
                 expected_calibration_error=None, is_well_calibrated=False, bins=[],
@@ -161,9 +165,11 @@ class RuntimeValidator:
             raw_confidence = max(0.0, min(1.0, raw_confidence))
             bin_width = 1.0 / self.n_bins
             bin_index = min(int(raw_confidence / bin_width), len(calibration_result.bins) - 1)
+            health_registry.report("runtime_validator", ok=True)
             return calibration_result.bins[bin_index].empirical_accuracy
         except Exception as e:
             logger.error(f"Failed getting calibrated confidence for raw={raw_confidence}: {e}")
+            health_registry.report("runtime_validator", ok=False, detail="Failed getting calibrated confidence", error=str(e))
             return None
 
     # -----------------------------------------------------------------
@@ -200,6 +206,7 @@ class RuntimeValidator:
             alpha = strategy_cum - baseline_cum
 
             status = STATUS_EDGE_CONFIRMED if alpha > self.min_alpha_pct else STATUS_NO_EDGE
+            health_registry.report("runtime_validator", ok=True, detail="Edge check computed")
             return EdgeCheckResult(
                 status=status, n_periods=n_periods,
                 strategy_cumulative_return_pct=float(strategy_cum),
@@ -209,6 +216,7 @@ class RuntimeValidator:
 
         except Exception as e:
             logger.error(f"Failed computing edge vs baseline: {e}")
+            health_registry.report("runtime_validator", ok=False, detail="Failed computing edge", error=str(e))
             return EdgeCheckResult(
                 status=STATUS_NO_EDGE, n_periods=0,
                 strategy_cumulative_return_pct=0.0, baseline_cumulative_return_pct=0.0, alpha_pct=0.0,

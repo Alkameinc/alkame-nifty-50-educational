@@ -8,13 +8,14 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 # 3. Local imports
-from config import SECTOR_MAP, configure_logging
+from config import SECTOR_MAP, HORIZON_INTRADAY, HORIZON_CONFIG, configure_logging
 from data_fetcher import DataFetcher
 from feature_engineer import FeatureEngineer
 from ensemble_manager import EnsembleManager, EnsemblePrediction
 from event_classifier import EventClassifier, Event
 from global_risk_monitor import GlobalRiskMonitor, GlobalRiskReading
 from runtime_validator import RuntimeValidator, CalibrationResult, EdgeCheckResult, LiveGateResult
+from health_monitor import registry as health_registry
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ CLASS_TO_ACTION = {"UP": ACTION_BUY, "DOWN": ACTION_SELL, "FLAT": ACTION_HOLD}
 class PredictionSignal:
     symbol: str
     timestamp: datetime
+    horizon: str
     action: str                                  # BUY | SELL | HOLD (final, after all safety gates)
     model_predicted_class: str                   # UP | DOWN | FLAT (raw ensemble lean, before gating)
     raw_confidence: float
@@ -49,6 +51,19 @@ class PredictionSignal:
     data_stale: bool = False
     suppressed: bool = False
     suppression_reasons: List[str] = field(default_factory=list)
+    target_price: Optional[float] = None
+    stop_loss: Optional[float] = None
+    peak_potential_price: Optional[float] = None
+
+
+@dataclass
+class MultiHorizonSignal:
+    symbol: str
+    timestamp: datetime
+    signals: Dict[str, PredictionSignal]
+    primary_action: str
+    primary_horizon: str
+    reasoning: List[str]
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +150,7 @@ class Predictor:
         news_articles: Optional[List[dict]] = None,
         calibration_result: Optional[CalibrationResult] = None,
         edge_check_result: Optional[EdgeCheckResult] = None,
+        horizon: str = HORIZON_INTRADAY,
     ) -> PredictionSignal:
         """
         Produces one final PredictionSignal for `symbol`. calibration_result
@@ -145,11 +161,10 @@ class Predictor:
         now = datetime.now()
 
         try:
-            # --- Step 1: data staleness gate ---
             data_stale = self.data_fetcher.check_staleness(stock_df, symbol)
             if data_stale:
                 return PredictionSignal(
-                    symbol=symbol, timestamp=now, action=ACTION_HOLD, model_predicted_class="FLAT",
+                    symbol=symbol, timestamp=now, horizon=horizon, action=ACTION_HOLD, model_predicted_class="FLAT",
                     raw_confidence=0.0, risk_adjusted_confidence=0.0, calibrated_confidence=None,
                     agreement_fraction=0.0,
                     downside_summary="Data for this stock is stale — no reliable signal can be produced right now.",
@@ -160,23 +175,27 @@ class Predictor:
                 )
 
             # --- Step 2: engineer features and get the latest row ---
-            engineered = self.feature_engineer.engineer_features(stock_df, index_df)
+            engineered = self.feature_engineer.engineer_features_for_horizon(stock_df, index_df, horizon=horizon)
             if engineered is None or engineered.empty:
-                return self._suppressed_signal(symbol, now, "Feature engineering failed or returned no data.")
+                return self._suppressed_signal(symbol, now, "Feature engineering failed or returned no data.", horizon=horizon)
 
             latest_row = engineered.iloc[[-1]]
 
             # --- Step 3: ensemble prediction ---
-            ensemble_predictions = self.ensemble_manager.predict(symbol, latest_row)
+            ensemble_predictions = self.ensemble_manager.predict(symbol, latest_row, horizon=horizon)
             if not ensemble_predictions:
-                return self._suppressed_signal(symbol, now, "Ensemble model unavailable or prediction failed.")
+                return self._suppressed_signal(symbol, now, "Ensemble model unavailable or prediction failed.", horizon=horizon)
             ensemble_pred: EnsemblePrediction = ensemble_predictions[0]
 
-            # --- Step 4: classify events, filter to this symbol ---
+            # --- Step 4: classify events, filter to this symbol and horizon ---
             all_events = self.event_classifier.classify_batch(
                 macro_events=macro_events, corporate_events=corporate_events, news_articles=news_articles,
             )
-            contributing_events = [e for e in all_events if symbol in e.affected_tickers]
+            model_bars = HORIZON_CONFIG[horizon]["horizon_bars"]
+            contributing_events = [
+                e for e in all_events 
+                if symbol in e.affected_tickers and HORIZON_CONFIG.get(e.impact_horizon, {}).get("horizon_bars", 0) >= model_bars
+            ]
 
             # --- Step 5: global risk adjustment ---
             risk_reading = self.global_risk_monitor.compute_composite_risk()
@@ -245,8 +264,54 @@ class Predictor:
             reasoning.extend(gate.reasons)
             reasoning.extend(suppression_reasons)
 
-            return PredictionSignal(
-                symbol=symbol, timestamp=now, action=final_action,
+            # --- Step 7.5: Calculate Exact Target Price and Stop Loss ---
+            cmp = stock_df["Close"].iloc[-1]
+            atr_val = latest_row["atr"].iloc[0] if "atr" in latest_row.columns and not pd.isna(latest_row["atr"].iloc[0]) else (cmp * 0.005)
+            
+            # Dynamic peak multiplier calculation
+            base_multiplier = 5.0
+            if horizon == "INTRADAY":
+                base_multiplier = 1.5
+            elif horizon in ["3D", "7D"]:
+                base_multiplier = 2.5
+            elif horizon in ["30D", "3M"]:
+                base_multiplier = 5.0
+            else:
+                base_multiplier = 8.0
+
+            # Adjust for volume surge
+            if "Volume" in stock_df.columns and len(stock_df) >= 20:
+                recent_vol = stock_df["Volume"].iloc[-5:].mean()
+                avg_vol = stock_df["Volume"].iloc[-20:].mean()
+                if avg_vol > 0 and recent_vol > (avg_vol * 1.5):
+                    base_multiplier += 1.0
+
+            # Adjust for sentiment
+            sentiment_boost = 0.0
+            if contributing_events:
+                avg_sent = sum(e.sentiment_score for e in contributing_events) / len(contributing_events)
+                if (final_action == ACTION_BUY and avg_sent > 0.3) or (final_action == ACTION_SELL and avg_sent < -0.3):
+                    sentiment_boost = 0.5
+            
+            final_peak_mult = min(base_multiplier + sentiment_boost, 10.0) # Cap at 10x ATR
+
+            target_price = None
+            stop_loss = None
+            peak_potential_price = None
+            if final_action == ACTION_BUY:
+                target_price = float(round(cmp + (3.0 * atr_val), 2))
+                stop_loss = float(round(cmp - (1.5 * atr_val), 2))
+                peak_potential_price = float(round(cmp + (final_peak_mult * atr_val), 2))
+            elif final_action == ACTION_SELL:
+                target_price = float(round(cmp - (3.0 * atr_val), 2))
+                stop_loss = float(round(cmp + (1.5 * atr_val), 2))
+                peak_potential_price = float(round(cmp - (final_peak_mult * atr_val), 2))
+            else:
+                peak_potential_price = float(round(stock_df["High"].max(), 2)) if not stock_df.empty else None
+
+
+            sig = PredictionSignal(
+                symbol=symbol, timestamp=now, horizon=horizon, action=final_action,
                 model_predicted_class=ensemble_pred.predicted_class,
                 raw_confidence=ensemble_pred.confidence, risk_adjusted_confidence=risk_adjusted_confidence,
                 calibrated_confidence=calibrated_confidence, agreement_fraction=ensemble_pred.agreement_fraction,
@@ -255,20 +320,111 @@ class Predictor:
                 risk_toggle_enabled=self.global_risk_monitor.get_toggle_state().enabled,
                 is_safe_to_trade_live=gate.safe_to_treat_as_live_edge, data_stale=False,
                 suppressed=bool(suppression_reasons), suppression_reasons=suppression_reasons,
+                target_price=target_price, stop_loss=stop_loss, peak_potential_price=peak_potential_price
             )
+            health_registry.report("predictor", ok=True)
+            return sig
 
         except Exception as e:
-            logger.error(f"Failed generating signal for {symbol}: {e}")
-            return self._suppressed_signal(symbol, now, f"Unhandled error generating signal: {e}")
+            logger.error(f"Failed generating signal for {symbol} ({horizon}): {e}")
+            health_registry.report("predictor", ok=False, detail=f"Failed generating signal {horizon}", error=str(e))
+            return self._suppressed_signal(symbol, now, f"Unhandled error generating signal: {e}", horizon=horizon)
+
+    def generate_multi_horizon_stream(
+        self,
+        symbol: str,
+        horizons: List[str],
+        stock_df: pd.DataFrame,
+        index_df: Optional[pd.DataFrame] = None,
+        macro_events: Optional[List] = None,
+        corporate_events: Optional[List[dict]] = None,
+        news_articles: Optional[List[dict]] = None,
+        calibration_result: Optional[CalibrationResult] = None,
+        edge_check_result: Optional[EdgeCheckResult] = None,
+    ):
+        for h in horizons:
+            # If horizon uses daily data, fetch it on the fly
+            h_stock_df = stock_df
+            h_index_df = index_df
+            if HORIZON_CONFIG[h].get("bar_interval") == "1d":
+                from config import to_yfinance_ticker
+                period = HORIZON_CONFIG[h].get("history_period", "5y")
+                # Attempt to fetch daily data
+                daily_stock = self.data_fetcher.fetch_daily_ohlcv_incremental(to_yfinance_ticker(symbol), full_period=period)
+                daily_index = self.data_fetcher.fetch_daily_ohlcv_incremental("^NSEI", full_period=period)
+                if daily_stock is not None and not daily_stock.empty and daily_index is not None and not daily_index.empty:
+                    h_stock_df = daily_stock
+                    h_index_df = daily_index
+
+            sig = self.generate_signal(
+                symbol=symbol, stock_df=h_stock_df, index_df=h_index_df, macro_events=macro_events,
+                news_articles=news_articles,
+                calibration_result=calibration_result, edge_check_result=edge_check_result, horizon=h
+            )
+            yield sig
+
+    def generate_multi_horizon_signal(
+        self,
+        symbol: str,
+        horizons: List[str],
+        stock_df: pd.DataFrame,
+        index_df: Optional[pd.DataFrame] = None,
+        macro_events: Optional[List] = None,
+        corporate_events: Optional[List[dict]] = None,
+        news_articles: Optional[List[dict]] = None,
+        calibration_result: Optional[CalibrationResult] = None,
+        edge_check_result: Optional[EdgeCheckResult] = None,
+    ) -> MultiHorizonSignal:
+        signals = {}
+        for h in horizons:
+            # If horizon uses daily data, fetch it on the fly
+            h_stock_df = stock_df
+            h_index_df = index_df
+            if HORIZON_CONFIG[h].get("bar_interval") == "1d":
+                from config import to_yfinance_ticker
+                period = HORIZON_CONFIG[h].get("history_period", "5y")
+                # Attempt to fetch daily data
+                daily_stock = self.data_fetcher.fetch_daily_ohlcv_incremental(to_yfinance_ticker(symbol), full_period=period)
+                daily_index = self.data_fetcher.fetch_daily_ohlcv_incremental("^NSEI", full_period=period)
+                if daily_stock is not None and not daily_stock.empty and daily_index is not None and not daily_index.empty:
+                    h_stock_df = daily_stock
+                    h_index_df = daily_index
+
+            sig = self.generate_signal(
+                symbol=symbol, stock_df=h_stock_df, index_df=h_index_df, macro_events=macro_events,
+                news_articles=news_articles,
+                calibration_result=calibration_result, edge_check_result=edge_check_result, horizon=h
+            )
+            signals[h] = sig
+
+        if not signals:
+            return MultiHorizonSignal(symbol, datetime.now(), {}, ACTION_HOLD, "NONE", ["No horizons requested."])
+
+        # Synthesize primary action (prefer longest unsuppressed safe horizon, fallback to first)
+        primary_horizon = horizons[0]
+        primary_action = signals[primary_horizon].action
+        for h in reversed(horizons):
+            if signals[h].is_safe_to_trade_live and not signals[h].suppressed:
+                primary_horizon = h
+                primary_action = signals[h].action
+                break
+
+        reasoning = [f"Synthesized from {len(horizons)} horizons. Primary driver: {primary_horizon}."]
+        return MultiHorizonSignal(
+            symbol=symbol, timestamp=datetime.now(), signals=signals,
+            primary_action=primary_action, primary_horizon=primary_horizon,
+            reasoning=reasoning
+        )
 
     @staticmethod
-    def _suppressed_signal(symbol: str, timestamp: datetime, reason: str) -> PredictionSignal:
+    def _suppressed_signal(symbol: str, timestamp: datetime, reason: str, horizon: str = HORIZON_INTRADAY) -> PredictionSignal:
         return PredictionSignal(
-            symbol=symbol, timestamp=timestamp, action=ACTION_HOLD, model_predicted_class="FLAT",
+            symbol=symbol, timestamp=timestamp, horizon=horizon, action=ACTION_HOLD, model_predicted_class="FLAT",
             raw_confidence=0.0, risk_adjusted_confidence=0.0, calibrated_confidence=None, agreement_fraction=0.0,
             downside_summary=f"Signal could not be safely produced: {reason}",
             upside_summary="Not applicable.", reasoning=[f"Forced HOLD: {reason}"],
             suppressed=True, suppression_reasons=[reason],
+            target_price=None, stop_loss=None,
         )
 
 
@@ -333,12 +489,13 @@ if __name__ == "__main__":
         predictor = Predictor(ensemble_manager=ensemble_manager)
 
         # Scenario A: no calibration/edge data supplied -> must default to safe (suppressed, HOLD)
-        signal_unproven = predictor.generate_signal(test_symbol, stock_df, index_df)
+        signal_unproven = predictor.generate_signal(test_symbol, stock_df, index_df, horizon=HORIZON_INTRADAY)
         print(f"Scenario A (no calibration/edge supplied) -> action={signal_unproven.action}, "
               f"suppressed={signal_unproven.suppressed}, calibrated_confidence={signal_unproven.calibrated_confidence}")
         assert signal_unproven.action == ACTION_HOLD
         assert signal_unproven.calibrated_confidence is None
         assert signal_unproven.downside_summary  # must never be empty
+        assert signal_unproven.horizon == HORIZON_INTRADAY
 
         # Scenario B: fully proven (good calibration + confirmed edge) -> action follows model lean
         rng2 = np.random.default_rng(7)
@@ -355,12 +512,10 @@ if __name__ == "__main__":
         # Include a macro event (RBI) that should NOT affect RELIANCE's Energy sector, plus a corporate event that SHOULD
         rbi_event = MacroEvent(event_date=date.today(), event_type="RBI_POLICY", label="RBI MPC Policy Decision",
                                 scope="MARKET", sector_hint="ALL", impact_window_days_before=1, impact_window_days_after=1)
-        corp_event = {"symbol": test_symbol, "category": "CORPORATE_ANNOUNCEMENT",
-                      "raw": {"subject": "Board Meeting Intimation"}, "fetched_at": datetime.now().isoformat()}
 
         signal_proven = predictor.generate_signal(
             test_symbol, stock_df, index_df,
-            macro_events=[rbi_event], corporate_events=[corp_event], news_articles=[],
+            macro_events=[rbi_event], news_articles=[],
             calibration_result=good_calibration, edge_check_result=positive_edge,
         )
         print(f"Scenario B (proven calibration + edge) -> action={signal_proven.action}, "
@@ -391,10 +546,18 @@ if __name__ == "__main__":
                                                                 slippage_bps=50, transaction_cost_bps=50)
         signal_unsafe = predictor.generate_signal(
             test_symbol, stock_df, index_df, calibration_result=bad_calibration, edge_check_result=no_edge,
+            horizon=HORIZON_INTRADAY
         )
         print(f"Scenario C (bad calibration + no edge) -> action={signal_unsafe.action}, suppressed={signal_unsafe.suppressed}")
         assert signal_unsafe.action == ACTION_HOLD
         assert signal_unsafe.suppressed is True
+        
+        # Scenario D: Multi-horizon signal
+        multi_sig = predictor.generate_multi_horizon_signal(
+            test_symbol, [HORIZON_INTRADAY], stock_df, index_df, calibration_result=bad_calibration, edge_check_result=no_edge
+        )
+        print(f"Scenario D (Multi-horizon) -> primary_action={multi_sig.primary_action}, primary_horizon={multi_sig.primary_horizon}")
+        assert multi_sig.primary_action == ACTION_HOLD
 
         print("STATUS: PASS")
         logger.info("predictor.py self-test passed.")

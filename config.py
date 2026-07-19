@@ -77,7 +77,7 @@ NIFTY50_SYMBOLS = [
     "LT", "ITC", "HINDUNILVR", "BAJFINANCE", "KOTAKBANK", "AXISBANK", "MARUTI",
     "SUNPHARMA", "TITAN", "ULTRACEMCO", "NTPC", "HCLTECH", "ONGC", "ADANIENT",
     "ADANIPORTS", "M&M", "COALINDIA", "ASIANPAINT", "BAJAJFINSV", "WIPRO",
-    "NESTLEIND", "POWERGRID", "JSWSTEEL", "TATASTEEL", "TATAMOTORS", "GRASIM",
+    "NESTLEIND", "POWERGRID", "JSWSTEEL", "TATASTEEL", "GRASIM",
     "TECHM", "HINDALCO", "CIPLA", "DRREDDY", "EICHERMOT", "BRITANNIA",
     "DIVISLAB", "BPCL", "HEROMOTOCO", "APOLLOHOSP", "SBILIFE", "HDFCLIFE",
     "INDUSINDBK", "BAJAJ-AUTO", "UPL", "SHRIRAMFIN", "TATACONSUM",
@@ -109,7 +109,7 @@ SECTOR_MAP = {
     "BHARTIARTL": "Telecom",
     "LT": "Infra", "ULTRACEMCO": "Cement", "GRASIM": "Cement",
     "ITC": "FMCG", "HINDUNILVR": "FMCG", "NESTLEIND": "FMCG", "BRITANNIA": "FMCG", "TATACONSUM": "FMCG",
-    "MARUTI": "Auto", "M&M": "Auto", "TATAMOTORS": "Auto", "EICHERMOT": "Auto",
+    "MARUTI": "Auto", "M&M": "Auto", "EICHERMOT": "Auto",
     "HEROMOTOCO": "Auto", "BAJAJ-AUTO": "Auto",
     "SUNPHARMA": "Pharma", "CIPLA": "Pharma", "DRREDDY": "Pharma", "DIVISLAB": "Pharma",
     "APOLLOHOSP": "Healthcare",
@@ -150,6 +150,7 @@ MARKET_TIMEZONE = "Asia/Kolkata"
 BAR_INTERVAL = "5m"          # 5-minute bars: ~60-day history, stable. Change to "1m" for finer/shorter history.
 BAR_HISTORY_PERIOD = "60d"
 DATA_STALENESS_THRESHOLD_MINUTES = 15   # if last bar older than this during market hours -> flag UNSAFE
+DATA_STALENESS_THRESHOLD_TRADING_DAYS = 1  # if last daily bar is more than 1 trading day old -> flag UNSAFE
 
 # --- Technical event thresholds --------------------------------------------
 ORB_MINUTES = 15                    # opening range breakout window
@@ -200,15 +201,106 @@ CALIBRATION_N_BINS = 10                 # number of confidence buckets used to b
 CALIBRATION_ECE_THRESHOLD = 0.10        # max acceptable Expected Calibration Error to call confidence "well calibrated"
 EDGE_CHECK_MIN_ALPHA_PCT = 0.0          # signal must show >0 edge vs NIFTY baseline in backtest to be enabled live
 
+# --- Multi-Horizon parameters (Phase 2) ---------------------------------------
+HORIZON_INTRADAY = "INTRADAY"
+HORIZON_3D = "3D"
+HORIZON_7D = "7D"
+HORIZON_30D = "30D"
+HORIZON_3M = "3M"
+HORIZON_6M = "6M"
+HORIZON_1Y = "1Y"
+
+ALL_HORIZONS = [HORIZON_INTRADAY, HORIZON_3D, HORIZON_7D, HORIZON_30D, HORIZON_3M, HORIZON_6M, HORIZON_1Y]
+
+HORIZON_CONFIG = {
+    HORIZON_INTRADAY: {
+        "bar_interval": "5m", "horizon_bars": 6, "deadband_pct_default": 0.15,
+        "history_period": "60d", "min_training_samples": 500,
+        "retrain_cadence_days": 1,
+    },
+    HORIZON_3D: {
+        "bar_interval": "1d", "horizon_bars": 3, "deadband_pct_default": 1.0,
+        "history_period": "2y", "min_training_samples": 300,
+        "retrain_cadence_days": 7,
+    },
+    HORIZON_7D: {
+        "bar_interval": "1d", "horizon_bars": 5, "deadband_pct_default": 1.5,
+        "history_period": "3y", "min_training_samples": 400,
+        "retrain_cadence_days": 7,
+    },
+    HORIZON_30D: {
+        "bar_interval": "1d", "horizon_bars": 21, "deadband_pct_default": 3.0,
+        "history_period": "5y", "min_training_samples": 500,
+        "retrain_cadence_days": 14,
+    },
+    HORIZON_3M: {
+        "bar_interval": "1d", "horizon_bars": 63, "deadband_pct_default": 5.0,
+        "history_period": "7y", "min_training_samples": 500,
+        "retrain_cadence_days": 30,
+    },
+    HORIZON_6M: {
+        "bar_interval": "1d", "horizon_bars": 126, "deadband_pct_default": 8.0,
+        "history_period": "10y", "min_training_samples": 400,
+        "retrain_cadence_days": 60,
+    },
+    HORIZON_1Y: {
+        "bar_interval": "1d", "horizon_bars": 252, "deadband_pct_default": 12.0,
+        "history_period": "max", "min_training_samples": 300,
+        "retrain_cadence_days": 90,
+    },
+}
+
+EVENT_IMPACT_HORIZON = {
+    "RBI_POLICY": HORIZON_30D,
+    "GDP_RELEASE": HORIZON_3M,
+    "UNION_BUDGET": HORIZON_1Y,
+    "ELECTION": HORIZON_1Y,
+    "FESTIVE_WINDOW": HORIZON_3M,
+    "MONSOON_STATUS": HORIZON_6M,
+    "FDI_FLOW_RELEASE": HORIZON_6M,
+    "GEOPOLITICAL": HORIZON_30D,
+    "QUARTERLY_EARNINGS": HORIZON_30D,
+    "REGULATORY_CHANGE": HORIZON_6M,
+    "CORPORATE_ANNOUNCEMENT": HORIZON_7D,
+    "NEWS_HEADLINE": HORIZON_3D,
+    "MACRO_OTHER": HORIZON_30D,
+    "CLASSIFICATION_ERROR": HORIZON_INTRADAY,
+}
+
+HORIZON_TO_MA_PERIOD = {
+    HORIZON_INTRADAY: 9,
+    HORIZON_3D: 9,
+    HORIZON_7D: 9,
+    HORIZON_30D: 50,
+    HORIZON_3M: 50,
+    HORIZON_6M: 200,
+    HORIZON_1Y: 200,
+}
+
+HORIZON_TO_SR_METHOD = {
+    HORIZON_INTRADAY: "bollinger",
+    HORIZON_3D: "bollinger",
+    HORIZON_7D: "bollinger",
+    HORIZON_30D: "swing_levels",
+    HORIZON_3M: "swing_levels",
+    HORIZON_6M: "swing_levels",
+    HORIZON_1Y: "swing_levels",
+}
+
 # --- Model training parameters (Phase 9) --------------------------------------
-PREDICTION_HORIZON_BARS = 6             # predict direction this many bars ahead (6 bars * 5m = 30 min)
-PREDICTION_DEADBAND_PCT = 0.15          # forward moves smaller than this (%) are labeled FLAT, not UP/DOWN
+PREDICTION_HORIZON_BARS = HORIZON_CONFIG[HORIZON_INTRADAY]["horizon_bars"]
+PREDICTION_DEADBAND_PCT = HORIZON_CONFIG[HORIZON_INTRADAY]["deadband_pct_default"]
 LABEL_CLASSES = ["DOWN", "FLAT", "UP"]
 MODEL_RANDOM_SEED = 42
 MODEL_N_ESTIMATORS = 200
 MODEL_MAX_DEPTH = 4
 MODEL_LEARNING_RATE = 0.05
 MIN_TRAINING_SAMPLES_PER_STOCK = 500    # below this, we refuse to train — too little data to trust
+
+# --- Portfolio / Position Sizing (Phase 11) -----------------------------------
+PORTFOLIO_TOTAL_CAPITAL = 10_00_000   # Default 10 Lakhs INR
+MAX_POSITION_SIZE_PCT = 0.10          # Max 10% of portfolio per stock
+MAX_DCA_STEPS = 4                     # Max number of tranches in a DCA ladder
 
 # --- Ensemble parameters (Phase 10) --------------------------------------------
 ENSEMBLE_MODEL_TYPES = ["gradient_boosting", "random_forest", "logistic_regression"]
@@ -223,6 +315,13 @@ TRANSACTION_COST_BPS = 3  # 0.03% brokerage + STT + other charges approximation
 # --- Scheduler parameters (Phase 16) -------------------------------------------
 SCHEDULER_INTERVAL_MINUTES = 5          # how often the live pipeline cycles during market hours (matches BAR_INTERVAL)
 LIVE_WORTHINESS_REFRESH_HOURS = 24      # how often the backtest-derived live/edge status is refreshed per symbol
+
+# --- Health Monitor parameters (Phase 1) -------------------------------------------
+HEALTH_DEGRADED_THRESHOLD = 2
+HEALTH_DOWN_THRESHOLD = 5
+HEALTH_THRESHOLD_OVERRIDES = {
+    "data_fetcher": {"degraded": 1, "down": 3}
+}
 
 # ---------------------------------------------------------------------------
 # 6. Functions
@@ -258,6 +357,15 @@ def validate_config() -> list:
                 "IMD_API_KEY not set — monsoon data will fall back to manual entry only."
             )
 
+        for horizon in ALL_HORIZONS:
+            if horizon not in HORIZON_CONFIG:
+                warnings.append(f"HORIZON_CONFIG missing entry for {horizon}")
+            else:
+                expected_keys = {"bar_interval", "horizon_bars", "deadband_pct_default", "history_period", "min_training_samples", "retrain_cadence_days"}
+                missing_keys = expected_keys - set(HORIZON_CONFIG[horizon].keys())
+                if missing_keys:
+                    warnings.append(f"HORIZON_CONFIG[{horizon}] is missing keys: {missing_keys}")
+
     except Exception as e:
         logger.error(f"Error while validating config: {e}")
         warnings.append(f"validate_config() raised an exception: {e}")
@@ -280,6 +388,7 @@ if __name__ == "__main__":
         logger.info(f"NIFTY50 symbol count: {len(NIFTY50_SYMBOLS)}")
         logger.info(f"Sample yfinance tickers: {NIFTY50_YFINANCE_TICKERS[:3]}")
         logger.info(f"Global tickers configured: {list(GLOBAL_TICKERS.keys())}")
+        logger.info(f"Horizons configured: {len(ALL_HORIZONS)}")
 
         warnings = validate_config()
         if warnings:
