@@ -87,54 +87,54 @@ class Scheduler:
     # Market hours
     # -----------------------------------------------------------------
     @staticmethod
-def is_market_open(now: Optional[datetime] = None) -> bool:
-    """
-    Check if NSE equity market is open.
-    
-    Rules:
-    - Must be a weekday (Mon-Fri)
-    - Must be within MARKET_OPEN_TIME – MARKET_CLOSE_TIME (IST)
-    - Must NOT be an official NSE trading holiday for 2026
-    """
-    try:
-        tz = ZoneInfo(MARKET_TIMEZONE)
-        now = now.astimezone(tz) if now is not None else datetime.now(tz)
+    def is_market_open(now: Optional[datetime] = None) -> bool:
+        """
+        Check if NSE equity market is open.
+        
+        Rules:
+        - Must be a weekday (Mon-Fri)
+        - Must be within MARKET_OPEN_TIME – MARKET_CLOSE_TIME (IST)
+        - Must NOT be an official NSE trading holiday for 2026
+        """
+        try:
+            tz = ZoneInfo(MARKET_TIMEZONE)
+            now = now.astimezone(tz) if now is not None else datetime.now(tz)
 
-        # Weekend check
-        if now.weekday() >= 5:  # Saturday=5, Sunday=6
-            return False
+            # Weekend check
+            if now.weekday() >= 5:  # Saturday=5, Sunday=6
+                return False
 
-        # Official NSE Equity Holidays 2026
-        nse_holidays_2026 = {
-            "2026-01-15",  # Municipal Corporation Election - Maharashtra
-            "2026-01-26",  # Republic Day
-            "2026-03-03",  # Holi
-            "2026-03-26",  # Shri Ram Navami
-            "2026-03-31",  # Shri Mahavir Jayanti
-            "2026-04-03",  # Good Friday
-            "2026-04-14",  # Dr. Baba Saheb Ambedkar Jayanti
-            "2026-05-01",  # Maharashtra Day
-            "2026-05-28",  # Bakri Id
-            "2026-06-26",  # Muharram
-            "2026-09-14",  # Ganesh Chaturthi
-            "2026-10-02",  # Mahatma Gandhi Jayanti
-            "2026-10-20",  # Dussehra
-            "2026-11-10",  # Diwali-Balipratipada
-            "2026-11-24",  # Guru Nanak Jayanti
-            "2026-12-25",  # Christmas
-        }
+            # Official NSE Equity Holidays 2026
+            nse_holidays_2026 = {
+                "2026-01-15",  # Municipal Corporation Election - Maharashtra
+                "2026-01-26",  # Republic Day
+                "2026-03-03",  # Holi
+                "2026-03-26",  # Shri Ram Navami
+                "2026-03-31",  # Shri Mahavir Jayanti
+                "2026-04-03",  # Good Friday
+                "2026-04-14",  # Dr. Baba Saheb Ambedkar Jayanti
+                "2026-05-01",  # Maharashtra Day
+                "2026-05-28",  # Bakri Id
+                "2026-06-26",  # Muharram
+                "2026-09-14",  # Ganesh Chaturthi
+                "2026-10-02",  # Mahatma Gandhi Jayanti
+                "2026-10-20",  # Dussehra
+                "2026-11-10",  # Diwali-Balipratipada
+                "2026-11-24",  # Guru Nanak Jayanti
+                "2026-12-25",  # Christmas
+            }
 
-        today_str = now.strftime("%Y-%m-%d")
-        if today_str in nse_holidays_2026:
-            return False
+            today_str = now.strftime("%Y-%m-%d")
+            if today_str in nse_holidays_2026:
+                return False
 
-        # Time window check
-        current_time = now.time()
-        return MARKET_OPEN_TIME <= current_time <= MARKET_CLOSE_TIME
+            # Time window check
+            current_time = now.time()
+            return MARKET_OPEN_TIME <= current_time <= MARKET_CLOSE_TIME
 
-    except Exception as e:
-        logger.error(f"Failed checking market hours: {e}")
-        return False  # fail safe
+        except Exception as e:
+            logger.error(f"Failed checking market hours: {e}")
+            return False  # fail safe
 
     # -----------------------------------------------------------------
     # Live-worthiness caching (backed by backtester, refreshed periodically)
