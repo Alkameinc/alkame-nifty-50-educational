@@ -1,0 +1,22 @@
+2026-07-15 00:36:26,300 | INFO     | __main__ | Running scheduler.py self-test...
+2026-07-15 00:36:27,412 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-15 00:36:27,442 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-15 00:36:44,893 | INFO     | ensemble_manager | Saved ensemble + metadata for SCHED_TEST to C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\models
+2026-07-15 00:36:45,778 | INFO     | __main__ | Not enough real resolved history for SCHED_TEST yet — using backtest-derived calibration snapshot.
+2026-07-15 00:37:15,908 | INFO     | data_fetcher | Fetched OHLCV for 9/9 global tickers.
+2026-07-15 00:37:15,947 | INFO     | history_manager | Saved prediction #1 for SCHED_TEST (SELL).
+2026-07-15 00:37:15,981 | INFO     | history_manager | Saved prediction #2 for SCHED_TEST (BUY).
+2026-07-15 00:37:16,007 | INFO     | history_manager | Resolved prediction #2: predicted=UP, actual=DOWN, correct=False
+2026-07-15 00:37:16,008 | INFO     | __main__ | Resolved 1 pending prediction(s) for SCHED_TEST.
+2026-07-15 00:37:16,014 | INFO     | __main__ | scheduler.py self-test passed.
+2026-07-15 00:38:14,153 | INFO     | __main__ | Running scheduler.py self-test...
+2026-07-15 00:38:14,559 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-15 00:38:14,563 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-15 00:38:27,597 | INFO     | ensemble_manager | Saved ensemble + metadata for SCHED_TEST to C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\models
+2026-07-15 00:38:28,162 | INFO     | __main__ | Not enough real resolved history for SCHED_TEST yet — using backtest-derived calibration snapshot.
+2026-07-15 00:38:40,910 | INFO     | data_fetcher | Fetched OHLCV for 9/9 global tickers.
+2026-07-15 00:38:40,962 | INFO     | history_manager | Saved prediction #1 for SCHED_TEST (SELL).
+2026-07-15 00:38:40,993 | INFO     | history_manager | Saved prediction #2 for SCHED_TEST (BUY).
+2026-07-15 00:38:41,015 | INFO     | history_manager | Resolved prediction #2: predicted=UP, actual=DOWN, correct=False
+2026-07-15 00:38:41,017 | INFO     | __main__ | Resolved 1 pending prediction(s) for SCHED_TEST.
+2026-07-15 00:38:41,021 | INFO     | __main__ | scheduler.py self-test passed.

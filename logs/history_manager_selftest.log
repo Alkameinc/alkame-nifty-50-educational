@@ -1,0 +1,14 @@
+2026-07-14 23:05:34,355 | INFO     | __main__ | Running history_manager.py self-test...
+2026-07-14 23:05:34,467 | INFO     | __main__ | Saved prediction #1 for M&M (BUY).
+2026-07-14 23:05:34,503 | INFO     | __main__ | Resolved prediction #1: predicted=UP, actual=UP, correct=True
+2026-07-14 23:05:34,525 | INFO     | __main__ | Saved prediction #2 for M&M (BUY).
+2026-07-14 23:05:34,542 | INFO     | __main__ | Resolved prediction #2: predicted=UP, actual=UP, correct=True
+2026-07-14 23:05:34,559 | INFO     | __main__ | Saved prediction #3 for M&M (BUY).
+2026-07-14 23:05:34,578 | INFO     | __main__ | Resolved prediction #3: predicted=UP, actual=DOWN, correct=False
+2026-07-14 23:05:34,600 | INFO     | __main__ | Saved prediction #4 for M&M (BUY).
+2026-07-14 23:05:34,620 | INFO     | __main__ | Resolved prediction #4: predicted=DOWN, actual=UP, correct=False
+2026-07-14 23:05:34,659 | INFO     | __main__ | Saved prediction #5 for M&M (BUY).
+2026-07-14 23:05:34,681 | INFO     | __main__ | Resolved prediction #5: predicted=FLAT, actual=FLAT, correct=True
+2026-07-14 23:05:34,820 | INFO     | __main__ | Saved event #1 (CORPORATE_ANNOUNCEMENT, scope=STOCK).
+2026-07-14 23:05:34,846 | INFO     | __main__ | Saved event #2 (CORPORATE_ANNOUNCEMENT, scope=STOCK).
+2026-07-14 23:05:34,855 | INFO     | __main__ | history_manager.py self-test passed.

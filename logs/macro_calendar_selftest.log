@@ -1,0 +1,11 @@
+2026-07-14 22:49:45,114 | INFO     | __main__ | Running macro_calendar.py self-test...
+2026-07-14 22:49:45,120 | INFO     | __main__ | No macro calendar found at C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv, seeding with defaults.
+2026-07-14 22:49:45,274 | INFO     | __main__ | Loaded 7 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-14 22:49:45,279 | INFO     | __main__ | Added macro event: Monsoon status: Normal (test entry) on 2026-07-14
+2026-07-14 22:49:45,313 | INFO     | __main__ | Reloaded macro calendar: 8 event(s).
+2026-07-14 22:49:45,314 | INFO     | __main__ | macro_calendar.py self-test passed.
+2026-07-14 22:54:06,511 | INFO     | __main__ | Running macro_calendar.py self-test...
+2026-07-14 22:54:06,542 | INFO     | __main__ | Loaded 8 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-14 22:54:06,547 | INFO     | __main__ | Added macro event: Monsoon status: Normal (test entry) on 2026-07-14
+2026-07-14 22:54:06,848 | INFO     | __main__ | Reloaded macro calendar: 9 event(s).
+2026-07-14 22:54:06,849 | INFO     | __main__ | macro_calendar.py self-test passed.

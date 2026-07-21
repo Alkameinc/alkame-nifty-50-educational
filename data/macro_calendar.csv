@@ -1,0 +1,10 @@
+event_date,event_type,label,scope,sector_hint,impact_window_days_before,impact_window_days_after,notes
+2026-04-08,RBI_POLICY,RBI MPC Policy Decision,MARKET,"Banking,NBFC,Insurance,ConsumerDurables,Auto",1,1,Bi-monthly MPC decision
+2026-06-05,RBI_POLICY,RBI MPC Policy Decision,MARKET,"Banking,NBFC,Insurance,ConsumerDurables,Auto",1,1,Bi-monthly MPC decision
+2026-08-05,RBI_POLICY,RBI MPC Policy Decision,MARKET,"Banking,NBFC,Insurance,ConsumerDurables,Auto",1,1,Bi-monthly MPC decision
+2026-10-07,RBI_POLICY,RBI MPC Policy Decision,MARKET,"Banking,NBFC,Insurance,ConsumerDurables,Auto",1,1,Pre-festive policy review
+2026-12-04,RBI_POLICY,RBI MPC Policy Decision,MARKET,"Banking,NBFC,Insurance,ConsumerDurables,Auto",1,1,Final MPC meeting of calendar year
+2027-02-01,UNION_BUDGET,Union Budget Presentation,MARKET,ALL,2,2,Fixed annual date
+2026-10-20,FESTIVE_WINDOW,Diwali demand window,SECTOR,"Auto,FMCG,ConsumerDurables",14,3,"High retail/auto/consumer-durable demand period, verify exact date yearly"
+2026-07-14,MONSOON_STATUS,Monsoon status: Normal (test entry),SECTOR,"FMCG,Auto,Agrochemicals",0,30,Added by self-test
+2026-07-14,MONSOON_STATUS,Monsoon status: Normal (test entry),SECTOR,"FMCG,Auto,Agrochemicals",0,30,Added by self-test

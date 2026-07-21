@@ -1,0 +1,4 @@
+2026-07-18 00:03:54,657 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-18 00:04:27,464 | WARNING  | data_fetcher | RELIANCE data is STALE: last bar is 519.5 minutes old (threshold=15m)
+2026-07-18 00:04:27,593 | INFO     | history_manager | Saved prediction #7 for RELIANCE (HOLD).
+2026-07-18 00:08:08,605 | INFO     | human_insight_manager | Recorded override #1 for RELIANCE: HOLD -> BUY (reason: Testing API)

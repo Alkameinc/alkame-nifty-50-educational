@@ -1,0 +1,9 @@
+2026-07-14 22:53:38,249 | INFO     | __main__ | Running news_sentiment_fetcher.py self-test...
+2026-07-14 22:53:38,738 | WARNING  | __main__ | MARKETAUX_API_KEY not set — skipping marketaux, will use RSS fallback.
+2026-07-14 22:53:38,738 | INFO     | __main__ | marketaux returned no results for RELIANCE, falling back to Google News RSS.
+2026-07-14 22:54:26,449 | INFO     | __main__ | Running news_sentiment_fetcher.py self-test...
+2026-07-14 22:54:26,468 | WARNING  | __main__ | MARKETAUX_API_KEY not set — skipping marketaux, will use RSS fallback.
+2026-07-14 22:54:26,469 | INFO     | __main__ | marketaux returned no results for RELIANCE, falling back to Google News RSS.
+2026-07-14 22:56:57,621 | INFO     | __main__ | Running news_sentiment_fetcher.py self-test...
+2026-07-14 22:56:57,653 | WARNING  | __main__ | MARKETAUX_API_KEY not set — skipping marketaux, will use RSS fallback.
+2026-07-14 22:56:57,654 | INFO     | __main__ | marketaux returned no results for RELIANCE, falling back to Google News RSS.

@@ -1,0 +1,34 @@
+{
+  "symbol": "SCHED_TEST",
+  "trained_at": "2026-07-15T00:38:27.595928",
+  "feature_columns": [
+    "rsi_feat",
+    "macd_line_feat",
+    "macd_signal_feat",
+    "macd_histogram_feat",
+    "bb_upper_feat",
+    "bb_middle_feat",
+    "bb_lower_feat",
+    "atr_feat",
+    "vwap_feat",
+    "ema_fast_feat",
+    "ema_slow_feat",
+    "orb_breakout_feat",
+    "gap_pct_feat",
+    "volume_ratio_feat",
+    "outperformance_pct_feat",
+    "nifty_correlation_feat"
+  ],
+  "label_classes": [
+    "DOWN",
+    "FLAT",
+    "UP"
+  ],
+  "per_model_accuracy": {
+    "gradient_boosting": 0.3395904436860068,
+    "random_forest": 0.4590443686006826,
+    "logistic_regression": 0.4778156996587031
+  },
+  "ensemble_accuracy": 0.39590443686006827,
+  "mean_agreement": 0.6302616609783845
+}

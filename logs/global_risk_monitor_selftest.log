@@ -1,0 +1,5 @@
+2026-07-14 22:58:31,523 | INFO     | __main__ | Running global_risk_monitor.py self-test...
+2026-07-14 22:58:44,340 | INFO     | data_fetcher | Fetched OHLCV for 9/9 global tickers.
+2026-07-14 22:58:44,358 | INFO     | __main__ | Global risk toggle set to True by human. Reason: Self-test: simulated crude oil shock
+2026-07-14 22:58:44,361 | INFO     | __main__ | Global risk toggle set to False by human. Reason: Self-test cleanup
+2026-07-14 22:58:44,362 | INFO     | __main__ | global_risk_monitor.py self-test passed.

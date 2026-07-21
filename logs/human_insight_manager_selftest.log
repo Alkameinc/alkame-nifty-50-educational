@@ -1,0 +1,9 @@
+2026-07-14 23:04:55,323 | INFO     | __main__ | Running human_insight_manager.py self-test...
+2026-07-14 23:04:55,450 | INFO     | __main__ | Added note #1 for RELIANCE: Watching for RBI policy reaction this week.
+2026-07-14 23:04:55,456 | ERROR    | __main__ | Refusing to record override for RELIANCE without a reason — reason is mandatory.
+2026-07-14 23:04:55,550 | INFO     | __main__ | Recorded override #1 for RELIANCE: BUY -> HOLD (reason: Waiting for board meeting outcome before acting.)
+2026-07-14 23:04:55,582 | INFO     | __main__ | Recorded override #2 for RELIANCE: BUY -> HOLD (reason: Human wants to wait for confirmation.)
+2026-07-14 23:04:55,610 | INFO     | __main__ | Recorded feedback #1 for RELIANCE (BUY): helpful=True
+2026-07-14 23:04:55,629 | INFO     | __main__ | Recorded feedback #2 for RELIANCE (SELL): helpful=False
+2026-07-14 23:04:55,650 | INFO     | __main__ | Recorded feedback #3 for RELIANCE (HOLD): helpful=None
+2026-07-14 23:04:55,655 | INFO     | __main__ | human_insight_manager.py self-test passed.

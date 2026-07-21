@@ -1,0 +1,57 @@
+2026-07-15 00:44:51,985 | INFO     | __main__ | Running app.py self-test...
+2026-07-15 00:44:52,008 | INFO     | __main__ | app.py self-test (pure logic) passed.
+2026-07-15 00:46:50,644 | INFO     | __main__ | Running app.py self-test...
+2026-07-15 00:46:50,660 | INFO     | __main__ | app.py self-test (pure logic) passed.
+2026-07-15 00:46:52,316 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-15 00:46:52,328 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-15 00:47:13,522 | INFO     | data_fetcher | Fetched OHLCV for 9/9 global tickers.
+2026-07-15 00:47:15,818 | WARNING  | data_fetcher | RELIANCE data is STALE: last bar is 562.3 minutes old (threshold=15m)
+2026-07-15 00:47:15,833 | INFO     | history_manager | Saved prediction #1 for RELIANCE (HOLD).
+2026-07-15 00:49:13,448 | INFO     | __main__ | Running app.py self-test...
+2026-07-15 00:49:13,468 | INFO     | __main__ | app.py self-test (pure logic) passed.
+2026-07-15 00:49:14,276 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-15 00:49:14,282 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-15 00:49:31,475 | INFO     | data_fetcher | Fetched OHLCV for 9/9 global tickers.
+2026-07-15 00:49:33,134 | WARNING  | data_fetcher | RELIANCE data is STALE: last bar is 564.6 minutes old (threshold=15m)
+2026-07-15 00:49:33,824 | INFO     | history_manager | Saved prediction #2 for RELIANCE (HOLD).
+2026-07-15 20:20:21,913 | INFO     | __main__ | Running app.py self-test...
+2026-07-15 20:20:21,949 | INFO     | __main__ | app.py self-test (pure logic) passed.
+2026-07-15 20:20:23,300 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-15 20:20:23,336 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-15 20:20:40,932 | INFO     | data_fetcher | Fetched OHLCV for 9/9 global tickers.
+2026-07-15 20:20:42,328 | INFO     | history_manager | Resolved prediction #2: predicted=FLAT, actual=FLAT, correct=True
+2026-07-15 20:20:42,374 | INFO     | history_manager | Resolved prediction #1: predicted=FLAT, actual=FLAT, correct=True
+2026-07-15 20:20:42,375 | INFO     | scheduler | Resolved 2 pending prediction(s) for RELIANCE.
+2026-07-15 20:20:42,378 | WARNING  | data_fetcher | RELIANCE data is STALE: last bar is 295.7 minutes old (threshold=15m)
+2026-07-15 20:20:42,414 | INFO     | history_manager | Saved prediction #3 for RELIANCE (HOLD).
+2026-07-15 20:45:48,159 | INFO     | __main__ | Running app.py self-test...
+2026-07-15 20:45:48,188 | INFO     | __main__ | app.py self-test (pure logic) passed.
+2026-07-15 20:45:50,183 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-15 20:45:50,189 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-15 20:46:06,870 | INFO     | data_fetcher | Fetched OHLCV for 9/9 global tickers.
+2026-07-15 20:46:08,765 | WARNING  | data_fetcher | RELIANCE data is STALE: last bar is 321.1 minutes old (threshold=15m)
+2026-07-15 20:46:09,437 | INFO     | history_manager | Saved prediction #4 for RELIANCE (HOLD).
+2026-07-15 21:28:11,533 | INFO     | __main__ | Running app.py self-test...
+2026-07-15 21:28:11,558 | INFO     | __main__ | app.py self-test (pure logic) passed.
+2026-07-15 21:28:12,492 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-15 21:28:12,499 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-15 21:28:23,650 | INFO     | data_fetcher | Fetched OHLCV for 9/9 global tickers.
+2026-07-15 21:28:25,139 | WARNING  | data_fetcher | RELIANCE data is STALE: last bar is 363.4 minutes old (threshold=15m)
+2026-07-15 21:28:25,324 | INFO     | history_manager | Saved prediction #5 for RELIANCE (HOLD).
+2026-07-16 01:42:11,862 | INFO     | __main__ | Running app.py self-test...
+2026-07-16 01:42:12,739 | INFO     | __main__ | app.py self-test (pure logic) passed.
+2026-07-16 01:42:26,694 | INFO     | data_fetcher | Fetched OHLCV for 9/9 global tickers.
+2026-07-16 01:42:28,223 | WARNING  | data_fetcher | RELIANCE data is STALE: last bar is 617.5 minutes old (threshold=15m)
+2026-07-16 01:42:28,259 | INFO     | history_manager | Saved prediction #6 for RELIANCE (HOLD).
+2026-07-18 13:46:18,237 | INFO     | __main__ | Running app.py self-test...
+2026-07-18 13:46:18,253 | INFO     | __main__ | app.py self-test (pure logic) passed.
+2026-07-18 13:46:19,403 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-18 13:46:19,424 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-18 13:46:35,479 | INFO     | data_fetcher | Fetched OHLCV for 9/9 global tickers.
+2026-07-18 13:46:36,603 | INFO     | history_manager | Resolved prediction #6: predicted=FLAT, actual=FLAT, correct=True
+2026-07-18 13:46:36,628 | INFO     | history_manager | Resolved prediction #5: predicted=FLAT, actual=FLAT, correct=True
+2026-07-18 13:46:36,651 | INFO     | history_manager | Resolved prediction #4: predicted=FLAT, actual=FLAT, correct=True
+2026-07-18 13:46:36,674 | INFO     | history_manager | Resolved prediction #3: predicted=FLAT, actual=FLAT, correct=True
+2026-07-18 13:46:36,676 | INFO     | scheduler | Resolved 4 pending prediction(s) for RELIANCE.
+2026-07-18 13:46:36,678 | WARNING  | data_fetcher | RELIANCE data is STALE: last bar is 1341.6 minutes old (threshold=15m)
+2026-07-18 13:46:36,696 | INFO     | history_manager | Saved prediction #8 for RELIANCE (HOLD).

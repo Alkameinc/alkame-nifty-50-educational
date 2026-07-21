@@ -1,0 +1,8 @@
+2026-07-14 23:03:13,249 | INFO     | __main__ | Running predictor.py self-test...
+2026-07-14 23:03:27,720 | INFO     | ensemble_manager | Saved ensemble + metadata for RELIANCE to C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\models
+2026-07-14 23:03:27,734 | INFO     | macro_calendar | Loaded 9 macro calendar event(s) from C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\data\macro_calendar.csv
+2026-07-14 23:03:40,177 | INFO     | data_fetcher | Fetched OHLCV for 9/9 global tickers.
+2026-07-14 23:03:40,186 | WARNING  | __main__ | No calibration/edge check data supplied for RELIANCE — treating as unproven (safest default: suppress confidence, do not treat as live-worthy).
+2026-07-14 23:03:46,762 | INFO     | data_fetcher | Fetched OHLCV for 9/9 global tickers.
+2026-07-14 23:03:55,498 | INFO     | data_fetcher | Fetched OHLCV for 9/9 global tickers.
+2026-07-14 23:03:55,507 | INFO     | __main__ | predictor.py self-test passed.
