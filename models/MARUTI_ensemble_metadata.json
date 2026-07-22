@@ -1,0 +1,34 @@
+{
+  "symbol": "MARUTI",
+  "trained_at": "2026-07-15T15:00:54.396087",
+  "feature_columns": [
+    "rsi_feat",
+    "macd_line_feat",
+    "macd_signal_feat",
+    "macd_histogram_feat",
+    "bb_upper_feat",
+    "bb_middle_feat",
+    "bb_lower_feat",
+    "atr_feat",
+    "vwap_feat",
+    "ema_fast_feat",
+    "ema_slow_feat",
+    "orb_breakout_feat",
+    "gap_pct_feat",
+    "volume_ratio_feat",
+    "outperformance_pct_feat",
+    "nifty_correlation_feat"
+  ],
+  "label_classes": [
+    "DOWN",
+    "FLAT",
+    "UP"
+  ],
+  "per_model_accuracy": {
+    "gradient_boosting": 0.3675937122128174,
+    "random_forest": 0.4026602176541717,
+    "logistic_regression": 0.407496977025393
+  },
+  "ensemble_accuracy": 0.4062877871825877,
+  "mean_agreement": 0.7154373236598147
+}

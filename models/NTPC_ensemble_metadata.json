@@ -1,0 +1,34 @@
+{
+  "symbol": "NTPC",
+  "trained_at": "2026-07-15T15:01:58.826095",
+  "feature_columns": [
+    "rsi_feat",
+    "macd_line_feat",
+    "macd_signal_feat",
+    "macd_histogram_feat",
+    "bb_upper_feat",
+    "bb_middle_feat",
+    "bb_lower_feat",
+    "atr_feat",
+    "vwap_feat",
+    "ema_fast_feat",
+    "ema_slow_feat",
+    "orb_breakout_feat",
+    "gap_pct_feat",
+    "volume_ratio_feat",
+    "outperformance_pct_feat",
+    "nifty_correlation_feat"
+  ],
+  "label_classes": [
+    "DOWN",
+    "FLAT",
+    "UP"
+  ],
+  "per_model_accuracy": {
+    "gradient_boosting": 0.3349455864570738,
+    "random_forest": 0.4014510278113664,
+    "logistic_regression": 0.4437726723095526
+  },
+  "ensemble_accuracy": 0.39298669891172916,
+  "mean_agreement": 0.7867795243853285
+}

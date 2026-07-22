@@ -1,0 +1,6 @@
+2026-07-15 14:10:52,290 | INFO     | __main__ | Running backtester.py self-test...
+2026-07-15 14:11:04,101 | INFO     | ensemble_manager | Saved ensemble + metadata for BACKTEST_SYNTH to C:\Users\Nanak Ram\Desktop\alkame-nifty-50-educational\models
+2026-07-15 14:11:04,374 | INFO     | __main__ | backtester.py self-test passed.
+2026-07-22 23:26:12,152 | INFO     | __main__ | Running backtester.py self-test...
+2026-07-22 23:26:21,061 | INFO     | ensemble_manager | Saved ensemble + metadata for BACKTEST_SYNTH to C:\Users\Nanak Ram\Desktop\alkame-nifty-50-educational\models
+2026-07-22 23:26:21,274 | INFO     | __main__ | backtester.py self-test passed.

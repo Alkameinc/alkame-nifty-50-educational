@@ -1,0 +1,5 @@
+data_analyst/sample_history.sqlite3
+data_analyst/*.sqlite3
+data_analyst/notebooks/.ipynb_checkpoints/
+venv/
+__pycache__/

@@ -1,0 +1,34 @@
+{
+  "symbol": "TECHM",
+  "trained_at": "2026-07-15T15:06:11.781566",
+  "feature_columns": [
+    "rsi_feat",
+    "macd_line_feat",
+    "macd_signal_feat",
+    "macd_histogram_feat",
+    "bb_upper_feat",
+    "bb_middle_feat",
+    "bb_lower_feat",
+    "atr_feat",
+    "vwap_feat",
+    "ema_fast_feat",
+    "ema_slow_feat",
+    "orb_breakout_feat",
+    "gap_pct_feat",
+    "volume_ratio_feat",
+    "outperformance_pct_feat",
+    "nifty_correlation_feat"
+  ],
+  "label_classes": [
+    "DOWN",
+    "FLAT",
+    "UP"
+  ],
+  "per_model_accuracy": {
+    "gradient_boosting": 0.41233373639661425,
+    "random_forest": 0.44619105199516323,
+    "logistic_regression": 0.3591293833131802
+  },
+  "ensemble_accuracy": 0.42321644498186217,
+  "mean_agreement": 0.7186618299072953
+}

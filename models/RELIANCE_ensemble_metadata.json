@@ -1,0 +1,34 @@
+{
+  "symbol": "RELIANCE",
+  "trained_at": "2026-07-15T14:57:17.515178",
+  "feature_columns": [
+    "rsi_feat",
+    "macd_line_feat",
+    "macd_signal_feat",
+    "macd_histogram_feat",
+    "bb_upper_feat",
+    "bb_middle_feat",
+    "bb_lower_feat",
+    "atr_feat",
+    "vwap_feat",
+    "ema_fast_feat",
+    "ema_slow_feat",
+    "orb_breakout_feat",
+    "gap_pct_feat",
+    "volume_ratio_feat",
+    "outperformance_pct_feat",
+    "nifty_correlation_feat"
+  ],
+  "label_classes": [
+    "DOWN",
+    "FLAT",
+    "UP"
+  ],
+  "per_model_accuracy": {
+    "gradient_boosting": 0.37484885126964934,
+    "random_forest": 0.5259975816203144,
+    "logistic_regression": 0.5779927448609432
+  },
+  "ensemble_accuracy": 0.4703748488512696,
+  "mean_agreement": 0.7702539298669892
+}

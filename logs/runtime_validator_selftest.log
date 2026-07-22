@@ -1,0 +1,6 @@
+2026-07-15 14:10:50,190 | INFO     | __main__ | Running runtime_validator.py self-test...
+2026-07-15 14:10:50,192 | WARNING  | __main__ | Only 20 prediction records available, need >= 50 to trust calibration — confidence scores must be treated as unverified until more history accumulates.
+2026-07-15 14:10:50,207 | INFO     | __main__ | runtime_validator.py self-test passed.
+2026-07-22 23:26:10,564 | INFO     | __main__ | Running runtime_validator.py self-test...
+2026-07-22 23:26:10,565 | WARNING  | __main__ | Only 20 prediction records available, need >= 50 to trust calibration — confidence scores must be treated as unverified until more history accumulates.
+2026-07-22 23:26:10,583 | INFO     | __main__ | runtime_validator.py self-test passed.
