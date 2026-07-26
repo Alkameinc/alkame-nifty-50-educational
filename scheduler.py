@@ -18,20 +18,14 @@ from config import (
     PREDICTION_HORIZON_BARS,
     PREDICTION_DEADBAND_PCT,
     BAR_INTERVAL,
-    ALL_HORIZONS,
-    HORIZON_INTRADAY,
     configure_logging,
 )
 from data_fetcher import DataFetcher
-from predictor import Predictor, PredictionSignal, MultiHorizonSignal
-from narrative_builder import NarrativeBuilder
-from position_planner import PositionPlanner
-from reference_level_engine import ReferenceLevelEngine
+from predictor import Predictor, PredictionSignal
 from event_classifier import EventClassifier
 from history_manager import HistoryManager
 from backtester import Backtester
 from runtime_validator import EdgeCheckResult, CalibrationResult
-from health_monitor import registry as health_registry
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -87,9 +81,6 @@ class Scheduler:
         self.event_classifier = event_classifier or EventClassifier()
         self.history_manager = history_manager or HistoryManager()
         self.backtester = backtester or Backtester()
-        self.reference_level_engine = ReferenceLevelEngine()
-        self.position_planner = PositionPlanner()
-        self.narrative_builder = NarrativeBuilder()
         self._live_worthiness_cache: Dict[str, LiveWorthinessSnapshot] = {}
 
     # -----------------------------------------------------------------
@@ -97,19 +88,53 @@ class Scheduler:
     # -----------------------------------------------------------------
     @staticmethod
     def is_market_open(now: Optional[datetime] = None) -> bool:
-        """Weekday (Mon-Fri) and within MARKET_OPEN_TIME-MARKET_CLOSE_TIME, IST.
-        Does NOT yet account for exchange holidays — that would come from the
-        macro calendar's festive/holiday entries in a future refinement."""
+        """
+        Check if NSE equity market is open.
+        
+        Rules:
+        - Must be a weekday (Mon-Fri)
+        - Must be within MARKET_OPEN_TIME – MARKET_CLOSE_TIME (IST)
+        - Must NOT be an official NSE trading holiday for 2026
+        """
         try:
             tz = ZoneInfo(MARKET_TIMEZONE)
             now = now.astimezone(tz) if now is not None else datetime.now(tz)
+
+            # Weekend check
             if now.weekday() >= 5:  # Saturday=5, Sunday=6
                 return False
+
+            # Official NSE Equity Holidays 2026
+            nse_holidays_2026 = {
+                "2026-01-15",  # Municipal Corporation Election - Maharashtra
+                "2026-01-26",  # Republic Day
+                "2026-03-03",  # Holi
+                "2026-03-26",  # Shri Ram Navami
+                "2026-03-31",  # Shri Mahavir Jayanti
+                "2026-04-03",  # Good Friday
+                "2026-04-14",  # Dr. Baba Saheb Ambedkar Jayanti
+                "2026-05-01",  # Maharashtra Day
+                "2026-05-28",  # Bakri Id
+                "2026-06-26",  # Muharram
+                "2026-09-14",  # Ganesh Chaturthi
+                "2026-10-02",  # Mahatma Gandhi Jayanti
+                "2026-10-20",  # Dussehra
+                "2026-11-10",  # Diwali-Balipratipada
+                "2026-11-24",  # Guru Nanak Jayanti
+                "2026-12-25",  # Christmas
+            }
+
+            today_str = now.strftime("%Y-%m-%d")
+            if today_str in nse_holidays_2026:
+                return False
+
+            # Time window check
             current_time = now.time()
             return MARKET_OPEN_TIME <= current_time <= MARKET_CLOSE_TIME
+
         except Exception as e:
             logger.error(f"Failed checking market hours: {e}")
-            return False  # fail safe: assume closed rather than risk acting when unsure
+            return False  # fail safe
 
     # -----------------------------------------------------------------
     # Live-worthiness caching (backed by backtester, refreshed periodically)
@@ -150,97 +175,26 @@ class Scheduler:
     # -----------------------------------------------------------------
     # One cycle for one symbol
     # -----------------------------------------------------------------
-
-    def run_cycle_stream_for_symbol(
-        self, symbol: str, stock_df: pd.DataFrame, index_df: pd.DataFrame,
-        macro_events: Optional[List] = None, corporate_events: Optional[List[dict]] = None,
-        news_articles: Optional[List[dict]] = None,
-    ):
-        try:
-            snapshot = self.get_cached_live_worthiness(symbol)
-            calibration_result = snapshot.calibration_result if snapshot else None
-            edge_check_result = snapshot.edge_check_result if snapshot else None
-
-            horizons_to_run = list(ALL_HORIZONS)
-
-            stream = self.predictor.generate_multi_horizon_stream(
-                symbol=symbol,
-                horizons=horizons_to_run,
-                stock_df=stock_df,
-                index_df=index_df,
-                macro_events=macro_events,
-                corporate_events=corporate_events,
-                news_articles=news_articles,
-                calibration_result=calibration_result,
-                edge_check_result=edge_check_result
-            )
-            
-            for sig in stream:
-                # We yield each PredictionSignal as it finishes computing
-                yield sig
-                
-        except Exception as e:
-            logger.error(f"Stream cycle failed for {symbol}: {e}")
-            
     def run_one_cycle_for_symbol(
         self, symbol: str, stock_df: pd.DataFrame, index_df: pd.DataFrame,
         macro_events: Optional[List] = None, corporate_events: Optional[List[dict]] = None,
         news_articles: Optional[List[dict]] = None,
-    ) -> Optional[MultiHorizonSignal]:
+    ) -> Optional[PredictionSignal]:
         try:
             snapshot = self.get_cached_live_worthiness(symbol)
             calibration_result = snapshot.calibration_result if snapshot else None
             edge_check_result = snapshot.edge_check_result if snapshot else None
 
-            horizons_to_run = list(ALL_HORIZONS)
-
-            # We need daily data for long horizons. Since run_one_cycle_for_symbol only takes stock_df, we rely on predictor to fetch it.
-            multi_signal = self.predictor.generate_multi_horizon_signal(
-                symbol=symbol,
-                horizons=horizons_to_run,
-                stock_df=stock_df,
-                index_df=index_df,
-                macro_events=macro_events,
-                corporate_events=corporate_events,
-                news_articles=news_articles,
-                calibration_result=calibration_result,
-                edge_check_result=edge_check_result
+            signal = self.predictor.generate_signal(
+                symbol, stock_df, index_df, macro_events=macro_events, corporate_events=corporate_events,
+                news_articles=news_articles, calibration_result=calibration_result, edge_check_result=edge_check_result,
             )
 
-            narrative = self.narrative_builder.build_stock_narrative(multi_signal, None)
-            cmp = stock_df["Close"].iloc[-1] if not stock_df.empty else 0.0
-            levels = self.reference_level_engine.get_reference_levels(symbol, stock_df, multi_signal.primary_horizon)
-            ma_lvl = levels.moving_average_value
-            supp_lvl = levels.support_band_high
-            plan = self.position_planner.generate_plan(
-                multi_signal=multi_signal, current_price=cmp, 
-                ma_level=ma_lvl, support_level=supp_lvl
-            )
-            
-            dca_ladder = []
-            if plan and plan.ladder:
-                total_cap = plan.max_allowed_inr or 1.0
-                for step in plan.ladder:
-                    dca_ladder.append({
-                        "type": step.reason,
-                        "price": step.trigger_price,
-                        "capital_allocation_pct": round((step.allocation_inr / total_cap) * 100, 1),
-                        "shares": int(step.allocation_inr / step.trigger_price) if step.trigger_price else 0
-                    })
+            self.history_manager.save_prediction(signal)
+            for event in signal.contributing_events:
+                self.history_manager.save_event(event)
 
-            primary_sig = multi_signal.signals.get(multi_signal.primary_horizon)
-            
-            for hor, sig in multi_signal.signals.items():
-                if hor == multi_signal.primary_horizon:
-                    self.history_manager.save_prediction(sig, narrative=narrative, dca_ladder=dca_ladder)
-                else:
-                    self.history_manager.save_prediction(sig)
-
-            if primary_sig and primary_sig.contributing_events:
-                for event in primary_sig.contributing_events:
-                    self.history_manager.save_event(event)
-
-            return multi_signal
+            return signal
 
         except Exception as e:
             logger.error(f"Cycle failed for {symbol}: {e}")
@@ -317,7 +271,6 @@ class Scheduler:
         """
         iterations = 0
         while max_iterations is None or iterations < max_iterations:
-            health_registry.report("scheduler", ok=True, detail="Heartbeat")
             if not self.is_market_open():
                 logger.info("Market closed — sleeping until next check.")
                 time_module.sleep(60 if max_iterations is None else 0)
@@ -331,7 +284,6 @@ class Scheduler:
                     self.run_one_cycle_for_symbol(symbol, stock_df, index_df)
             except Exception as e:
                 logger.error(f"Error during scheduler cycle: {e}")
-                health_registry.report("scheduler", ok=False, detail="Error during scheduler cycle", error=str(e))
 
             iterations += 1
             if max_iterations is None:
@@ -414,6 +366,7 @@ if __name__ == "__main__":
         cached = scheduler.get_cached_live_worthiness(test_symbol)
         print(f"Live-worthiness cached: {cached is not None}, edge_status={snapshot.edge_check_result.status}")
         assert cached is not None
+
         # --- Test 3: run_one_cycle_for_symbol produces AND persists a signal ---
         before_count = len(history_manager.get_predictions(test_symbol))
         signal = scheduler.run_one_cycle_for_symbol(test_symbol, stock_df, index_df, macro_events=[], corporate_events=[], news_articles=[])

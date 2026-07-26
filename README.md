@@ -1,4 +1,10 @@
-# Alkame-Nifty50
+# Alkame-Nifty50 — Educational Repository
+
+> **DBERT Labs Internship 2026**
+> **Domain:** Data Analyst
+> **Intern:** Ankur Sen
+> **Program Details:** https://dbert.online · https://internship.dbert.online
+> This repository is a component of the DBERT Labs structural training track. All modifications, upgrade branches, and submitted pull requests are developed under professional educational guidelines.
 
 **NIFTY 50 Intraday Market Intelligence Engine**
 *Human-in-the-loop · Calibration-gated · Event-aware · Scalping-ready · API-first*
