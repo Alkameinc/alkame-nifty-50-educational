@@ -1,0 +1,17 @@
+2026-07-14 22:46:33,626 | INFO     | __main__ | Running config.py self-test...
+2026-07-14 22:46:33,644 | INFO     | __main__ | Project root: C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational
+2026-07-14 22:46:33,646 | INFO     | __main__ | Directories ensured: ['C:\\Users\\shivj\\Desktop\\alkame-nifty-50-educational\\alkame-nifty-50-educational\\data', 'C:\\Users\\shivj\\Desktop\\alkame-nifty-50-educational\\alkame-nifty-50-educational\\data\\cache', 'C:\\Users\\shivj\\Desktop\\alkame-nifty-50-educational\\alkame-nifty-50-educational\\models', 'C:\\Users\\shivj\\Desktop\\alkame-nifty-50-educational\\alkame-nifty-50-educational\\logs', 'C:\\Users\\shivj\\Desktop\\alkame-nifty-50-educational\\alkame-nifty-50-educational\\db']
+2026-07-14 22:46:33,651 | INFO     | __main__ | NIFTY50 symbol count: 50
+2026-07-14 22:46:33,653 | INFO     | __main__ | Sample yfinance tickers: ['RELIANCE.NS', 'HDFCBANK.NS', 'ICICIBANK.NS']
+2026-07-14 22:46:33,655 | INFO     | __main__ | Global tickers configured: ['DOLLAR_INDEX', 'GOLD', 'SILVER', 'CRUDE_BRENT', 'CRUDE_WTI', 'USD_INR', 'US_SP500', 'US_NASDAQ', 'VIX']
+2026-07-14 22:46:33,656 | WARNING  | __main__ | Config validation produced 2 warning(s):
+2026-07-14 22:46:33,658 | WARNING  | __main__ |   - Environment variable 'MARKETAUX_API_KEY' is not set. Related features will be degraded or disabled.
+2026-07-14 22:46:33,660 | WARNING  | __main__ |   - IMD_API_KEY not set — monsoon data will fall back to manual entry only.
+2026-07-15 21:18:07,979 | INFO     | __main__ | Running config.py self-test...
+2026-07-15 21:18:07,985 | INFO     | __main__ | Project root: C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational
+2026-07-15 21:18:07,985 | INFO     | __main__ | Directories ensured: ['C:\\Users\\shivj\\Desktop\\alkame-nifty-50-educational\\alkame-nifty-50-educational\\data', 'C:\\Users\\shivj\\Desktop\\alkame-nifty-50-educational\\alkame-nifty-50-educational\\data\\cache', 'C:\\Users\\shivj\\Desktop\\alkame-nifty-50-educational\\alkame-nifty-50-educational\\models', 'C:\\Users\\shivj\\Desktop\\alkame-nifty-50-educational\\alkame-nifty-50-educational\\logs', 'C:\\Users\\shivj\\Desktop\\alkame-nifty-50-educational\\alkame-nifty-50-educational\\db']
+2026-07-15 21:18:07,986 | INFO     | __main__ | NIFTY50 symbol count: 50
+2026-07-15 21:18:07,986 | INFO     | __main__ | Sample yfinance tickers: ['RELIANCE.NS', 'HDFCBANK.NS', 'ICICIBANK.NS']
+2026-07-15 21:18:07,987 | INFO     | __main__ | Global tickers configured: ['DOLLAR_INDEX', 'GOLD', 'SILVER', 'CRUDE_BRENT', 'CRUDE_WTI', 'USD_INR', 'US_SP500', 'US_NASDAQ', 'VIX']
+2026-07-15 21:18:07,987 | WARNING  | __main__ | Config validation produced 1 warning(s):
+2026-07-15 21:18:07,988 | WARNING  | __main__ |   - IMD_API_KEY not set — monsoon data will fall back to manual entry only.

@@ -1,0 +1,30 @@
+{
+  "symbol": "SYNTHTEST",
+  "trained_at": "2026-07-14T23:00:31.939599",
+  "feature_columns": [
+    "rsi_feat",
+    "macd_line_feat",
+    "macd_signal_feat",
+    "macd_histogram_feat",
+    "bb_upper_feat",
+    "bb_middle_feat",
+    "bb_lower_feat",
+    "atr_feat",
+    "vwap_feat",
+    "ema_fast_feat",
+    "ema_slow_feat",
+    "orb_breakout_feat",
+    "gap_pct_feat",
+    "volume_ratio_feat",
+    "outperformance_pct_feat",
+    "nifty_correlation_feat"
+  ],
+  "label_classes": [
+    "DOWN",
+    "FLAT",
+    "UP"
+  ],
+  "prediction_horizon_bars": 6,
+  "deadband_pct": 0.15,
+  "test_accuracy": 0.2928082191780822
+}

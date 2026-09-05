@@ -1,0 +1,3 @@
+2026-07-14 23:00:18,556 | INFO     | __main__ | Running model_trainer.py self-test...
+2026-07-14 23:00:31,941 | INFO     | __main__ | Saved model + metadata for SYNTHTEST to C:\Users\shivj\Desktop\alkame-nifty-50-educational\alkame-nifty-50-educational\models
+2026-07-14 23:00:32,760 | INFO     | __main__ | model_trainer.py self-test passed.
