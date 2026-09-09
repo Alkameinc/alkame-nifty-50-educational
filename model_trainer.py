@@ -223,9 +223,6 @@ class ModelTrainer:
                 logger.error("No ML-safe ('_feat') columns found — refusing to train on raw columns.")
                 return None
 
-            raw_leak = [c for c in feature_columns if not c.endswith(ML_SAFE_SUFFIX)]
-            assert not raw_leak, f"Non-lagged column(s) detected in feature set: {raw_leak}"
-
             if label_type == "level":
                 labels = self.build_price_level_labels(engineered, horizon=horizon)
             else:
@@ -233,6 +230,9 @@ class ModelTrainer:
                 
             X = engineered[feature_columns].copy()
             y = labels.copy()
+
+            raw_leak = [c for c in X.columns if not c.endswith(ML_SAFE_SUFFIX)]
+            assert not raw_leak, f"Non-lagged column(s) detected in feature set: {raw_leak}"
 
             combined = pd.concat([X, y.rename("label")], axis=1).dropna()
             

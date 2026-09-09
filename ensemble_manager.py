@@ -178,6 +178,7 @@ class EnsembleManager:
 
             # Soft-vote: average probability matrices across all models
             avg_proba = np.mean(list(proba_matrices.values()), axis=0)
+            avg_proba = avg_proba / avg_proba.sum(axis=1, keepdims=True)  # Renormalize
             ensemble_pred_idx = avg_proba.argmax(axis=1)
             ensemble_preds = [LABEL_CLASSES[i] for i in ensemble_pred_idx]
             ensemble_accuracy = accuracy_score(y_test, ensemble_preds)
@@ -287,6 +288,7 @@ class EnsembleManager:
 
             proba_matrices = {name: self._reindexed_proba(model, X_ordered) for name, model in models.items()}
             avg_proba = np.mean(list(proba_matrices.values()), axis=0)
+            avg_proba = avg_proba / avg_proba.sum(axis=1, keepdims=True)  # Renormalize
             pred_idx = avg_proba.argmax(axis=1)
 
             individual_pred_arrays = {name: p.argmax(axis=1) for name, p in proba_matrices.items()}

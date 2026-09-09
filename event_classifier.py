@@ -142,7 +142,7 @@ class EventClassifier:
                 if "ALL" not in sectors and scope == SCOPE_MARKET:
                     scope = SCOPE_SECTOR
 
-            return Event(
+            evt = Event(
                 event_id=self._next_event_id("MACRO"),
                 source="MACRO",
                 event_type=macro_event.event_type,
@@ -189,7 +189,7 @@ class EventClassifier:
             affected = [symbol] if symbol else []
             scope = SCOPE_STOCK if symbol else SCOPE_MARKET  # market-wide block deals have no single symbol
 
-            return Event(
+            evt = Event(
                 event_id=self._next_event_id("CORP"),
                 source="CORPORATE",
                 event_type=category,
@@ -242,7 +242,7 @@ class EventClassifier:
                 confidence = 1.0 if symbol else 0.3
                 sector_val = SECTOR_MAP.get(symbol) if symbol else None
 
-            return Event(
+            evt = Event(
                 event_id=self._next_event_id("NEWS"),
                 source="NEWS",
                 event_type="NEWS_HEADLINE",

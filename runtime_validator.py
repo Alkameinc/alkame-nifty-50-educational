@@ -125,12 +125,16 @@ class RuntimeValidator:
 
             bins: List[CalibrationBin] = []
             ece = 0.0
-            for bin_range, group in df.groupby("bin", observed=True):
-                if len(group) == 0:
+            for bin_range, group in df.groupby("bin", observed=False):
+                count = len(group)
+                if count == 0:
+                    bins.append(CalibrationBin(
+                        bin_range=str(bin_range), count=0,
+                        mean_predicted_confidence=0.0, empirical_accuracy=0.0,
+                    ))
                     continue
                 mean_conf = float(group["confidence"].mean())
                 empirical_acc = float(group["correct"].mean())
-                count = len(group)
                 bins.append(CalibrationBin(
                     bin_range=str(bin_range), count=count,
                     mean_predicted_confidence=mean_conf, empirical_accuracy=empirical_acc,
@@ -166,7 +170,11 @@ class RuntimeValidator:
             bin_width = 1.0 / self.n_bins
             bin_index = min(int(raw_confidence / bin_width), len(calibration_result.bins) - 1)
             health_registry.report("runtime_validator", ok=True)
-            return calibration_result.bins[bin_index].empirical_accuracy
+            
+            target_bin = calibration_result.bins[bin_index]
+            if target_bin.count == 0:
+                return None
+            return target_bin.empirical_accuracy
         except Exception as e:
             logger.error(f"Failed getting calibrated confidence for raw={raw_confidence}: {e}")
             health_registry.report("runtime_validator", ok=False, detail="Failed getting calibrated confidence", error=str(e))
