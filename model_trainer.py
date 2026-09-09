@@ -90,16 +90,28 @@ class ModelTrainer:
     def simulate_user_cost(self, df: pd.DataFrame, seed: int = MODEL_RANDOM_SEED) -> None:
         """
         Synthetically generates a 'user_avg_cost' for historical data so the model
-        can learn the 'USER_COST' outcome. 50% chance of having a position. If position
-        exists, cost is between -15% and +15% of current price.
+        can learn the 'USER_COST' outcome. Makes the cost stable across a day to
+        prevent feature-target leakage.
         Mutates df in place (both unlagged and _feat lagged columns).
         """
         rng = np.random.default_rng(seed)
-        mask = rng.random(len(df)) > 0.5
+        day_keys = df.index.date
+        unique_days = np.unique(day_keys)
         
-        df["has_position"] = mask.astype(float)
-        random_pcts = rng.uniform(-15.0, 15.0, size=len(df))
-        df["pct_from_user_avg_cost"] = np.where(mask, random_pcts, 0.0)
+        has_pos = np.zeros(len(df))
+        pct_cost = np.zeros(len(df))
+        closes = df["Close"].values
+        
+        for d in unique_days:
+            idx = np.where(day_keys == d)[0]
+            if rng.random() > 0.5:
+                has_pos[idx] = 1.0
+                day_open = closes[idx[0]]
+                sim_cost = day_open * rng.uniform(0.85, 1.15)
+                pct_cost[idx] = (closes[idx] - sim_cost) / sim_cost * 100.0
+                
+        df["has_position"] = has_pos
+        df["pct_from_user_avg_cost"] = pct_cost
         
         df[f"has_position{ML_SAFE_SUFFIX}"] = df["has_position"].shift(1)
         df[f"pct_from_user_avg_cost{ML_SAFE_SUFFIX}"] = df["pct_from_user_avg_cost"].shift(1)

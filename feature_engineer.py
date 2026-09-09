@@ -433,6 +433,51 @@ class FeatureEngineer:
         if out is None:
             return None
             
+        if reference_deltas is None:
+            # Fix pipeline leakage: populate historical rolling S/R and MA features for the level model
+            from config import HORIZON_TO_MA_PERIOD, HORIZON_TO_SR_METHOD, BOLLINGER_PERIOD, BOLLINGER_STD_DEV
+            
+            ma_period = HORIZON_TO_MA_PERIOD.get(horizon, 50)
+            rolling_ma = out["Close"].rolling(window=ma_period, min_periods=1).mean()
+            out["pct_from_ma"] = ((out["Close"] - rolling_ma) / rolling_ma) * 100.0
+            
+            sr_method = HORIZON_TO_SR_METHOD.get(horizon, "bollinger")
+            if sr_method == "bollinger":
+                sma = out["Close"].rolling(window=BOLLINGER_PERIOD, min_periods=1).mean()
+                std = out["Close"].rolling(window=BOLLINGER_PERIOD, min_periods=1).std().fillna(0)
+                upper = sma + (BOLLINGER_STD_DEV * std)
+                lower = sma - (BOLLINGER_STD_DEV * std)
+                
+                out["pct_from_support_band"] = np.where(
+                    out["Close"] < lower * 0.995, ((out["Close"] - lower * 0.995) / (lower * 0.995)) * 100.0,
+                    np.where(out["Close"] > lower * 1.005, ((out["Close"] - lower * 1.005) / (lower * 1.005)) * 100.0, 0.0)
+                )
+                out["pct_from_resistance_band"] = np.where(
+                    out["Close"] < upper * 0.995, ((out["Close"] - upper * 0.995) / (upper * 0.995)) * 100.0,
+                    np.where(out["Close"] > upper * 1.005, ((out["Close"] - upper * 1.005) / (upper * 1.005)) * 100.0, 0.0)
+                )
+            else:
+                lookback_map = {"30D": 60, "3M": 120, "6M": 252, "1Y": 500}
+                lookback = lookback_map.get(horizon, 120)
+                
+                res_high = out["High"].rolling(window=lookback, min_periods=1).quantile(0.90)
+                res_low = out["High"].rolling(window=lookback, min_periods=1).quantile(0.75)
+                sup_high = out["Low"].rolling(window=lookback, min_periods=1).quantile(0.25)
+                sup_low = out["Low"].rolling(window=lookback, min_periods=1).min()
+                
+                out["pct_from_support_band"] = np.where(
+                    out["Close"] < sup_low, ((out["Close"] - sup_low) / sup_low) * 100.0,
+                    np.where(out["Close"] > sup_high, ((out["Close"] - sup_high) / sup_high) * 100.0, 0.0)
+                )
+                out["pct_from_resistance_band"] = np.where(
+                    out["Close"] < res_low, ((out["Close"] - res_low) / res_low) * 100.0,
+                    np.where(out["Close"] > res_high, ((out["Close"] - res_high) / res_high) * 100.0, 0.0)
+                )
+            
+            # Re-shift the ML-safe columns to prevent lookahead
+            for col in ["pct_from_ma", "pct_from_support_band", "pct_from_resistance_band"]:
+                out[f"{col}{ML_SAFE_SUFFIX}"] = out[col].shift(1)
+
         if horizon == HORIZON_INTRADAY:
             return out
             
