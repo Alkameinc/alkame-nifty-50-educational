@@ -378,7 +378,7 @@ if __name__ == "__main__":
 
         # --- Test 4: resolve_pending_outcomes resolves a prediction whose horizon has elapsed ---
         old_signal = PredictionSignal(
-            symbol=test_symbol, timestamp=stock_df.index[100], action="BUY", model_predicted_class="UP",
+            symbol=test_symbol, timestamp=stock_df.index[100], horizon="INTRADAY", action="BUY", model_predicted_class="UP",
             raw_confidence=0.7, risk_adjusted_confidence=0.7, calibrated_confidence=None, agreement_fraction=0.6,
             downside_summary="d", upside_summary="u", reasoning=[],
         )

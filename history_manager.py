@@ -432,7 +432,7 @@ if __name__ == "__main__":
 
         # --- Predictions + outcome resolution ---
         signal = PredictionSignal(
-            symbol=test_symbol, timestamp=datetime.now(), action="BUY", model_predicted_class="UP",
+            symbol=test_symbol, timestamp=datetime.now(), horizon="INTRADAY", action="BUY", model_predicted_class="UP",
             raw_confidence=0.72, risk_adjusted_confidence=0.70, calibrated_confidence=None, agreement_fraction=0.66,
             downside_summary="Some downside.", upside_summary="Some upside.", reasoning=["Model said UP."],
         )
@@ -449,7 +449,7 @@ if __name__ == "__main__":
         pattern = [(0.9, "UP", "UP"), (0.9, "UP", "DOWN"), (0.3, "DOWN", "UP"), (0.6, "FLAT", "FLAT")]
         for conf, predicted, actual in pattern:
             s = PredictionSignal(
-                symbol=test_symbol, timestamp=datetime.now(), action="BUY", model_predicted_class=predicted,
+                symbol=test_symbol, timestamp=datetime.now(), horizon="INTRADAY", action="BUY", model_predicted_class=predicted,
                 raw_confidence=conf, risk_adjusted_confidence=conf, calibrated_confidence=None, agreement_fraction=0.5,
                 downside_summary="d", upside_summary="u", reasoning=[],
             )

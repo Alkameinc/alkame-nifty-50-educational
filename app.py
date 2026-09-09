@@ -252,12 +252,12 @@ if __name__ == "__main__":
 
         # format_confidence_display — must never show a raw number when uncalibrated
         signal_calibrated = PredictionSignal(
-            symbol="TEST", timestamp=datetime.now(), action=ACTION_BUY, model_predicted_class="UP",
+            symbol="TEST", timestamp=datetime.now(), horizon="INTRADAY", action=ACTION_BUY, model_predicted_class="UP",
             raw_confidence=0.8, risk_adjusted_confidence=0.8, calibrated_confidence=0.75, agreement_fraction=0.66,
             downside_summary="d", upside_summary="u", reasoning=[],
         )
         signal_uncalibrated = PredictionSignal(
-            symbol="TEST", timestamp=datetime.now(), action=ACTION_BUY, model_predicted_class="UP",
+            symbol="TEST", timestamp=datetime.now(), horizon="INTRADAY", action=ACTION_BUY, model_predicted_class="UP",
             raw_confidence=0.8, risk_adjusted_confidence=0.8, calibrated_confidence=None, agreement_fraction=0.66,
             downside_summary="d", upside_summary="u", reasoning=[],
         )

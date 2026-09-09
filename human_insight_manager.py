@@ -252,7 +252,7 @@ class HumanInsightManager:
             f"Reason: {reason}"
         ]
         return PredictionSignal(
-            symbol=signal.symbol, timestamp=signal.timestamp, action=overridden_action,
+            symbol=signal.symbol, timestamp=signal.timestamp, horizon=signal.horizon, action=overridden_action,
             model_predicted_class=signal.model_predicted_class, raw_confidence=signal.raw_confidence,
             risk_adjusted_confidence=signal.risk_adjusted_confidence,
             calibrated_confidence=signal.calibrated_confidence, agreement_fraction=signal.agreement_fraction,
@@ -377,7 +377,7 @@ if __name__ == "__main__":
 
         # apply_override_to_signal — build a minimal fake PredictionSignal and override it
         fake_signal = PredictionSignal(
-            symbol=test_symbol, timestamp=datetime.now(), action="BUY", model_predicted_class="UP",
+            symbol=test_symbol, timestamp=datetime.now(), horizon="INTRADAY", action="BUY", model_predicted_class="UP",
             raw_confidence=0.7, risk_adjusted_confidence=0.7, calibrated_confidence=0.65, agreement_fraction=0.66,
             downside_summary="Some downside.", upside_summary="Some upside.", reasoning=["Model said BUY."],
         )
