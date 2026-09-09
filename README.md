@@ -319,4 +319,12 @@ Pull requests are welcome for bug fixes, improved data sources, and backtesting 
 
 ## License
 
-[MIT](./LICENSE) — Educational use. See the legal notice above for trading-related restrictions.
+**Educational / Personal Use Only — Commercial Use Prohibited**
+
+This repository is publicly available for educational, academic, research, and personal learning purposes. You are welcome to read, study, and modify the source code for your own non-commercial educational or personal use.
+
+Commercial use, redistribution, resale, incorporation into commercial products or services, SaaS deployment, and development of competing commercial products are strictly prohibited without prior written permission from Alkameinc.
+
+Please see the [LICENSE.md](LICENSE.md) file for the complete terms.
+
+*Copyright © 2026 Alkameinc. All Rights Reserved.*
