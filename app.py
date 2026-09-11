@@ -9,7 +9,7 @@ import pandas as pd
 
 # 3. Local imports
 from config import NIFTY50_SYMBOLS, to_yfinance_ticker, configure_logging
-from predictor import PredictionSignal, ACTION_BUY, ACTION_SELL, ACTION_HOLD
+from predictor import PredictionSignal, MultiHorizonSignal, ACTION_BUY, ACTION_SELL, ACTION_HOLD
 from scheduler import Scheduler
 from history_manager import HistoryManager
 from human_insight_manager import HumanInsightManager
@@ -158,24 +158,39 @@ def render_dashboard() -> None:
         st.error("Signal could not be generated for this stock right now.")
         return
 
+    # Extract primary/intraday prediction signal if MultiHorizonSignal is returned
+    if isinstance(signal, MultiHorizonSignal):
+        multi_sig = signal
+        active_signal = multi_sig.signals.get(multi_sig.primary_horizon) or next(iter(multi_sig.signals.values()))
+    else:
+        multi_sig = None
+        active_signal = signal
+
     # --- Signal panel: downside ALWAYS before upside ---
-    st.subheader(f"{symbol} — {format_action_label(signal.action)}")
-    st.caption(format_confidence_display(signal))
-    if signal.suppressed:
+    st.subheader(f"{symbol} — {format_action_label(active_signal.action)}")
+    st.caption(format_confidence_display(active_signal))
+    if active_signal.suppressed:
         st.info("This signal was adjusted for safety reasons — see reasoning below for why.")
 
+    if multi_sig and len(multi_sig.signals) > 1:
+        st.markdown("**Multi-Horizon Breakdown:**")
+        cols = st.columns(len(multi_sig.signals))
+        for idx, (h, h_sig) in enumerate(multi_sig.signals.items()):
+            with cols[idx]:
+                st.metric(f"Horizon: {h}", format_action_label(h_sig.action))
+
     st.markdown("**Downside — read this first:**")
-    st.write(signal.downside_summary)
+    st.write(active_signal.downside_summary)
     st.markdown("**Upside:**")
-    st.write(signal.upside_summary)
+    st.write(active_signal.upside_summary)
 
     with st.expander("Full reasoning"):
-        for r in signal.reasoning:
+        for r in active_signal.reasoning:
             st.write(f"- {r}")
 
-    if signal.contributing_events:
+    if active_signal.contributing_events:
         st.markdown("**Events tagged as affecting this stock:**")
-        st.dataframe(pd.DataFrame(format_events_for_table(signal.contributing_events)), use_container_width=True)
+        st.dataframe(pd.DataFrame(format_events_for_table(active_signal.contributing_events)), use_container_width=True)
     else:
         st.caption("No specific events currently tagged as affecting this stock.")
 
@@ -187,7 +202,7 @@ def render_dashboard() -> None:
     with col1:
         note_text = st.text_area("Add a note")
         if st.button("Save note") and note_text.strip():
-            human_insight_manager.add_note(symbol, note_text, related_action=signal.action)
+            human_insight_manager.add_note(symbol, note_text, related_action=active_signal.action)
             st.success("Note saved.")
         notes = human_insight_manager.get_notes(symbol, limit=5)
         if notes:
@@ -195,15 +210,15 @@ def render_dashboard() -> None:
             for n in notes:
                 st.caption(f"- {n.timestamp[:16]}: {n.note_text}")
     with col2:
-        default_idx = OVERRIDE_ACTIONS.index(signal.action) if signal.action in OVERRIDE_ACTIONS else 2
+        default_idx = OVERRIDE_ACTIONS.index(active_signal.action) if active_signal.action in OVERRIDE_ACTIONS else 2
         override_action = st.selectbox("Override action", OVERRIDE_ACTIONS, index=default_idx)
         override_reason = st.text_input("Reason for override (required)")
         if st.button("Apply override"):
             if not override_reason.strip():
                 st.error("A reason is required to record an override.")
             else:
-                human_insight_manager.apply_override_to_signal(signal, override_action, override_reason)
-                st.success(f"Override recorded: {signal.action} -> {override_action}")
+                human_insight_manager.apply_override_to_signal(active_signal, override_action, override_reason)
+                st.success(f"Override recorded: {active_signal.action} -> {override_action}")
 
     st.divider()
 
@@ -247,7 +262,7 @@ if __name__ == "__main__":
         buy_label = format_action_label(ACTION_BUY)
         sell_label = format_action_label(ACTION_SELL)
         hold_label = format_action_label(ACTION_HOLD)
-        print(f"Action labels: BUY='{buy_label}', SELL='{sell_label}', HOLD='{hold_label}'")
+        print(f"Action labels: BUY='{buy_label.encode('ascii', 'ignore').decode()}', SELL='{sell_label.encode('ascii', 'ignore').decode()}', HOLD='{hold_label.encode('ascii', 'ignore').decode()}'")
         assert "BUY" in buy_label and "SELL" in sell_label and "HOLD" in hold_label
 
         # format_confidence_display — must never show a raw number when uncalibrated
