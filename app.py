@@ -9,6 +9,7 @@ import pandas as pd
 
 # 3. Local imports
 from config import NIFTY50_SYMBOLS, to_yfinance_ticker, configure_logging
+from data_fetcher import DataFetcher
 from predictor import PredictionSignal, MultiHorizonSignal, ACTION_BUY, ACTION_SELL, ACTION_HOLD
 from scheduler import Scheduler
 from history_manager import HistoryManager
@@ -160,7 +161,11 @@ def render_dashboard() -> None:
 
     # --- Fundamental Metrics & Data Points ---
     with st.spinner(f"Loading fundamentals for {symbol}..."):
-        fundamentals = scheduler.data_fetcher.fetch_stock_fundamentals(yf_ticker)
+        fetcher = getattr(scheduler, "data_fetcher", None) or DataFetcher()
+        if hasattr(fetcher, "fetch_stock_fundamentals"):
+            fundamentals = fetcher.fetch_stock_fundamentals(yf_ticker)
+        else:
+            fundamentals = DataFetcher().fetch_stock_fundamentals(yf_ticker)
     
     cmp = stock_df["Close"].iloc[-1] if not stock_df.empty else 0.0
     st.subheader(f"📊 {symbol} Key Data Points & Valuation")
