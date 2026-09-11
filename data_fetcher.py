@@ -260,7 +260,63 @@ class DataFetcher:
             
             high52 = info.get("fiftyTwoWeekHigh")
             low52 = info.get("fiftyTwoWeekLow")
-            
+            cmp_raw = info.get("currentPrice") or info.get("regularMarketPrice")
+
+            # Calculate valuation assessment
+            # Scoring factors:
+            # 1. P/E vs typical baseline (under 18 attractive, 18-32 fair, >32 premium/growth)
+            # 2. P/B vs baseline (under 2.5 attractive, 2.5-5.0 fair, >5.0 premium)
+            # 3. 52-week range percentile (position between 52W low and 52W high)
+            valuation_status = "FAIR PRICED"
+            valuation_badge = "🟡 FAIR PRICED"
+            valuation_details = []
+
+            pe_val = float(pe) if pe and pe > 0 else None
+            pb_val = float(pb) if pb and pb > 0 else None
+            range_pct = None
+            if cmp_raw and high52 and low52 and (high52 > low52):
+                range_pct = max(0.0, min(1.0, (cmp_raw - low52) / (high52 - low52)))
+
+            score = 0  # <0 towards underpriced, >0 towards overpriced
+            if pe_val is not None:
+                if pe_val < 18.0:
+                    score -= 1
+                    valuation_details.append(f"P/E ({pe_val:.1f}x) is below typical market average (<18x)")
+                elif pe_val > 35.0:
+                    score += 1
+                    valuation_details.append(f"P/E ({pe_val:.1f}x) trades at a premium (>35x)")
+                else:
+                    valuation_details.append(f"P/E ({pe_val:.1f}x) is within reasonable range (18-35x)")
+
+            if pb_val is not None:
+                if pb_val < 2.0:
+                    score -= 1
+                    valuation_details.append(f"P/B ({pb_val:.1f}x) offers tangible asset cushion (<2.0x)")
+                elif pb_val > 6.0:
+                    score += 1
+                    valuation_details.append(f"P/B ({pb_val:.1f}x) reflects high asset premium (>6.0x)")
+
+            if range_pct is not None:
+                if range_pct < 0.25:
+                    score -= 1
+                    valuation_details.append(f"Price is in lower quartile of 52W range ({range_pct*100:.0f}%)")
+                elif range_pct > 0.85:
+                    score += 1
+                    valuation_details.append(f"Price is near 52W high ({range_pct*100:.0f}% of range)")
+
+            if score <= -1:
+                valuation_status = "UNDERPRICED"
+                valuation_badge = "🟢 UNDERPRICED (Attractive Valuation)"
+                valuation_rationale = "Valuation metrics suggest stock is trading at an attractive discount relative to earnings, assets, or historical range. " + " • ".join(valuation_details)
+            elif score >= 2:
+                valuation_status = "OVERPRICED"
+                valuation_badge = "🔴 OVERPRICED (Premium Valuation)"
+                valuation_rationale = "Valuation metrics reflect premium pricing or high growth expectations baked into price. " + " • ".join(valuation_details)
+            else:
+                valuation_status = "FAIR PRICED"
+                valuation_badge = "🟡 FAIR PRICED (Fair Value)"
+                valuation_rationale = "Valuation metrics align closely with historical and market baseline norms. " + " • ".join(valuation_details)
+
             return {
                 "pe_ratio": pe_str,
                 "price_to_book": pb_str,
@@ -271,13 +327,23 @@ class DataFetcher:
                 "fifty_two_week_low": f"₹{low52:,.2f}" if low52 else "N/A",
                 "sector": info.get("sector", "N/A"),
                 "industry": info.get("industry", "N/A"),
+                "valuation_status": valuation_status,
+                "valuation_badge": valuation_badge,
+                "valuation_rationale": valuation_rationale,
+                "raw_pe": pe_val,
+                "raw_pb": pb_val,
+                "raw_range_pct": range_pct,
             }
         except Exception as e:
             logger.warning(f"Could not fetch fundamentals for {ticker}: {e}")
             return {
                 "pe_ratio": "N/A", "price_to_book": "N/A", "market_cap": "N/A",
                 "eps": "N/A", "dividend_yield": "N/A", "fifty_two_week_high": "N/A",
-                "fifty_two_week_low": "N/A", "sector": "N/A", "industry": "N/A"
+                "fifty_two_week_low": "N/A", "sector": "N/A", "industry": "N/A",
+                "valuation_status": "FAIR PRICED",
+                "valuation_badge": "🟡 FAIR PRICED (Neutral Data)",
+                "valuation_rationale": "Insufficient fundamental data to establish over/under-pricing. Evaluated as Neutral/Fair.",
+                "raw_pe": None, "raw_pb": None, "raw_range_pct": None,
             }
 
     def is_market_open(self) -> bool:
