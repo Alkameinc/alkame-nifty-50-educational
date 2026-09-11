@@ -97,6 +97,12 @@ class Event:
         return self.confidence_in_scope < low_confidence_threshold
 
 
+@dataclass
+class EventBatchResult:
+    events: List[Event]
+    status: str  # EVENTS_AVAILABLE, NO_EVENTS, EVENT_SOURCE_UNAVAILABLE, EVENT_SOURCE_PARTIAL
+    errors: List[str] = field(default_factory=list)
+
 class EventClassifier:
     """
     Converts raw items from macro_calendar.py, corporate_events_fetcher.py,
@@ -300,21 +306,63 @@ class EventClassifier:
         macro_events: Optional[List[MacroEvent]] = None,
         corporate_events: Optional[List[dict]] = None,
         news_articles: Optional[List[dict]] = None,
-    ) -> List[Event]:
+    ) -> EventBatchResult:
         """Classify a mixed batch from all three sources into one unified Event list."""
         results: List[Event] = []
-        try:
-            for m in (macro_events or []):
-                results.append(self.classify_macro_event(m))
-            for c in (corporate_events or []):
-                results.append(self.classify_corporate_event(c))
-            for n in (news_articles or []):
-                results.append(self.classify_news_event(n))
+        errors: List[str] = []
+        
+        sources_total = 3
+        sources_unavailable = 0
+
+        # Note: If the argument is explicitly passed as an empty list [], it means
+        # the source was available but yielded no events. If it is None, the source
+        # failed or was unavailable.
+        if macro_events is None:
+            sources_unavailable += 1
+            errors.append("Macro events source unavailable")
+        else:
+            for m in macro_events:
+                try:
+                    results.append(self.classify_macro_event(m))
+                except Exception as e:
+                    errors.append(f"Error classifying macro event: {e}")
+
+        if corporate_events is None:
+            sources_unavailable += 1
+            errors.append("Corporate events source unavailable")
+        else:
+            for c in corporate_events:
+                try:
+                    results.append(self.classify_corporate_event(c))
+                except Exception as e:
+                    errors.append(f"Error classifying corporate event: {e}")
+
+        if news_articles is None:
+            sources_unavailable += 1
+            errors.append("News articles source unavailable")
+        else:
+            for n in news_articles:
+                try:
+                    results.append(self.classify_news_event(n))
+                except Exception as e:
+                    errors.append(f"Error classifying news event: {e}")
+
+        if sources_unavailable == sources_total:
+            status = "EVENT_SOURCE_UNAVAILABLE"
+        elif sources_unavailable > 0:
+            status = "EVENT_SOURCE_PARTIAL"
+        elif len(results) == 0:
+            status = "NO_EVENTS"
+        else:
+            status = "EVENTS_AVAILABLE"
+
+        if errors:
+            logger.error(f"Event classification encountered errors: {errors}")
+            health_registry.report("event_classifier", ok=(status != "EVENT_SOURCE_UNAVAILABLE"), detail="Errors in classify_batch", error=str(errors))
+        else:
             health_registry.report("event_classifier", ok=True)
-        except Exception as e:
-            logger.error(f"Failed classifying event batch: {e}")
-            health_registry.report("event_classifier", ok=False, detail="Failed classifying event batch", error=str(e))
-        return results
+
+        return EventBatchResult(events=results, status=status, errors=errors)
 
 
 # ---------------------------------------------------------------------------
@@ -364,11 +412,12 @@ if __name__ == "__main__":
         assert news_plain_event.affected_tickers == ["TCS"]
 
         # Test 5: batch classification combines all sources correctly
-        batch = classifier.classify_batch(
+        batch_res = classifier.classify_batch(
             macro_events=[rbi_macro], corporate_events=[corp_raw], news_articles=[news_crude, news_plain],
         )
-        print(f"Batch classification produced {len(batch)} unified events (expected 4)")
-        assert len(batch) == 4
+        print(f"Batch classification produced {len(batch_res.events)} unified events (expected 4)")
+        assert len(batch_res.events) == 4
+        assert batch_res.status == "EVENTS_AVAILABLE"
 
         print("STATUS: PASS")
         logger.info("event_classifier.py self-test passed.")

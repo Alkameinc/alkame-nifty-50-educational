@@ -37,6 +37,8 @@ class PredictionSignal:
     horizon: str
     action: str                                  # BUY | SELL | HOLD (final, after all safety gates)
     model_predicted_class: str                   # UP | DOWN | FLAT (raw ensemble lean, before gating)
+    model_version: str
+    feature_version: str
     raw_confidence: float
     risk_adjusted_confidence: float
     calibrated_confidence: Optional[float]        # None if calibration not yet proven — must not be displayed as a number
@@ -188,13 +190,25 @@ class Predictor:
             ensemble_pred: EnsemblePrediction = ensemble_predictions[0]
 
             # --- Step 4: classify events, filter to this symbol and horizon ---
-            all_events = self.event_classifier.classify_batch(
+            event_batch_result = self.event_classifier.classify_batch(
                 macro_events=macro_events, corporate_events=corporate_events, news_articles=news_articles,
             )
+            
+            if event_batch_result.status == "EVENT_SOURCE_UNAVAILABLE":
+                return self._suppressed_signal(symbol, now, "Event sources are completely unavailable — failing closed for safety.", horizon=horizon)
+
+            all_events = event_batch_result.events
             model_bars = HORIZON_CONFIG[horizon]["horizon_bars"]
+            # Use horizon rank (index in ALL_HORIZONS, ordered shortest→longest)
+            # to filter events: include events whose impact_horizon is at least
+            # as long as the prediction horizon.  Raw bar counts are NOT comparable
+            # across different bar intervals (5-min vs 1-day).
+            from config import ALL_HORIZONS
+            horizon_rank = ALL_HORIZONS.index(horizon) if horizon in ALL_HORIZONS else 0
             contributing_events = [
                 e for e in all_events 
-                if symbol in e.affected_tickers and HORIZON_CONFIG.get(e.impact_horizon, {}).get("horizon_bars", 0) >= model_bars
+                if symbol in e.affected_tickers
+                and (ALL_HORIZONS.index(e.impact_horizon) if e.impact_horizon in ALL_HORIZONS else -1) >= horizon_rank
             ]
 
             # --- Step 5: global risk adjustment ---
@@ -289,9 +303,11 @@ class Predictor:
             # Adjust for sentiment
             sentiment_boost = 0.0
             if contributing_events:
-                avg_sent = sum(e.sentiment_score for e in contributing_events) / len(contributing_events)
-                if (final_action == ACTION_BUY and avg_sent > 0.3) or (final_action == ACTION_SELL and avg_sent < -0.3):
-                    sentiment_boost = 0.5
+                scored_events = [e for e in contributing_events if e.sentiment_score is not None]
+                if scored_events:
+                    avg_sent = sum(e.sentiment_score for e in scored_events) / len(scored_events)
+                    if (final_action == ACTION_BUY and avg_sent > 0.3) or (final_action == ACTION_SELL and avg_sent < -0.3):
+                        sentiment_boost = 0.5
             
             final_peak_mult = min(base_multiplier + sentiment_boost, 10.0) # Cap at 10x ATR
 
@@ -313,6 +329,8 @@ class Predictor:
             sig = PredictionSignal(
                 symbol=symbol, timestamp=now, horizon=horizon, action=final_action,
                 model_predicted_class=ensemble_pred.predicted_class,
+                model_version=ensemble_pred.model_version,
+                feature_version=ensemble_pred.feature_version,
                 raw_confidence=ensemble_pred.confidence, risk_adjusted_confidence=risk_adjusted_confidence,
                 calibrated_confidence=calibrated_confidence, agreement_fraction=ensemble_pred.agreement_fraction,
                 downside_summary=downside_summary, upside_summary=upside_summary, reasoning=reasoning,
@@ -339,8 +357,8 @@ class Predictor:
         macro_events: Optional[List] = None,
         corporate_events: Optional[List[dict]] = None,
         news_articles: Optional[List[dict]] = None,
-        calibration_result: Optional[CalibrationResult] = None,
-        edge_check_result: Optional[EdgeCheckResult] = None,
+        calibration_results: Optional[Dict[str, 'CalibrationResult']] = None,
+        edge_check_results: Optional[Dict[str, 'EdgeCheckResult']] = None,
     ):
         for h in horizons:
             # If horizon uses daily data, fetch it on the fly
@@ -356,10 +374,13 @@ class Predictor:
                     h_stock_df = daily_stock
                     h_index_df = daily_index
 
+            h_calib = calibration_results.get(h) if calibration_results else None
+            h_edge = edge_check_results.get(h) if edge_check_results else None
+
             sig = self.generate_signal(
                 symbol=symbol, stock_df=h_stock_df, index_df=h_index_df, macro_events=macro_events,
                 news_articles=news_articles,
-                calibration_result=calibration_result, edge_check_result=edge_check_result, horizon=h
+                calibration_result=h_calib, edge_check_result=h_edge, horizon=h
             )
             yield sig
 
@@ -372,8 +393,8 @@ class Predictor:
         macro_events: Optional[List] = None,
         corporate_events: Optional[List[dict]] = None,
         news_articles: Optional[List[dict]] = None,
-        calibration_result: Optional[CalibrationResult] = None,
-        edge_check_result: Optional[EdgeCheckResult] = None,
+        calibration_results: Optional[Dict[str, 'CalibrationResult']] = None,
+        edge_check_results: Optional[Dict[str, 'EdgeCheckResult']] = None,
     ) -> MultiHorizonSignal:
         signals = {}
         for h in horizons:
@@ -390,10 +411,13 @@ class Predictor:
                     h_stock_df = daily_stock
                     h_index_df = daily_index
 
+            h_calib = calibration_results.get(h) if calibration_results else None
+            h_edge = edge_check_results.get(h) if edge_check_results else None
+
             sig = self.generate_signal(
                 symbol=symbol, stock_df=h_stock_df, index_df=h_index_df, macro_events=macro_events,
                 news_articles=news_articles,
-                calibration_result=calibration_result, edge_check_result=edge_check_result, horizon=h
+                calibration_result=h_calib, edge_check_result=h_edge, horizon=h
             )
             signals[h] = sig
 
@@ -420,6 +444,7 @@ class Predictor:
     def _suppressed_signal(symbol: str, timestamp: datetime, reason: str, horizon: str = HORIZON_INTRADAY) -> PredictionSignal:
         return PredictionSignal(
             symbol=symbol, timestamp=timestamp, horizon=horizon, action=ACTION_HOLD, model_predicted_class="FLAT",
+            model_version="UNKNOWN", feature_version="UNKNOWN",
             raw_confidence=0.0, risk_adjusted_confidence=0.0, calibrated_confidence=None, agreement_fraction=0.0,
             downside_summary=f"Signal could not be safely produced: {reason}",
             upside_summary="Not applicable.", reasoning=[f"Forced HOLD: {reason}"],
@@ -512,10 +537,11 @@ if __name__ == "__main__":
         # Include a macro event (RBI) that should NOT affect RELIANCE's Energy sector, plus a corporate event that SHOULD
         rbi_event = MacroEvent(event_date=date.today(), event_type="RBI_POLICY", label="RBI MPC Policy Decision",
                                 scope="MARKET", sector_hint="ALL", impact_window_days_before=1, impact_window_days_after=1)
+        corp_event = {"symbol": "RELIANCE", "category": "CORPORATE_ANNOUNCEMENT", "raw": {"subject": "Board Meeting Intimation"}}
 
         signal_proven = predictor.generate_signal(
             test_symbol, stock_df, index_df,
-            macro_events=[rbi_event], news_articles=[],
+            macro_events=[rbi_event], corporate_events=[corp_event], news_articles=[],
             calibration_result=good_calibration, edge_check_result=positive_edge,
         )
         print(f"Scenario B (proven calibration + edge) -> action={signal_proven.action}, "
@@ -554,7 +580,9 @@ if __name__ == "__main__":
         
         # Scenario D: Multi-horizon signal
         multi_sig = predictor.generate_multi_horizon_signal(
-            test_symbol, [HORIZON_INTRADAY], stock_df, index_df, calibration_result=bad_calibration, edge_check_result=no_edge
+            test_symbol, [HORIZON_INTRADAY], stock_df, index_df,
+            calibration_results={HORIZON_INTRADAY: bad_calibration},
+            edge_check_results={HORIZON_INTRADAY: no_edge},
         )
         print(f"Scenario D (Multi-horizon) -> primary_action={multi_sig.primary_action}, primary_horizon={multi_sig.primary_horizon}")
         assert multi_sig.primary_action == ACTION_HOLD
