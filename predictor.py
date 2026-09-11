@@ -167,6 +167,7 @@ class Predictor:
             if data_stale:
                 return PredictionSignal(
                     symbol=symbol, timestamp=now, horizon=horizon, action=ACTION_HOLD, model_predicted_class="FLAT",
+                    model_version="UNKNOWN", feature_version="UNKNOWN",
                     raw_confidence=0.0, risk_adjusted_confidence=0.0, calibrated_confidence=None,
                     agreement_fraction=0.0,
                     downside_summary="Data for this stock is stale — no reliable signal can be produced right now.",
