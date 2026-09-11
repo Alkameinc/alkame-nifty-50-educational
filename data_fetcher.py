@@ -236,6 +236,50 @@ class DataFetcher:
         """Fetch the NIFTY 50 index itself — used as the baseline for edge/outperformance checks."""
         return self.fetch_ohlcv(NIFTY_INDEX_TICKER, interval=interval, period=period)
 
+    def fetch_stock_fundamentals(self, ticker: str) -> Dict[str, object]:
+        """Fetch fundamental metrics (P/E, P/B, Market Cap, EPS, Div Yield, 52W High/Low) with safe fallbacks."""
+        try:
+            t = yf.Ticker(ticker)
+            info = t.info or {}
+            
+            # Format Market Cap to INR Crores
+            mcap = info.get("marketCap")
+            mcap_cr = f"₹{mcap / 1e7:,.2f} Cr" if mcap else "N/A"
+            
+            pe = info.get("trailingPE") or info.get("forwardPE")
+            pe_str = f"{pe:.2f}" if pe else "N/A"
+            
+            pb = info.get("priceToBook")
+            pb_str = f"{pb:.2f}" if pb else "N/A"
+            
+            eps = info.get("trailingEps")
+            eps_str = f"₹{eps:.2f}" if eps else "N/A"
+            
+            div = info.get("dividendYield")
+            div_str = f"{div * 100:.2f}%" if div is not None else "N/A"
+            
+            high52 = info.get("fiftyTwoWeekHigh")
+            low52 = info.get("fiftyTwoWeekLow")
+            
+            return {
+                "pe_ratio": pe_str,
+                "price_to_book": pb_str,
+                "market_cap": mcap_cr,
+                "eps": eps_str,
+                "dividend_yield": div_str,
+                "fifty_two_week_high": f"₹{high52:,.2f}" if high52 else "N/A",
+                "fifty_two_week_low": f"₹{low52:,.2f}" if low52 else "N/A",
+                "sector": info.get("sector", "N/A"),
+                "industry": info.get("industry", "N/A"),
+            }
+        except Exception as e:
+            logger.warning(f"Could not fetch fundamentals for {ticker}: {e}")
+            return {
+                "pe_ratio": "N/A", "price_to_book": "N/A", "market_cap": "N/A",
+                "eps": "N/A", "dividend_yield": "N/A", "fifty_two_week_high": "N/A",
+                "fifty_two_week_low": "N/A", "sector": "N/A", "industry": "N/A"
+            }
+
     def is_market_open(self) -> bool:
         from market_calendar import is_market_open as _is_open
         return _is_open()

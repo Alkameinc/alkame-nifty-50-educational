@@ -158,6 +158,30 @@ def render_dashboard() -> None:
         st.error("Signal could not be generated for this stock right now.")
         return
 
+    # --- Fundamental Metrics & Data Points ---
+    with st.spinner(f"Loading fundamentals for {symbol}..."):
+        fundamentals = scheduler.data_fetcher.fetch_stock_fundamentals(yf_ticker)
+    
+    cmp = stock_df["Close"].iloc[-1] if not stock_df.empty else 0.0
+    st.subheader(f"📊 {symbol} Key Data Points & Valuation")
+    
+    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+    with col_f1:
+        st.metric("Current Price (CMP)", f"₹{cmp:,.2f}")
+        st.metric("P/E Ratio", fundamentals["pe_ratio"])
+    with col_f2:
+        st.metric("Market Cap", fundamentals["market_cap"])
+        st.metric("Price / Book (P/B)", fundamentals["price_to_book"])
+    with col_f3:
+        st.metric("52-Week High", fundamentals["fifty_two_week_high"])
+        st.metric("Trailing EPS", fundamentals["eps"])
+    with col_f4:
+        st.metric("52-Week Low", fundamentals["fifty_two_week_low"])
+        st.metric("Dividend Yield", fundamentals["dividend_yield"])
+        
+    st.caption(f"Sector: **{fundamentals['sector']}** | Industry: **{fundamentals['industry']}**")
+    st.divider()
+
     # Extract primary/intraday prediction signal if MultiHorizonSignal is returned
     if isinstance(signal, MultiHorizonSignal):
         multi_sig = signal
