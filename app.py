@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 PAGE_TITLE = "Alkame-Nifty50"
 ACTION_EMOJI = {ACTION_BUY: "\U0001F7E2", ACTION_SELL: "\U0001F534", ACTION_HOLD: "\U0001F7E1"}
-RISK_LEVEL_TO_BANNER_STYLE = {"NORMAL": "success", "ELEVATED": "warning", "CRISIS": "error"}
+RISK_LEVEL_TO_BANNER_STYLE = {"NORMAL": "success", "ELEVATED": "warning", "CRISIS": "error", "UNAVAILABLE": "warning"}
 OVERRIDE_ACTIONS = [ACTION_BUY, ACTION_SELL, ACTION_HOLD]
 
 

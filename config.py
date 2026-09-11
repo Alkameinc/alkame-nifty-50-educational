@@ -65,6 +65,38 @@ def configure_logging(log_filename: str = "app.log", level: int = logging.INFO) 
 MARKETAUX_API_KEY = os.environ.get("MARKETAUX_API_KEY", "")
 IMD_API_KEY = os.environ.get("IMD_API_KEY", "")
 
+# API Authentication & Authorization (P0-001 & P0-002)
+API_AUTH_ENABLED = os.environ.get("ALKAME_API_AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
+DEFAULT_DEV_API_KEY = "dev-alkame-key-insecure"
+API_ADMIN_KEY = os.environ.get("ALKAME_ADMIN_KEY", "dev-alkame-admin-key")
+API_READONLY_KEY = os.environ.get("ALKAME_READONLY_KEY", "dev-alkame-readonly-key")
+
+# Recognized keys mapped to roles: ADMIN, READ_ONLY
+API_KEYS_ROLE_MAP = {
+    API_ADMIN_KEY: "ADMIN",
+    API_READONLY_KEY: "READ_ONLY",
+    DEFAULT_DEV_API_KEY: "ADMIN",
+}
+
+_custom_admin_keys = [k.strip() for k in os.environ.get("ALKAME_ADMIN_KEYS", "").split(",") if k.strip()]
+for k in _custom_admin_keys:
+    API_KEYS_ROLE_MAP[k] = "ADMIN"
+
+_custom_readonly_keys = [k.strip() for k in os.environ.get("ALKAME_READONLY_KEYS", "").split(",") if k.strip()]
+for k in _custom_readonly_keys:
+    API_KEYS_ROLE_MAP[k] = "READ_ONLY"
+
+# CORS configuration: explicit allowlist, no wildcard with credentials
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "ALKAME_CORS_ORIGINS",
+        "http://localhost:8501,http://127.0.0.1:8501,http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000"
+    ).split(",")
+    if origin.strip()
+]
+CORS_ALLOW_CREDENTIALS = True
+
 REQUIRED_ENV_VARS = ["MARKETAUX_API_KEY"]   # IMD key is optional (monsoon feature degrades gracefully without it)
 
 

@@ -1,10 +1,21 @@
 # 1. Standard library imports
 import json
 import logging
+import uuid
+import hashlib
+import platform
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+def _get_git_commit_sha() -> str:
+    try:
+        sha = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, timeout=2).decode().strip()
+        return sha
+    except Exception:
+        return "UNKNOWN"
 
 # 2. Third-party imports
 import numpy as np
@@ -156,10 +167,11 @@ class EnsembleManager:
                     ensemble_accuracy=0.0, mean_agreement=0.0, success=False, error=msg,
                 )
 
-            X_train, X_test, y_train, y_test = self.model_trainer.time_based_split(X, y)
+            horizon_bars = HORIZON_CONFIG.get(horizon, {}).get("horizon_bars", 0)
+            X_train, X_test, y_train, y_test = self.model_trainer.time_based_split(X, y, purge_window=horizon_bars)
             if len(X_train) > 0 and len(X_test) > 0:
-                assert X_train.index.max() <= X_test.index.min(), (
-                    "Time-based split violated: a training row is timestamped after a test row!"
+                assert X_train.index.max() < X_test.index.min(), (
+                    "Time-based split violated: a training row is timestamped at or after a test row!"
                 )
 
             estimators = self._build_base_estimators()
@@ -196,8 +208,17 @@ class EnsembleManager:
             agreement_fraction_per_row = agreement_counts / len(model_names)
             mean_agreement = float(np.mean(agreement_fraction_per_row))
 
-            self._save_ensemble(symbol, fitted_models, feature_columns, per_model_accuracy,
-                                 ensemble_accuracy, mean_agreement, horizon=horizon)
+            data_start = str(X_train.index.min()) if len(X_train) > 0 else None
+            data_end = str(X_train.index.max()) if len(X_train) > 0 else None
+
+            self._save_ensemble(
+                symbol=symbol, fitted_models=fitted_models, feature_columns=feature_columns,
+                per_model_accuracy=per_model_accuracy, ensemble_accuracy=ensemble_accuracy,
+                mean_agreement=mean_agreement, horizon=horizon,
+                training_sample_count=len(X_train),
+                training_data_start=data_start,
+                training_data_end=data_end,
+            )
 
             health_registry.report("ensemble_manager", ok=True, detail=f"Trained ensemble for {symbol}")
             return EnsembleTrainingResult(
@@ -223,24 +244,53 @@ class EnsembleManager:
         return MODELS_DIR / f"{symbol}_{horizon}{ENSEMBLE_METADATA_SUFFIX}"
 
     def _save_ensemble(
-        self, symbol: str, fitted_models: Dict[str, object], feature_columns: List[str],
-        per_model_accuracy: Dict[str, float], ensemble_accuracy: float, mean_agreement: float,
-        horizon: str = HORIZON_INTRADAY
+        self,
+        symbol: str,
+        fitted_models: Dict[str, object],
+        feature_columns: List[str],
+        per_model_accuracy: Dict[str, float],
+        ensemble_accuracy: float,
+        mean_agreement: float,
+        horizon: str = HORIZON_INTRADAY,
+        training_sample_count: int = 0,
+        training_data_start: Optional[str] = None,
+        training_data_end: Optional[str] = None,
     ) -> None:
         try:
             ensure_directories()
             joblib.dump({"models": fitted_models, "classes": LABEL_CLASSES}, self._ensemble_path(symbol, horizon))
+
+            schema_str = ",".join(sorted(feature_columns))
+            schema_hash = hashlib.sha256(schema_str.encode("utf-8")).hexdigest()
+            model_id = str(uuid.uuid4())
+            commit_sha = _get_git_commit_sha()
+
+            import sklearn
             metadata = {
+                "model_id": model_id,
                 "symbol": symbol,
                 "horizon": horizon,
-                "model_version": "v1.0",
+                "model_version": "v1.1",
                 "feature_version": "v1.0",
                 "trained_at": datetime.now().isoformat(),
+                "code_commit_sha": commit_sha,
+                "training_sample_count": training_sample_count,
+                "training_data_start": training_data_start,
+                "training_data_end": training_data_end,
+                "training_seed": MODEL_RANDOM_SEED,
                 "feature_columns": feature_columns,
+                "feature_schema_hash": schema_hash,
                 "label_classes": LABEL_CLASSES,
                 "per_model_accuracy": per_model_accuracy,
                 "ensemble_accuracy": ensemble_accuracy,
                 "mean_agreement": mean_agreement,
+                "environment": {
+                    "python_version": platform.python_version(),
+                    "sklearn_version": sklearn.__version__,
+                    "joblib_version": joblib.__version__,
+                    "numpy_version": np.__version__,
+                    "pandas_version": pd.__version__,
+                },
             }
             f = None
             try:
@@ -249,7 +299,7 @@ class EnsembleManager:
             finally:
                 if f is not None:
                     f.close()
-            logger.info(f"Saved ensemble + metadata for {symbol} ({horizon}) to {MODELS_DIR}")
+            logger.info(f"Saved ensemble (id={model_id[:8]}) + rich metadata for {symbol} ({horizon}) to {MODELS_DIR}")
         except Exception as e:
             logger.error(f"Failed saving ensemble for {symbol}: {e}")
             raise

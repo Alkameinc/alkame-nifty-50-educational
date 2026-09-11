@@ -249,48 +249,57 @@ class ModelTrainer:
             return None
 
     # -----------------------------------------------------------------
-    # Time-based split (never shuffled)
+    # Time-based split (never shuffled, purged boundary)
     # -----------------------------------------------------------------
     @staticmethod
     def time_based_split(
-        X: pd.DataFrame, y: pd.Series, test_fraction: float = TIME_SERIES_SPLIT_TEST_FRACTION
+        X: pd.DataFrame,
+        y: pd.Series,
+        test_fraction: float = TIME_SERIES_SPLIT_TEST_FRACTION,
+        purge_window: int = 0,
     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
         """
-        Strictly chronological split: the earliest (1 - test_fraction) of rows
-        become the training set, the most recent test_fraction become the
-        test set. No shuffling, ever — X and y are assumed to already be
-        sorted by time (which they are, since they come from a DatetimeIndex).
+        Strictly chronological split with boundary purging (P0-003):
+        The most recent test_fraction rows become the test set (from split_idx to end).
+        To eliminate forward-label leakage where training labels peek into test-interval prices,
+        the training set ends at (split_idx - purge_window), discarding the purge window rows.
         """
         n = len(X)
         split_idx = int(n * (1 - test_fraction))
-        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-        y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+        train_end_idx = max(0, split_idx - purge_window) if purge_window > 0 else split_idx
+        X_train, X_test = X.iloc[:train_end_idx], X.iloc[split_idx:]
+        y_train, y_test = y.iloc[:train_end_idx], y.iloc[split_idx:]
         return X_train, X_test, y_train, y_test
 
     @staticmethod
     def walk_forward_split(
-        X: pd.DataFrame, y: pd.Series, n_splits: int = 3, min_train_samples: int = 200
+        X: pd.DataFrame,
+        y: pd.Series,
+        n_splits: int = 3,
+        min_train_samples: int = 200,
+        purge_window: int = 0,
     ):
         """
         Generates expanding chronological train/validation/test folds for walk-forward validation.
-        Yields (fold_idx, X_train, X_test, y_train, y_test) tuples.
-        Prevents lookahead leakage by strictly preserving chronological ordering across windows.
+        Applies a purge window (test_start - purge_window) to prevent forward-looking label leakage
+        across each fold boundary (P0-003).
         """
         n = len(X)
         if n < min_train_samples + n_splits * 20:
             # Fall back to single split if dataset is small
-            X_tr, X_te, y_tr, y_te = ModelTrainer.time_based_split(X, y)
+            X_tr, X_te, y_tr, y_te = ModelTrainer.time_based_split(X, y, purge_window=purge_window)
             yield 0, X_tr, X_te, y_tr, y_te
             return
 
         test_size = int((n - min_train_samples) / n_splits)
         for i in range(n_splits):
-            train_end = min_train_samples + i * test_size
-            test_end = min(n, train_end + test_size)
+            test_start = min_train_samples + i * test_size
+            test_end = min(n, test_start + test_size)
+            train_end = max(0, test_start - purge_window) if purge_window > 0 else test_start
             X_train = X.iloc[:train_end]
-            X_test = X.iloc[train_end:test_end]
+            X_test = X.iloc[test_start:test_end]
             y_train = y.iloc[:train_end]
-            y_test = y.iloc[train_end:test_end]
+            y_test = y.iloc[test_start:test_end]
             yield i, X_train, X_test, y_train, y_test
 
     # -----------------------------------------------------------------
@@ -403,13 +412,14 @@ class ModelTrainer:
                     class_report={}, success=False, error=msg,
                 )
 
-            X_train, X_test, y_train, y_test = self.time_based_split(X, y)
+            horizon_bars = HORIZON_CONFIG.get(horizon, {}).get("horizon_bars", 0)
+            X_train, X_test, y_train, y_test = self.time_based_split(X, y, purge_window=horizon_bars)
 
-            # Hard runtime guarantee that the split is genuinely chronological —
+            # Hard runtime guarantee that the split is genuinely chronological and purged —
             # every training timestamp must precede every test timestamp.
             if len(X_train) > 0 and len(X_test) > 0:
-                assert X_train.index.max() <= X_test.index.min(), (
-                    "Time-based split violated: a training row is timestamped after a test row!"
+                assert X_train.index.max() < X_test.index.min(), (
+                    "Time-based split violated: a training row is timestamped at or after a test row!"
                 )
 
             model = self.train(X_train, y_train)

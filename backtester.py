@@ -88,7 +88,8 @@ class Backtester:
                     is_live_worthy=False, success=False, error="Dataset preparation failed for backtest.",
                 )
             X, y, _ = prepared
-            _, X_test, _, y_test = self.ensemble_manager.model_trainer.time_based_split(X, y)
+            horizon_bars = HORIZON_CONFIG.get(horizon, {}).get("horizon_bars", 0)
+            _, X_test, _, y_test = self.ensemble_manager.model_trainer.time_based_split(X, y, purge_window=horizon_bars)
 
             if len(X_test) == 0:
                 return BacktestResult(

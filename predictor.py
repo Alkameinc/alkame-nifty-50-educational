@@ -331,6 +331,11 @@ class Predictor:
             risk_multiplier = self.global_risk_monitor.get_confidence_multiplier(sector, risk_reading)
             risk_adjusted_confidence = ensemble_pred.confidence * risk_multiplier
 
+            if risk_reading.risk_level == "UNAVAILABLE":
+                suppression_reasons.append(
+                    "Global risk monitor data is unavailable — operating in conservative mode (fail-closed)."
+                )
+
             # --- Step 6: validation gate (calibration + edge) ---
             if calibration_result is None or edge_check_result is None:
                 logger.warning(

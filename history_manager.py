@@ -249,8 +249,15 @@ class HistoryManager:
             if conn is not None:
                 conn.close()
 
-    def get_predictions(self, symbol: Optional[str] = None, horizon: Optional[str] = None, limit: int = 200,
-                         only_unresolved: bool = False, model_version: Optional[str] = None) -> List[PredictionRecord]:
+    def get_predictions(
+        self,
+        symbol: Optional[str] = None,
+        horizon: Optional[str] = None,
+        limit: int = 200,
+        only_unresolved: bool = False,
+        model_version: Optional[str] = None,
+        feature_version: Optional[str] = None,
+    ) -> List[PredictionRecord]:
         conn = None
         try:
             conn = self._get_connection()
@@ -268,6 +275,9 @@ class HistoryManager:
             if model_version:
                 query += " AND model_version = ?"
                 params.append(model_version)
+            if feature_version:
+                query += " AND feature_version = ?"
+                params.append(feature_version)
             if only_unresolved:
                 query += " AND outcome_resolved = 0"
             query += " ORDER BY id DESC LIMIT ?"
@@ -300,15 +310,29 @@ class HistoryManager:
             if conn is not None:
                 conn.close()
 
-    def build_calibration_dataset(self, symbol: Optional[str] = None, horizon: Optional[str] = None, model_version: Optional[str] = None) -> pd.DataFrame:
+    def build_calibration_dataset(
+        self,
+        symbol: Optional[str] = None,
+        horizon: Optional[str] = None,
+        model_version: Optional[str] = None,
+        feature_version: Optional[str] = None,
+    ) -> pd.DataFrame:
         """
         Builds the (confidence, correct) DataFrame that runtime_validator.py's
         compute_calibration() expects, from REAL resolved predictions. Uses
         risk_adjusted_confidence (the confidence actually shown pre-calibration)
         rather than raw_confidence, since that's what's being calibrated.
+        Isolates calibration strictly by symbol, horizon, model_version, and feature_version.
         """
         try:
-            records = self.get_predictions(symbol=symbol, horizon=horizon, model_version=model_version, limit=100_000, only_unresolved=False)
+            records = self.get_predictions(
+                symbol=symbol,
+                horizon=horizon,
+                model_version=model_version,
+                feature_version=feature_version,
+                limit=100_000,
+                only_unresolved=False,
+            )
             resolved = [
                 r for r in records
                 if r.outcome_resolved and r.outcome_correct is not None
