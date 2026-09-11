@@ -267,6 +267,32 @@ class ModelTrainer:
         y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
         return X_train, X_test, y_train, y_test
 
+    @staticmethod
+    def walk_forward_split(
+        X: pd.DataFrame, y: pd.Series, n_splits: int = 3, min_train_samples: int = 200
+    ):
+        """
+        Generates expanding chronological train/validation/test folds for walk-forward validation.
+        Yields (fold_idx, X_train, X_test, y_train, y_test) tuples.
+        Prevents lookahead leakage by strictly preserving chronological ordering across windows.
+        """
+        n = len(X)
+        if n < min_train_samples + n_splits * 20:
+            # Fall back to single split if dataset is small
+            X_tr, X_te, y_tr, y_te = ModelTrainer.time_based_split(X, y)
+            yield 0, X_tr, X_te, y_tr, y_te
+            return
+
+        test_size = int((n - min_train_samples) / n_splits)
+        for i in range(n_splits):
+            train_end = min_train_samples + i * test_size
+            test_end = min(n, train_end + test_size)
+            X_train = X.iloc[:train_end]
+            X_test = X.iloc[train_end:test_end]
+            y_train = y.iloc[:train_end]
+            y_test = y.iloc[train_end:test_end]
+            yield i, X_train, X_test, y_train, y_test
+
     # -----------------------------------------------------------------
     # Train / evaluate / persist
     # -----------------------------------------------------------------

@@ -3,7 +3,7 @@ import logging
 import time as time_module
 from dataclasses import dataclass
 from datetime import datetime, time as dt_time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 from zoneinfo import ZoneInfo
 
 # 2. Third-party imports
@@ -53,6 +53,15 @@ class LiveWorthinessSnapshot:
     edge_check_result: EdgeCheckResult
     calibration_result: CalibrationResult
     refreshed_at: datetime
+
+
+@dataclass
+class CycleResult:
+    success: bool
+    status: str  # "SUCCESS", "DATA_UNAVAILABLE", "PREDICTION_FAILED", "ERROR"
+    symbol: str
+    signal: Optional['MultiHorizonSignal'] = None
+    error: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +150,14 @@ class Scheduler:
         self, symbol: str, stock_df: pd.DataFrame, index_df: pd.DataFrame,
         macro_events: Optional[List] = None, corporate_events: Optional[List[dict]] = None,
         news_articles: Optional[List[dict]] = None,
-    ) -> Optional['MultiHorizonSignal']:
+        return_structured: bool = False,
+    ) -> Union[Optional['MultiHorizonSignal'], CycleResult]:
+        if stock_df is None or stock_df.empty or index_df is None or index_df.empty:
+            logger.warning(f"Data unavailable for {symbol} in cycle run.")
+            if return_structured:
+                return CycleResult(success=False, status="DATA_UNAVAILABLE", symbol=symbol, signal=None, error="Empty stock or index data")
+            return None
+
         try:
             from config import HORIZON_CONFIG
             horizons = list(HORIZON_CONFIG.keys())
@@ -164,10 +180,14 @@ class Scheduler:
                 for event in sig.contributing_events:
                     self.history_manager.save_event(event)
 
+            if return_structured:
+                return CycleResult(success=True, status="SUCCESS", symbol=symbol, signal=multi_signal)
             return multi_signal
 
         except Exception as e:
             logger.error(f"Cycle failed for {symbol}: {e}")
+            if return_structured:
+                return CycleResult(success=False, status="ERROR", symbol=symbol, signal=None, error=str(e))
             return None
 
     def run_cycle_stream_for_symbol(

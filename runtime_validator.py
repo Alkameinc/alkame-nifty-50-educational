@@ -57,6 +57,9 @@ class EdgeCheckResult:
     strategy_cumulative_return_pct: float
     baseline_cumulative_return_pct: float
     alpha_pct: float
+    max_drawdown_pct: float = 0.0
+    trade_count: int = 0
+    sharpe_ratio: float = 0.0
 
 
 @dataclass
@@ -218,6 +221,17 @@ class RuntimeValidator:
             baseline_cum = (np.prod(1 + aligned_baseline / 100.0) - 1) * 100.0
             alpha = strategy_cum - baseline_cum
 
+            # Calculate Maximum Drawdown
+            equity_curve = np.cumprod(1 + net_strategy_returns / 100.0)
+            peak = np.maximum.accumulate(equity_curve)
+            drawdown = (equity_curve - peak) / peak * 100.0
+            max_drawdown = float(abs(np.min(drawdown))) if len(drawdown) > 0 else 0.0
+
+            # Calculate Active Trade Count and Annualized Sharpe Ratio
+            trade_count = int(np.sum(net_strategy_returns != 0.0))
+            std_dev = float(np.std(net_strategy_returns))
+            sharpe = float(np.mean(net_strategy_returns) / std_dev * np.sqrt(252)) if std_dev > 1e-6 else 0.0
+
             status = STATUS_EDGE_CONFIRMED if alpha > self.min_alpha_pct else STATUS_NO_EDGE
             health_registry.report("runtime_validator", ok=True, detail="Edge check computed")
             return EdgeCheckResult(
@@ -225,6 +239,9 @@ class RuntimeValidator:
                 strategy_cumulative_return_pct=float(strategy_cum),
                 baseline_cumulative_return_pct=float(baseline_cum),
                 alpha_pct=float(alpha),
+                max_drawdown_pct=round(max_drawdown, 2),
+                trade_count=trade_count,
+                sharpe_ratio=round(sharpe, 2),
             )
 
         except Exception as e:
