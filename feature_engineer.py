@@ -328,6 +328,9 @@ class FeatureEngineer:
 
         try:
             out = stock_df.copy()
+            # Drop bars where all OHLCV are NaN or Close is missing
+            if out["Close"].isna().any():
+                out = out.dropna(subset=["Close"]).copy()
             close = out["Close"]
             volume = out["Volume"]
 

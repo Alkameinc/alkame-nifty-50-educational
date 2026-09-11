@@ -233,6 +233,8 @@ class EnsembleManager:
             metadata = {
                 "symbol": symbol,
                 "horizon": horizon,
+                "model_version": "v1.0",
+                "feature_version": "v1.0",
                 "trained_at": datetime.now().isoformat(),
                 "feature_columns": feature_columns,
                 "label_classes": LABEL_CLASSES,
@@ -296,6 +298,8 @@ class EnsembleManager:
             individual_pred_arrays = {name: p.argmax(axis=1) for name, p in proba_matrices.items()}
 
             results = []
+            m_ver = metadata.get("model_version", "v1.0")
+            f_ver = metadata.get("feature_version", "v1.0")
             for row_i in range(len(X_ordered)):
                 predicted_class = LABEL_CLASSES[pred_idx[row_i]]
                 confidence = float(avg_proba[row_i, pred_idx[row_i]])
@@ -304,6 +308,7 @@ class EnsembleManager:
                 results.append(EnsemblePrediction(
                     predicted_class=predicted_class, confidence=confidence,
                     agreement_fraction=agreement, per_model_votes=votes,
+                    model_version=m_ver, feature_version=f_ver,
                 ))
             health_registry.report("ensemble_manager", ok=True, detail=f"Predicted for {symbol}")
             return results

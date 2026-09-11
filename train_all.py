@@ -1,15 +1,10 @@
-import sys
-import pandas as pd
 from data_fetcher import DataFetcher
 from backtester import Backtester
-from config import NIFTY50_SYMBOLS, ALL_HORIZONS
+from config import ALL_HORIZONS, HORIZON_CONFIG, NIFTY50_SYMBOLS, to_yfinance_ticker
 
 def train_all():
     fetcher = DataFetcher()
     backtester = Backtester()
-    
-    from config import to_yfinance_ticker, NIFTY50_SYMBOLS, HORIZON_CONFIG
-    
     symbols_to_train = NIFTY50_SYMBOLS
 
     print("=== ALKAME NIFTY 50: MODEL TRAINING ===")
