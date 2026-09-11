@@ -170,7 +170,11 @@ def render_dashboard() -> None:
     st.subheader(f"{symbol} — {format_action_label(active_signal.action)}")
     st.caption(format_confidence_display(active_signal))
     if active_signal.suppressed:
-        st.info("This signal was adjusted for safety reasons — see reasoning below for why.")
+        st.info(f"**Safety Gate Active**: The raw AI model leans **{active_signal.model_predicted_class}** (confidence: {active_signal.raw_confidence:.1%}), but the final recommendation is held at **HOLD** because runtime safety checks (backtest alpha edge or historical calibration) must be proven before risking capital.")
+        if active_signal.suppression_reasons:
+            with st.expander("Why was this held? (Safety Gate Details)", expanded=True):
+                for reason in active_signal.suppression_reasons:
+                    st.write(f"• {reason}")
 
     if multi_sig and len(multi_sig.signals) > 1:
         st.markdown("**Multi-Horizon Breakdown:**")
