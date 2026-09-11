@@ -2,6 +2,7 @@ import logging
 from typing import List, Optional, Dict
 from dataclasses import dataclass, field
 from config import NIFTY50_SYMBOLS, ALL_HORIZONS, to_yfinance_ticker
+import pandas as pd
 from data_fetcher import DataFetcher
 from predictor import Predictor, MultiHorizonSignal, ACTION_BUY
 
@@ -51,25 +52,61 @@ class OpportunityScanner:
     Generates signals for all stocks, applies safety gates, and ranks them by conviction.
     """
     
-    def __init__(self, predictor: Predictor, data_fetcher: DataFetcher):
+    def __init__(
+        self,
+        predictor: Predictor,
+        data_fetcher: DataFetcher,
+        macro_events: Optional[List] = None,
+        corporate_events: Optional[List[dict]] = None,
+        news_articles: Optional[List[dict]] = None,
+    ):
         self.predictor = predictor
         self.data_fetcher = data_fetcher
+        self.macro_events = macro_events
+        self.corporate_events = corporate_events
+        self.news_articles = news_articles
 
-    def scan(self, limit: int = 5) -> List[ScanResult]:
+    def scan(
+        self,
+        limit: int = 5,
+        macro_events: Optional[List] = None,
+        corporate_events: Optional[List[dict]] = None,
+        news_articles: Optional[List[dict]] = None,
+        stock_data_cache: Optional[Dict[str, pd.DataFrame]] = None,
+    ) -> List[ScanResult]:
         """
         Runs a full scan across all NIFTY 50 symbols.
         Returns the top `limit` BUY opportunities ranked by composite conviction score.
         Use scan_with_summary() for full structured results including rejections.
         """
-        summary = self.scan_with_summary(limit=limit)
+        summary = self.scan_with_summary(
+            limit=limit,
+            macro_events=macro_events,
+            corporate_events=corporate_events,
+            news_articles=news_articles,
+            stock_data_cache=stock_data_cache,
+        )
         return summary.opportunities
 
-    def scan_with_summary(self, limit: int = 5) -> ScanSummary:
+    def scan_with_summary(
+        self,
+        limit: int = 5,
+        macro_events: Optional[List] = None,
+        corporate_events: Optional[List[dict]] = None,
+        news_articles: Optional[List[dict]] = None,
+        stock_data_cache: Optional[Dict[str, pd.DataFrame]] = None,
+    ) -> ScanSummary:
         """
         Runs a full scan and returns a ScanSummary with both opportunities and rejection details.
+        Accepts optional event contexts and an optional pre-fetched stock data cache for reuse.
         """
         logger.info(f"Starting opportunity scan across {len(NIFTY50_SYMBOLS)} symbols...")
         summary = ScanSummary(scanned=len(NIFTY50_SYMBOLS))
+
+        # Use passed events or fall back to instance events
+        macros = macro_events if macro_events is not None else (self.macro_events or [])
+        corps = corporate_events if corporate_events is not None else (self.corporate_events or [])
+        news = news_articles if news_articles is not None else (self.news_articles or [])
         
         # Pre-fetch index data once for relative strength checks
         index_ticker = "^NSEI"
@@ -78,7 +115,14 @@ class OpportunityScanner:
         for symbol in NIFTY50_SYMBOLS:
             try:
                 yf_ticker = to_yfinance_ticker(symbol)
-                stock_df = self.data_fetcher.fetch_ohlcv(yf_ticker)
+
+                # Reuse pre-fetched stock data if available in cache, otherwise fetch once
+                if stock_data_cache is not None and symbol in stock_data_cache:
+                    stock_df = stock_data_cache[symbol]
+                else:
+                    stock_df = self.data_fetcher.fetch_ohlcv(yf_ticker)
+                    if stock_data_cache is not None and stock_df is not None:
+                        stock_data_cache[symbol] = stock_df
                 
                 if stock_df is None or stock_df.empty:
                     summary.add_rejection(symbol, f"No data available for {symbol}", "missing_data")
@@ -88,12 +132,15 @@ class OpportunityScanner:
                     summary.add_rejection(symbol, f"Data for {symbol} is stale", "stale_data")
                     continue
                 
-                # We skip macro/news events here for simplicity, relying strictly on technical/model data
+                # Pass events into signal generation so safety gates and conviction scores reflect current macro/news
                 multi_sig = self.predictor.generate_multi_horizon_signal(
                     symbol=symbol,
                     horizons=ALL_HORIZONS,
                     stock_df=stock_df,
-                    index_df=index_df
+                    index_df=index_df,
+                    macro_events=macros,
+                    corporate_events=corps,
+                    news_articles=news,
                 )
                 
                 # Filter to actionable BUY signals

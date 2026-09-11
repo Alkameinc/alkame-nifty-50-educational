@@ -246,3 +246,61 @@ def test_api_refresh_rate_limiting():
     res2 = refresh_backtest("RELIANCE")
     assert res2.get("status") == "rejected"
     assert "cooldown active" in res2.get("reason", "").lower()
+
+
+# ============================================================================
+# 9. Risk-Based Position Sizing (P1 4.7)
+# ============================================================================
+def test_position_planner_risk_sizing():
+    from position_planner import PositionPlanner
+    from predictor import MultiHorizonSignal
+
+    planner = PositionPlanner(portfolio_capital=10_00_000, max_position_pct=0.10)
+    sig = MultiHorizonSignal(
+        symbol="RELIANCE", timestamp=datetime.now(), signals={},
+        primary_action=ACTION_BUY, primary_horizon="1D", reasoning=[]
+    )
+    plan = planner.generate_plan(
+        multi_signal=sig, current_price=2500.0, ma_level=2400.0, support_level=2300.0
+    )
+
+    assert plan.action == ACTION_BUY
+    assert plan.planned_capital == 1_00_000.0
+    assert plan.stop_price is not None and plan.stop_price < 2300.0
+    assert plan.max_loss > 0.0
+    assert plan.risk_pct > 0.0 and plan.risk_pct <= 2.0
+
+
+# ============================================================================
+# 10. Structured Scheduler Results (P1 4.10)
+# ============================================================================
+def test_scheduler_cycle_result():
+    from scheduler import Scheduler, CycleResult
+
+    sched = Scheduler()
+    # When data is empty, returns structured failure
+    res = sched.run_one_cycle_for_symbol("TEST", pd.DataFrame(), pd.DataFrame(), return_structured=True)
+    assert isinstance(res, CycleResult)
+    assert res.success is False
+    assert res.status == "DATA_UNAVAILABLE"
+
+
+# ============================================================================
+# 11. Walk-Forward Split (P1 4.1)
+# ============================================================================
+def test_model_trainer_walk_forward_split():
+    from model_trainer import ModelTrainer
+
+    # 500 samples
+    dates = pd.date_range("2026-01-01", periods=500, freq="1D")
+    X = pd.DataFrame({"f1": range(500)}, index=dates)
+    y = pd.Series(["UP"] * 500, index=dates)
+
+    splits = list(ModelTrainer.walk_forward_split(X, y, n_splits=3, min_train_samples=200))
+    assert len(splits) == 3
+    for fold, X_tr, X_te, y_tr, y_te in splits:
+        assert len(X_tr) >= 200
+        assert len(X_te) > 0
+        # Chronological order invariant: max train timestamp < min test timestamp
+        assert X_tr.index.max() < X_te.index.min()
+
