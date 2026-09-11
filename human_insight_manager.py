@@ -247,17 +247,19 @@ class HumanInsightManager:
         original output is preserved in reasoning, never silently erased.
         """
         self.record_override(signal.symbol, signal.action, overridden_action, reason, created_by)
-        updated_reasoning = list(signal.reasoning) + [
+        new_reasoning = list(signal.reasoning) + [
             f"HUMAN OVERRIDE by {created_by}: changed action from {signal.action} to {overridden_action}. "
             f"Reason: {reason}"
         ]
         return PredictionSignal(
             symbol=signal.symbol, timestamp=signal.timestamp, horizon=signal.horizon, action=overridden_action,
-            model_predicted_class=signal.model_predicted_class, raw_confidence=signal.raw_confidence,
+            model_predicted_class=signal.model_predicted_class, 
+            model_version=signal.model_version, feature_version=signal.feature_version,
+            raw_confidence=signal.raw_confidence,
             risk_adjusted_confidence=signal.risk_adjusted_confidence,
             calibrated_confidence=signal.calibrated_confidence, agreement_fraction=signal.agreement_fraction,
             downside_summary=signal.downside_summary, upside_summary=signal.upside_summary,
-            reasoning=updated_reasoning, contributing_events=signal.contributing_events,
+            reasoning=new_reasoning, contributing_events=signal.contributing_events,
             global_risk_level=signal.global_risk_level, risk_toggle_enabled=signal.risk_toggle_enabled,
             is_safe_to_trade_live=signal.is_safe_to_trade_live, data_stale=signal.data_stale,
             suppressed=signal.suppressed, suppression_reasons=signal.suppression_reasons,
@@ -378,6 +380,7 @@ if __name__ == "__main__":
         # apply_override_to_signal — build a minimal fake PredictionSignal and override it
         fake_signal = PredictionSignal(
             symbol=test_symbol, timestamp=datetime.now(), horizon="INTRADAY", action="BUY", model_predicted_class="UP",
+            model_version="UNKNOWN", feature_version="UNKNOWN",
             raw_confidence=0.7, risk_adjusted_confidence=0.7, calibrated_confidence=0.65, agreement_fraction=0.66,
             downside_summary="Some downside.", upside_summary="Some upside.", reasoning=["Model said BUY."],
         )

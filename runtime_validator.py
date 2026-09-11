@@ -34,7 +34,8 @@ STATUS_NO_EDGE = "NO_EDGE"
 
 @dataclass
 class CalibrationBin:
-    bin_range: str
+    lower_bound: float
+    upper_bound: float
     count: int
     mean_predicted_confidence: float
     empirical_accuracy: float
@@ -129,14 +130,14 @@ class RuntimeValidator:
                 count = len(group)
                 if count == 0:
                     bins.append(CalibrationBin(
-                        bin_range=str(bin_range), count=0,
+                        lower_bound=float(bin_range.left), upper_bound=float(bin_range.right), count=0,
                         mean_predicted_confidence=0.0, empirical_accuracy=0.0,
                     ))
                     continue
                 mean_conf = float(group["confidence"].mean())
                 empirical_acc = float(group["correct"].mean())
                 bins.append(CalibrationBin(
-                    bin_range=str(bin_range), count=count,
+                    lower_bound=float(bin_range.left), upper_bound=float(bin_range.right), count=count,
                     mean_predicted_confidence=mean_conf, empirical_accuracy=empirical_acc,
                 ))
                 ece += (count / n_samples) * abs(mean_conf - empirical_acc)
@@ -167,12 +168,16 @@ class RuntimeValidator:
             if calibration_result.status != STATUS_SUFFICIENT or not calibration_result.bins:
                 return None
             raw_confidence = max(0.0, min(1.0, raw_confidence))
-            bin_width = 1.0 / self.n_bins
-            bin_index = min(int(raw_confidence / bin_width), len(calibration_result.bins) - 1)
             health_registry.report("runtime_validator", ok=True)
             
-            target_bin = calibration_result.bins[bin_index]
-            if target_bin.count == 0:
+            target_bin = None
+            for b in calibration_result.bins:
+                if (raw_confidence > b.lower_bound and raw_confidence <= b.upper_bound) or \
+                   (raw_confidence == 0.0 and b.lower_bound == 0.0):
+                    target_bin = b
+                    break
+                    
+            if target_bin is None or target_bin.count == 0:
                 return None
             return target_bin.empirical_accuracy
         except Exception as e:

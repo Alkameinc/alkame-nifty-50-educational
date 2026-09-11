@@ -67,6 +67,8 @@ class EnsemblePrediction:
     confidence: float
     agreement_fraction: float
     per_model_votes: Dict[str, str]
+    model_version: str = "UNKNOWN"
+    feature_version: str = "UNKNOWN"
 
 
 # ---------------------------------------------------------------------------

@@ -31,6 +31,8 @@ class PredictionRecord:
     id: int
     symbol: str
     horizon: str
+    model_version: str
+    feature_version: str
     narrative: str
     dca_ladder: str
     timestamp: str
@@ -128,6 +130,12 @@ class HistoryManager:
             try:
                 cursor.execute("ALTER TABLE predictions ADD COLUMN dca_ladder TEXT")
             except: pass
+            try:
+                cursor.execute("ALTER TABLE predictions ADD COLUMN model_version TEXT DEFAULT 'UNKNOWN'")
+            except: pass
+            try:
+                cursor.execute("ALTER TABLE predictions ADD COLUMN feature_version TEXT DEFAULT 'UNKNOWN'")
+            except: pass
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS events (
@@ -186,15 +194,16 @@ class HistoryManager:
                     risk_adjusted_confidence, calibrated_confidence, agreement_fraction,
                     downside_summary, upside_summary, reasoning, global_risk_level,
                     risk_toggle_enabled, is_safe_to_trade_live, data_stale, suppressed, suppression_reasons,
-                    horizon, narrative, dca_ladder
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    horizon, narrative, dca_ladder, model_version, feature_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 signal.symbol, signal.timestamp.isoformat(), signal.action, signal.model_predicted_class,
                 signal.raw_confidence, signal.risk_adjusted_confidence, signal.calibrated_confidence,
                 signal.agreement_fraction, signal.downside_summary, signal.upside_summary,
                 json.dumps(signal.reasoning), signal.global_risk_level, int(signal.risk_toggle_enabled),
                 int(signal.is_safe_to_trade_live), int(signal.data_stale), int(signal.suppressed),
-                json.dumps(signal.suppression_reasons), signal.horizon, narrative, dca_ladder_str
+                json.dumps(signal.suppression_reasons), signal.horizon, narrative, dca_ladder_str,
+                signal.model_version, signal.feature_version
             ))
 
             conn.commit()
@@ -240,19 +249,25 @@ class HistoryManager:
             if conn is not None:
                 conn.close()
 
-    def get_predictions(self, symbol: Optional[str] = None, limit: int = 200,
-                         only_unresolved: bool = False) -> List[PredictionRecord]:
+    def get_predictions(self, symbol: Optional[str] = None, horizon: Optional[str] = None, limit: int = 200,
+                         only_unresolved: bool = False, model_version: Optional[str] = None) -> List[PredictionRecord]:
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             query = ("SELECT id, symbol, timestamp, action, model_predicted_class, raw_confidence, "
                       "risk_adjusted_confidence, calibrated_confidence, agreement_fraction, outcome_resolved, "
-                      "outcome_correct, outcome_actual_class, resolved_at, horizon, narrative, dca_ladder FROM predictions WHERE 1=1")
+                      "outcome_correct, outcome_actual_class, resolved_at, horizon, narrative, dca_ladder, model_version, feature_version FROM predictions WHERE 1=1")
             params = []
             if symbol:
                 query += " AND symbol = ?"
                 params.append(symbol)
+            if horizon:
+                query += " AND horizon = ?"
+                params.append(horizon)
+            if model_version:
+                query += " AND model_version = ?"
+                params.append(model_version)
             if only_unresolved:
                 query += " AND outcome_resolved = 0"
             query += " ORDER BY id DESC LIMIT ?"
@@ -268,9 +283,11 @@ class HistoryManager:
                     agreement_fraction=row[8], outcome_resolved=bool(row[9]),
                     outcome_correct=None if row[10] is None else bool(row[10]),
                     outcome_actual_class=row[11], resolved_at=row[12],
-                    horizon=row[13] if len(row) > 13 else 'INTRADAY',
+                    horizon=row[13] if len(row) > 13 and row[13] else 'INTRADAY',
                     narrative=row[14] if len(row) > 14 else None,
-                    dca_ladder=row[15] if len(row) > 15 else None
+                    dca_ladder=row[15] if len(row) > 15 else None,
+                    model_version=row[16] if len(row) > 16 and row[16] else 'LEGACY/UNKNOWN',
+                    feature_version=row[17] if len(row) > 17 and row[17] else 'LEGACY/UNKNOWN'
                 ))
 
             health_registry.report("history_manager", ok=True)
@@ -283,7 +300,7 @@ class HistoryManager:
             if conn is not None:
                 conn.close()
 
-    def build_calibration_dataset(self, symbol: Optional[str] = None) -> pd.DataFrame:
+    def build_calibration_dataset(self, symbol: Optional[str] = None, horizon: Optional[str] = None, model_version: Optional[str] = None) -> pd.DataFrame:
         """
         Builds the (confidence, correct) DataFrame that runtime_validator.py's
         compute_calibration() expects, from REAL resolved predictions. Uses
@@ -291,8 +308,13 @@ class HistoryManager:
         rather than raw_confidence, since that's what's being calibrated.
         """
         try:
-            records = self.get_predictions(symbol=symbol, limit=100_000, only_unresolved=False)
-            resolved = [r for r in records if r.outcome_resolved and r.outcome_correct is not None]
+            records = self.get_predictions(symbol=symbol, horizon=horizon, model_version=model_version, limit=100_000, only_unresolved=False)
+            resolved = [
+                r for r in records
+                if r.outcome_resolved and r.outcome_correct is not None
+                and r.model_version not in ('LEGACY/UNKNOWN', 'UNKNOWN', 'LEGACY')
+                and r.feature_version not in ('LEGACY/UNKNOWN', 'UNKNOWN', 'LEGACY')
+            ]
             if not resolved:
                 health_registry.report("history_manager", ok=True)
                 return pd.DataFrame(columns=["confidence", "correct"])
@@ -433,6 +455,7 @@ if __name__ == "__main__":
         # --- Predictions + outcome resolution ---
         signal = PredictionSignal(
             symbol=test_symbol, timestamp=datetime.now(), horizon="INTRADAY", action="BUY", model_predicted_class="UP",
+            model_version="v1.0", feature_version="v1.0",
             raw_confidence=0.72, risk_adjusted_confidence=0.70, calibrated_confidence=None, agreement_fraction=0.66,
             downside_summary="Some downside.", upside_summary="Some upside.", reasoning=["Model said UP."],
         )
@@ -450,13 +473,14 @@ if __name__ == "__main__":
         for conf, predicted, actual in pattern:
             s = PredictionSignal(
                 symbol=test_symbol, timestamp=datetime.now(), horizon="INTRADAY", action="BUY", model_predicted_class=predicted,
+                model_version="v1.0", feature_version="v1.0",
                 raw_confidence=conf, risk_adjusted_confidence=conf, calibrated_confidence=None, agreement_fraction=0.5,
                 downside_summary="d", upside_summary="u", reasoning=[],
             )
             pid = manager.save_prediction(s)
             manager.resolve_outcome(pid, actual_class=actual)
 
-        calibration_df = manager.build_calibration_dataset(test_symbol)
+        calibration_df = manager.build_calibration_dataset(test_symbol, horizon="INTRADAY", model_version="v1.0")
         print(f"Calibration dataset built: {len(calibration_df)} rows, columns={list(calibration_df.columns)}")
         assert len(calibration_df) == 5  # the first one + 4 more
         assert set(calibration_df.columns) == {"confidence", "correct"}

@@ -135,7 +135,11 @@ def get_signal(symbol: str):
             "horizon": hor,
             "action": sig.action,
             "verdict_text": verdict_text,
-            "confidence": sig.risk_adjusted_confidence,
+            "confidence": getattr(sig, 'calibrated_confidence', None),
+            "raw_confidence": getattr(sig, 'raw_confidence', 0.0),
+            "risk_adjusted_confidence": getattr(sig, 'risk_adjusted_confidence', 0.0),
+            "calibrated_confidence": getattr(sig, 'calibrated_confidence', None),
+            "calibration_status": "VALID" if getattr(sig, 'calibrated_confidence', None) is not None else "UNAVAILABLE",
             "current_price": float(stock_df["Close"].iloc[-1]) if not stock_df.empty else None,
             "target_price": sig.target_price,
             "stop_loss": sig.stop_loss,
@@ -192,7 +196,11 @@ def stream_signal(symbol: str):
                 "horizon": sig.horizon,
                 "action": sig.action,
                 "verdict_text": verdict_text,
-                "confidence": getattr(sig, 'risk_adjusted_confidence', getattr(sig, 'raw_confidence', 0.0)),
+                "confidence": getattr(sig, 'calibrated_confidence', None),
+                "raw_confidence": getattr(sig, 'raw_confidence', 0.0),
+                "risk_adjusted_confidence": getattr(sig, 'risk_adjusted_confidence', getattr(sig, 'raw_confidence', 0.0)),
+                "calibrated_confidence": getattr(sig, 'calibrated_confidence', None),
+                "calibration_status": "VALID" if getattr(sig, 'calibrated_confidence', None) is not None else "UNAVAILABLE",
                 "current_price": float(stock_df["Close"].iloc[-1]) if not stock_df.empty else None,
                 "target_price": getattr(sig, 'target_price', None),
                 "stop_loss": getattr(sig, 'stop_loss', None),
@@ -207,17 +215,46 @@ def stream_signal(symbol: str):
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
+import time
+import threading
+
+# --- Refresh protection state ---
+_refresh_locks: dict = {}          # symbol -> threading.Lock
+_refresh_last_time: dict = {}      # symbol -> float (epoch)
+_REFRESH_COOLDOWN_SECONDS = 60     # Minimum seconds between refreshes for the same symbol
+
+def _get_refresh_lock(symbol: str) -> threading.Lock:
+    if symbol not in _refresh_locks:
+        _refresh_locks[symbol] = threading.Lock()
+    return _refresh_locks[symbol]
+
+
 @app.post("/api/signal/{symbol}/refresh")
 def refresh_backtest(symbol: str):
     if symbol not in NIFTY50_SYMBOLS:
         return {"error": "Invalid symbol"}
-    yf_ticker = to_yfinance_ticker(symbol)
-    stock_df = scheduler.data_fetcher.fetch_ohlcv(yf_ticker)
-    index_df = scheduler.data_fetcher.fetch_nifty_index()
-    if stock_df is not None and index_df is not None:
-        scheduler.refresh_live_worthiness(symbol, stock_df, index_df)
-        return {"status": "success"}
-    return {"error": "Failed to fetch data"}
+
+    lock = _get_refresh_lock(symbol)
+    if not lock.acquire(blocking=False):
+        return {"status": "rejected", "reason": "A refresh is already running for this symbol.", "http_status": 429}
+
+    try:
+        last = _refresh_last_time.get(symbol, 0)
+        elapsed = time.time() - last
+        if elapsed < _REFRESH_COOLDOWN_SECONDS:
+            remaining = int(_REFRESH_COOLDOWN_SECONDS - elapsed)
+            return {"status": "rejected", "reason": f"Refresh cooldown active. Try again in {remaining}s.", "http_status": 429}
+
+        yf_ticker = to_yfinance_ticker(symbol)
+        stock_df = scheduler.data_fetcher.fetch_ohlcv(yf_ticker)
+        index_df = scheduler.data_fetcher.fetch_nifty_index()
+        if stock_df is not None and index_df is not None:
+            scheduler.refresh_live_worthiness(symbol, stock_df, index_df)
+            _refresh_last_time[symbol] = time.time()
+            return {"status": "success"}
+        return {"error": "Failed to fetch data"}
+    finally:
+        lock.release()
 
 @app.get("/api/scalping")
 def get_scalping():

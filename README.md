@@ -32,7 +32,7 @@ This project is built and maintained by interns and mentors of the **[DBERT AI I
 This release significantly expands the system beyond the original signal pipeline.
 
 ### 🆕 REST API Layer (`api.py`)
-A Flask-based REST API now exposes core engine capabilities over HTTP. Enables integration with external dashboards, bots, and automation workflows without touching internal Python code directly.
+A FastAPI-based REST API now exposes core engine capabilities over HTTP. Enables integration with external dashboards, bots, and automation workflows without touching internal Python code directly.
 
 ### 🆕 Scalping Engine (`scalping.py`)
 Dedicated short-horizon scalping logic for high-frequency intraday opportunities on NIFTY 50 constituents. Works alongside the main prediction pipeline with its own risk guardrails.
@@ -95,7 +95,7 @@ Expanded schema captures position plan data, narrative summaries, and health sna
 | `health_monitor.py` | Data feed freshness, model staleness, API quota, pipeline latency checks |
 | `backtester.py` | Historical replay with slippage/costs, real alpha calculation |
 | `scheduler.py` | Orchestrates the full pipeline on a market-hours loop |
-| `api.py` | Flask REST API — signals, scanner results, and history over HTTP |
+| `api.py` | FastAPI REST API — signals, scanner results, and history over HTTP |
 | `app.py` | Streamlit dashboard |
 | `train_all.py` | Batch training script for all NIFTY 50 models |
 | `automation/` | Cron wrappers, log rotation, restart-on-failure scripts for server deployment |
@@ -210,7 +210,7 @@ python history_manager.py
 python health_monitor.py
 python backtester.py
 python scheduler.py
-python api.py                         # Starts the Flask REST API server
+python api.py                         # Starts the FastAPI REST API server (or: uvicorn api:app --host 0.0.0.0 --port 8000)
 python app.py                         # Pure-logic self-test only; see Running section for dashboard
 ```
 
@@ -233,10 +233,10 @@ python scheduler.py
 **Terminal 2 — REST API Server**
 
 ```bash
-python api.py
+uvicorn api:app --host 0.0.0.0 --port 8000
 ```
 
-> Defaults to `http://localhost:5000`. Endpoints include signal retrieval, scanner results, health status, and prediction history. Refer to inline docstrings in `api.py` for full endpoint documentation. **Add API key middleware before any public or network-exposed deployment.**
+> Defaults to `http://localhost:8000` (interactive API documentation available at `http://localhost:8000/docs`). Endpoints include signal retrieval, scanner results, health status, and prediction history. Refer to inline docstrings in `api.py` for full endpoint documentation. Alternatively, run `python api.py`. **Add API key middleware before any public or network-exposed deployment.**
 
 **Terminal 3 — Dashboard**
 
@@ -254,14 +254,32 @@ streamlit run app.py
 
 ---
 
+---
+
+## Educational Research Framework Notice
+
+> **Educational and Research Use Only**: This repository is an educational research framework for exploring NIFTY 50 statistical machine learning, probability calibration, risk-gated signal generation, and event classification. It is **not** financial advice, a trading recommendation system, or guaranteed to be profitable.
+
+---
+
+## Safety & Governance Principles
+
+1. **Probability Calibration**: Raw model confidence is never presented as calibrated probability. Calibrated confidence is only shown after passing empirical accuracy verification on real historical outcomes, strictly partitioned by `(symbol, horizon, model_version)`.
+2. **Feature Leakage Prevention**: Opening Range Breakout (ORB) features are strictly causal: bars inside the opening range receive no lookahead levels, and post-ORB levels become available only after the opening window has closed.
+3. **Data Freshness State**: Provenance is explicitly tracked as `LIVE`, `CACHED_FRESH`, `CACHED_STALE`, or `UNAVAILABLE`. Stale cache is never silently treated as live market data.
+4. **Authoritative Market Calendar**: `market_calendar.py` enforces official NSE trading holidays, trading sessions, and timezone-aware market-open transitions.
+5. **Fail-Closed Event Handling**: Unreachable or degraded news/macro event feeds report explicit partial/unavailable statuses rather than silently masquerading as "no events".
+6. **Refresh Protection**: Expensive backtest and calibration refresh endpoints enforce concurrency guards and cooldown rate limiting.
+
+---
+
 ## Known Limitations
 
-- **NIFTY 50 constituent list** and sector map need verification against NSE's next semi-annual index review.
-- **Festive-window dates** are approximate (lunar calendar shifts yearly) — verify each year.
-- **Exchange holidays** are not yet modeled in `scheduler.is_market_open()` — it currently only checks weekday + time window.
-- **`corporate_events_fetcher.py`** may be blocked from cloud/VPN IPs by NSE's bot protection — run from a normal home/office connection.
+- **NIFTY 50 constituent list** and sector map should be verified semi-annually against NSE's index reviews (March & September).
+- **Festive-window dates** are approximate (lunar calendar shifts yearly) — verify each year in `macro_calendar.csv`.
+- **`corporate_events_fetcher.py`** may be blocked from cloud/VPN IPs by NSE's anti-bot protections — run from a normal residential/office connection.
 - **Scalping signals** carry inherently higher noise at very short timeframes; always validate against `runtime_validator.py` output before acting.
-- **`api.py`** does not include authentication by default — add API key middleware before any public or network-exposed deployment.
+- **`api.py`** provides local in-memory rate limiting and concurrency protection. Add API key middleware before any public internet deployment.
 
 ---
 
@@ -274,7 +292,7 @@ This repository — including the API layer, scalping engine, market scanner, po
 DBERT internships give you verifiable, portfolio-ready experience across the exact skill areas used in this project:
 
 - **AI/ML Engineering Internship** — feature engineering, ensemble model training, calibration and backtesting on real market data
-- **Full-Stack Development Internship** — Flask REST APIs, Streamlit dashboards, SQLite-backed data pipelines
+- **Full-Stack Development Internship** — FastAPI REST APIs, Streamlit dashboards, SQLite-backed data pipelines
 - **Quantitative & Algorithmic Trading Internship** — signal design, scalping strategies, position planning, and risk modelling
 - **DevOps & Cloud Deployment Internship** — AWS EC2, Nginx, cron automation, health monitoring, and CI-style deployment pipelines
 - **Open-Source & LLM Internship tracks** — contributing to production-grade, open-source AI systems with real-world mentorship
@@ -284,7 +302,7 @@ Every DBERT intern works on live GitHub repositories (like this one), receives c
 **Who should apply:**
 
 - Engineering and CS students looking for a *remote AI/ML internship in India* or worldwide
-- Developers wanting real *Python, Flask, and machine learning internship* experience
+- Developers wanting real *Python, FastAPI, and machine learning internship* experience
 - Anyone interested in an *algorithmic trading internship* or *fintech internship* working with live NIFTY 50 market data
 - Contributors who want *open-source internship* experience on a public GitHub project
 

@@ -3,7 +3,9 @@ import logging
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Union, Any
+from enum import Enum
+from dataclasses import dataclass
 
 # 2. Third-party imports
 import pandas as pd
@@ -32,11 +34,23 @@ from health_monitor import registry as health_registry
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# 5. Constants
+# 5. Constants & Models
 # ---------------------------------------------------------------------------
 MAX_RETRIES = 3
 RETRY_BACKOFF_SECONDS = 2
 REQUIRED_COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
+
+class DataStatus(Enum):
+    LIVE = "LIVE"
+    CACHED_FRESH = "CACHED_FRESH"
+    CACHED_STALE = "CACHED_STALE"
+    UNAVAILABLE = "UNAVAILABLE"
+
+@dataclass
+class MarketDataResult:
+    data: Optional[pd.DataFrame]
+    status: DataStatus
+    source: str
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +100,8 @@ class DataFetcher:
         ticker: str,
         interval: str = BAR_INTERVAL,
         period: str = BAR_HISTORY_PERIOD,
-    ) -> Optional[pd.DataFrame]:
+        return_metadata: bool = False,
+    ) -> Union[Optional[pd.DataFrame], MarketDataResult]:
         """
         Fetch OHLCV bars for a single ticker with retry logic. Returns None
         only if both live fetch and cache fallback fail — callers must handle
@@ -96,6 +111,8 @@ class DataFetcher:
         cached = self._load_cache(ticker, interval=interval)
         if cached is not None and not self.check_staleness(cached, ticker):
             logger.info(f"Using fresh cache for {ticker}")
+            if return_metadata:
+                return MarketDataResult(data=cached, status=DataStatus.CACHED_FRESH, source="cache")
             return cached
 
         last_error = None
@@ -112,6 +129,8 @@ class DataFetcher:
                 df = df[REQUIRED_COLUMNS].copy()
                 self._save_cache(ticker, df, interval=interval)
                 health_registry.report("data_fetcher", ok=True, detail=f"Fetched live data for {ticker}")
+                if return_metadata:
+                    return MarketDataResult(data=df, status=DataStatus.LIVE, source="yahoo")
                 return df
 
             except Exception as e:
@@ -126,10 +145,14 @@ class DataFetcher:
         logger.error(f"All {MAX_RETRIES} live fetch attempts failed for {ticker}: {last_error}")
         cached = self._load_cache(ticker, interval=interval)
         if cached is not None:
+            if return_metadata:
+                return MarketDataResult(data=cached, status=DataStatus.CACHED_STALE, source="cache")
             return cached
 
         logger.error(f"No cache available for {ticker} ({interval}) either — returning None.")
         health_registry.report("data_fetcher", ok=False, detail=f"No live or cached data for {ticker}", error=str(last_error))
+        if return_metadata:
+            return MarketDataResult(data=None, status=DataStatus.UNAVAILABLE, source="none")
         return None
 
     def fetch_daily_ohlcv(self, ticker: str, period: str = "5y") -> Optional[pd.DataFrame]:
@@ -214,13 +237,8 @@ class DataFetcher:
         return self.fetch_ohlcv(NIFTY_INDEX_TICKER, interval=interval, period=period)
 
     def is_market_open(self) -> bool:
-        try:
-            now = pd.Timestamp.now(tz=MARKET_TIMEZONE)
-            if now.weekday() >= 5: # Sat, Sun
-                return False
-            return MARKET_OPEN_TIME <= now.time() <= MARKET_CLOSE_TIME
-        except Exception:
-            return True # Safe default
+        from market_calendar import is_market_open as _is_open
+        return _is_open()
 
     def check_staleness(self, df: pd.DataFrame, ticker: str) -> bool:
         """
@@ -310,6 +328,12 @@ if __name__ == "__main__":
         print(f"Single ticker fetch ({test_symbol}): {'OK' if single_ok else 'FAILED'}"
               f" — rows={0 if df is None else len(df)}")
 
+        # Test 1.5: fetch with metadata
+        res = fetcher.fetch_ohlcv(test_symbol, return_metadata=True)
+        meta_ok = isinstance(res, MarketDataResult) and res.status in DataStatus
+        print(f"Fetch with metadata ({test_symbol}): {'OK' if meta_ok else 'FAILED'}"
+              f" — status={getattr(res, 'status', 'UNKNOWN')}")
+
         # Test 2: staleness check runs without error
         if df is not None:
             stale = fetcher.check_staleness(df, test_symbol)
@@ -350,7 +374,7 @@ if __name__ == "__main__":
         collision_ok = cache_5m and cache_1d
         print(f"Cache collision test (distinct files exist): {'OK' if collision_ok else 'FAILED'}")
         
-        overall_pass = single_ok and index_ok and gold_ok and cache_ok and daily_ok and inc_ok and collision_ok
+        overall_pass = single_ok and meta_ok and index_ok and gold_ok and cache_ok and daily_ok and inc_ok and collision_ok
         print("STATUS: PASS" if overall_pass else "STATUS: FAIL — see details above")
 
         if not overall_pass:
