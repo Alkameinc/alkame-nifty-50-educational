@@ -230,22 +230,22 @@ HORIZON_CONFIG = {
     },
     HORIZON_30D: {
         "bar_interval": "1d", "horizon_bars": 21, "deadband_pct_default": 3.0,
-        "history_period": "5y", "min_training_samples": 500,
+        "history_period": "5y", "min_training_samples": 350,
         "retrain_cadence_days": 14,
     },
     HORIZON_3M: {
         "bar_interval": "1d", "horizon_bars": 63, "deadband_pct_default": 5.0,
-        "history_period": "7y", "min_training_samples": 500,
+        "history_period": "7y", "min_training_samples": 300,
         "retrain_cadence_days": 30,
     },
     HORIZON_6M: {
         "bar_interval": "1d", "horizon_bars": 126, "deadband_pct_default": 8.0,
-        "history_period": "10y", "min_training_samples": 400,
+        "history_period": "10y", "min_training_samples": 250,
         "retrain_cadence_days": 60,
     },
     HORIZON_1Y: {
         "bar_interval": "1d", "horizon_bars": 252, "deadband_pct_default": 12.0,
-        "history_period": "max", "min_training_samples": 300,
+        "history_period": "max", "min_training_samples": 200,
         "retrain_cadence_days": 90,
     },
 }

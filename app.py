@@ -212,6 +212,19 @@ def render_dashboard() -> None:
     # --- Signal panel: downside ALWAYS before upside ---
     st.subheader(f"{symbol} — {format_action_label(active_signal.action)}")
     st.caption(format_confidence_display(active_signal))
+
+    col_sig1, col_sig2, col_sig3 = st.columns(3)
+    with col_sig1:
+        st.metric("Active Horizon", active_signal.horizon)
+    with col_sig2:
+        tgt_txt = f"₹{active_signal.target_price:,.2f}" if active_signal.target_price is not None else "N/A"
+        tgt_delta = f"{((active_signal.target_price - cmp) / cmp) * 100:+.1f}%" if active_signal.target_price and cmp > 0 else None
+        st.metric("Expected Target Price", tgt_txt, delta=tgt_delta)
+    with col_sig3:
+        stop_txt = f"₹{active_signal.stop_loss:,.2f}" if active_signal.stop_loss is not None else "N/A"
+        stop_delta = f"{((active_signal.stop_loss - cmp) / cmp) * 100:+.1f}%" if active_signal.stop_loss and cmp > 0 else None
+        st.metric("Risk Threshold / Stop Loss", stop_txt, delta=stop_delta, delta_color="inverse")
+
     if active_signal.suppressed:
         st.info(f"**Safety Gate Active**: The raw AI model leans **{active_signal.model_predicted_class}** (confidence: {active_signal.raw_confidence:.1%}), but the final recommendation is held at **HOLD** because runtime safety checks (backtest alpha edge or historical calibration) must be proven before risking capital.")
         if active_signal.suppression_reasons:
