@@ -21,7 +21,7 @@ from config import (
     configure_logging,
 )
 from data_fetcher import DataFetcher
-from predictor import Predictor, PredictionSignal
+from predictor import Predictor, PredictionSignal, MultiHorizonSignal
 from event_classifier import EventClassifier
 from history_manager import HistoryManager
 from backtester import Backtester

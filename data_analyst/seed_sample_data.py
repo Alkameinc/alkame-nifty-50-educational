@@ -62,8 +62,9 @@ def _simulate_symbol_history(symbol: str, n_predictions: int, rng: np.random.Gen
         action = {"UP": "BUY", "DOWN": "SELL", "FLAT": "HOLD"}[predicted_class]
 
         signal = PredictionSignal(
-            symbol=symbol, timestamp=timestamp, action=action,
+            symbol=symbol, timestamp=timestamp, horizon="INTRADAY", action=action,
             model_predicted_class=predicted_class,
+            model_version="v1.0", feature_version="v1.0",
             raw_confidence=raw_confidence, risk_adjusted_confidence=raw_confidence,
             calibrated_confidence=None, agreement_fraction=float(rng.uniform(0.4, 1.0)),
             downside_summary="Synthetic sample data — see data_analyst/seed_sample_data.py.",

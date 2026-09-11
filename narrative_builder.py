@@ -94,14 +94,18 @@ if __name__ == "__main__":
     
     sig_intra = PredictionSignal(
         symbol="RELIANCE", timestamp=datetime.now(), horizon=HORIZON_INTRADAY,
-        action=ACTION_BUY, model_predicted_class="UP", raw_confidence=0.75,
+        action=ACTION_BUY, model_predicted_class="UP",
+        model_version="v1.0", feature_version="v1.0",
+        raw_confidence=0.75,
         risk_adjusted_confidence=0.75, calibrated_confidence=None, agreement_fraction=0.8,
         downside_summary="", upside_summary="", reasoning=[],
         is_safe_to_trade_live=True
     )
     sig_30d = PredictionSignal(
         symbol="RELIANCE", timestamp=datetime.now(), horizon=HORIZON_30D,
-        action=ACTION_HOLD, model_predicted_class="FLAT", raw_confidence=0.55,
+        action=ACTION_HOLD, model_predicted_class="FLAT",
+        model_version="v1.0", feature_version="v1.0",
+        raw_confidence=0.55,
         risk_adjusted_confidence=0.55, calibrated_confidence=None, agreement_fraction=0.5,
         downside_summary="", upside_summary="", reasoning=[],
         is_safe_to_trade_live=True
