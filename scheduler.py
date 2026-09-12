@@ -260,15 +260,26 @@ class Scheduler:
                 edge_check_results=edge_results,
             )
 
-            for sig in stream:
-                self.history_manager.save_prediction(sig)
-                for event in sig.contributing_events:
-                    self.history_manager.save_event(event)
-                yield sig
+        calibration_result = (
+            snapshot.calibration_result if snapshot else None
+        )
+        edge_check_result = (
+            snapshot.edge_check_result if snapshot else None
+        )
 
-        except Exception as e:
-            logger.error(f"Cycle stream failed for {symbol}: {e}")
-            yield None
+        horizons = list(HORIZON_CONFIG.keys())
+
+        yield from self.predictor.generate_multi_horizon_stream(
+            symbol=symbol,
+            horizons=horizons,
+            stock_df=stock_df,
+            index_df=index_df,
+            macro_events=macro_events,
+            corporate_events=corporate_events,
+            news_articles=news_articles,
+            calibration_result=calibration_result,
+            edge_check_result=edge_check_result,
+        )
 
     # -----------------------------------------------------------------
     # Outcome resolution — closes the loop that grows real calibration data

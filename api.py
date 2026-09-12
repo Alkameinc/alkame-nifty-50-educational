@@ -187,7 +187,7 @@ def get_signal(symbol: str):
     )
 
     all_horizons_data = {}
-    for hor, sig in multi_signal.signals.items():
+    for hor, sig in signals.items():
         if sig.action == "BUY":
             verdict_text = "Strong opportunity identified. Proceed with entry according to your risk parameters."
         elif sig.action == "SELL":
@@ -290,6 +290,10 @@ def stream_signal(symbol: str):
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream"
+    )
 
 import threading
 import time
