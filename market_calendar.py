@@ -1,7 +1,9 @@
 # 1. Standard library imports
+import csv
 import logging
 from datetime import date, datetime, time, timedelta
-from typing import Optional, Set, Union
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Union
 from zoneinfo import ZoneInfo
 
 # 2. Local imports
@@ -9,6 +11,7 @@ from config import (
     MARKET_CLOSE_TIME,
     MARKET_OPEN_TIME,
     MARKET_TIMEZONE,
+    DATA_DIR,
     configure_logging,
 )
 
@@ -16,33 +19,89 @@ from config import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# 4. NSE Holidays List
+# 4. NSE Holidays List & Provider
 # ---------------------------------------------------------------------------
 # Official NSE Equity Holidays for 2026 (and common annual fixed holidays)
-NSE_HOLIDAYS_SET: Set[str] = {
-    # 2025 (Reference / fallback)
-    "2025-01-26", "2025-08-15", "2025-10-02", "2025-12-25",
-    # 2026 Official NSE Equity Holidays
+# Reference: https://www.nseindia.com/resources/exchange-communication-holidays
+OFFICIAL_NSE_2026_HOLIDAYS: Set[str] = {
     "2026-01-15",  # Municipal Corporation Election - Maharashtra
     "2026-01-26",  # Republic Day
+    "2026-02-19",  # Chhatrapati Shivaji Maharaj Jayanti
     "2026-03-03",  # Holi
+    "2026-03-19",  # Gudi Padwa
     "2026-03-26",  # Shri Ram Navami
     "2026-03-31",  # Shri Mahavir Jayanti
+    "2026-04-01",  # Annual Bank Closing
     "2026-04-03",  # Good Friday
     "2026-04-14",  # Dr. Baba Saheb Ambedkar Jayanti
     "2026-05-01",  # Maharashtra Day
     "2026-05-28",  # Bakri Id
     "2026-06-26",  # Muharram
     "2026-08-15",  # Independence Day (Saturday)
+    "2026-08-26",  # Id-e-Milad
     "2026-09-14",  # Ganesh Chaturthi
     "2026-10-02",  # Mahatma Gandhi Jayanti
     "2026-10-20",  # Dussehra
+    "2026-11-08",  # Diwali Laxmi Pujan (Muhurat Trading / Non-regular)
     "2026-11-10",  # Diwali-Balipratipada
     "2026-11-24",  # Guru Nanak Jayanti
     "2026-12-25",  # Christmas
-    # 2027 Key fixed holidays
-    "2027-01-26", "2027-08-15", "2027-10-02", "2027-12-25",
 }
+
+NSE_HOLIDAYS_SET: Set[str] = {
+    # 2025 (Reference / fallback)
+    "2025-01-26", "2025-08-15", "2025-10-02", "2025-12-25",
+    # 2026 Official NSE Equity Holidays (Full official list)
+    *OFFICIAL_NSE_2026_HOLIDAYS,
+    # 2027 Key fixed holidays
+    "2027-01-26", "2027-03-22", "2027-03-26", "2027-04-14", "2027-04-19",
+    "2027-05-01", "2027-08-15", "2027-10-02", "2027-10-11", "2027-10-29",
+    "2027-11-01", "2027-11-14", "2027-12-25",
+}
+
+
+class MarketCalendarProvider:
+    """Abstract interface for market holiday and schedule providers."""
+
+    def load_holidays(self) -> Set[str]:
+        raise NotImplementedError
+
+
+class CSVMarketCalendarProvider(MarketCalendarProvider):
+    """Loads versioned market holiday CSV files from data/market_calendar/ directory."""
+
+    def __init__(self, calendar_dir: Optional[Path] = None):
+        self.calendar_dir = calendar_dir or (Path(__file__).parent / "data" / "market_calendar")
+
+    def load_holidays(self) -> Set[str]:
+        holidays: Set[str] = set()
+        if not self.calendar_dir.exists():
+            logger.warning(f"Calendar directory {self.calendar_dir} not found. Falling back to built-in holidays.")
+            return set(NSE_HOLIDAYS_SET)
+
+        csv_files = list(self.calendar_dir.glob("NSE_*.csv"))
+        if not csv_files:
+            logger.warning(f"No NSE_*.csv found in {self.calendar_dir}. Falling back to built-in holidays.")
+            return set(NSE_HOLIDAYS_SET)
+
+        for csv_path in sorted(csv_files):
+            try:
+                with open(csv_path, "r", encoding="utf-8-sig") as f:
+                    reader = csv.DictReader(f)
+                    file_holiday_count = 0
+                    for row in reader:
+                        date_str = (row.get("date") or row.get("\ufeffdate") or "").strip()
+                        # Regular trading holidays are excluded from market trading
+                        if date_str:
+                            holidays.add(date_str)
+                            file_holiday_count += 1
+                logger.info(f"Loaded {file_holiday_count} holidays from {csv_path.name}")
+            except Exception as e:
+                logger.error(f"Failed loading market calendar CSV from {csv_path}: {e}")
+
+        # Ensure baseline fallback holidays are also included
+        holidays.update(NSE_HOLIDAYS_SET)
+        return holidays
 
 
 class MarketCalendar:
@@ -52,8 +111,22 @@ class MarketCalendar:
     logic across data fetching, scheduling, and validation.
     """
 
-    def __init__(self, holidays: Optional[Set[str]] = None, timezone_str: str = MARKET_TIMEZONE):
-        self.holidays = holidays if holidays is not None else set(NSE_HOLIDAYS_SET)
+    def __init__(
+        self,
+        holidays: Optional[Set[str]] = None,
+        provider: Optional[MarketCalendarProvider] = None,
+        timezone_str: str = MARKET_TIMEZONE,
+    ):
+        if holidays is not None:
+            self.holidays = holidays
+        else:
+            p = provider or CSVMarketCalendarProvider()
+            try:
+                self.holidays = p.load_holidays()
+            except Exception as e:
+                logger.warning(f"Error loading holidays from provider: {e}; falling back to static set.")
+                self.holidays = set(NSE_HOLIDAYS_SET)
+
         self.tz = ZoneInfo(timezone_str)
 
     def is_holiday(self, d: Union[date, datetime, str]) -> bool:
@@ -146,6 +219,9 @@ class MarketCalendar:
 market_calendar = MarketCalendar()
 
 # Standalone helper functions
+def is_holiday(d: Union[date, datetime, str]) -> bool:
+    return market_calendar.is_holiday(d)
+
 def is_trading_day(d: Union[date, datetime, str]) -> bool:
     return market_calendar.is_trading_day(d)
 

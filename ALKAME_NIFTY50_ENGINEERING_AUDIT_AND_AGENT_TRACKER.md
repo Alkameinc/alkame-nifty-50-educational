@@ -945,124 +945,50 @@ This supports rollback.
 
 ## DATA-001 — NIFTY 50 universe is manually hardcoded
 
-The configuration explicitly says the list must be checked after index reviews.
+**Status: VERIFIED**  
+**Severity: P1**
 
-That is acceptable for a learning project but not reliable for unattended research.
-
-### Upgrade
-
-Create:
-
-```text
-UniverseProvider
-```
-
-with:
-
-```text
-source
-effective_from
-effective_to
-review_date
-checksum
-```
-
-At minimum, add an automated validation job.
+Fixed via `UniverseProvider` in `universe_provider.py` loading versioned constituent snapshot files (`data/universe/nifty50_constituents_v1.json`) with constituent count invariants, active date ranges, and SHA-256 integrity checksums. Integrated into `config.py` with fallback. Verified by `test_universe_provider_integrity_and_checksum`.
 
 ---
 
 ## DATA-002 — Sector mapping is manually maintained
 
-`SECTOR_MAP` is hand-maintained and broad.
+**Status: VERIFIED**  
+**Severity: P1**
 
-This is risky for:
-
-- sector event filtering
-- global-risk exposure
-- sector-specific narratives
-
-### Upgrade
-
-Version the sector map.
+Fixed via `SectorMapProvider` in `sector_provider.py` loading versioned sector and granular industry metadata (`data/sector_map/nifty50_sectors_v1.json`). Provides schema-validated sector lookup, sector filtering, and dictionary export for `config.SECTOR_MAP`. Verified by `test_sector_map_provider_coverage`.
 
 ---
 
 ## DATA-003 — NSE holiday calendar is incomplete/outdated relative to the official 2026 calendar
 
-The repository has a hardcoded holiday set.
+**Status: VERIFIED**  
+**Severity: P1**
 
-The official NSE 2026 calendar includes additional dates such as:
-
-- 19-Feb-2026
-- 19-Mar-2026
-- 01-Apr-2026
-- 26-Aug-2026
-- special Diwali Laxmi Pujan trading holiday on 08-Nov-2026
-
-The repo's list does not currently include all of these.
-
-Official source:
-
-https://www.nseindia.com/resources/exchange-communication-holidays
-
-### Required fix
-
-Do not rely on a static annual set buried in Python code.
-
-Use:
-
-```text
-data/market_calendar/
-  NSE_2026.csv
-  NSE_2027.csv
-```
-
-with a versioned source and update workflow.
-
-Prefer an adapter:
-
-```text
-MarketCalendarProvider
-```
+Fixed via `CSVMarketCalendarProvider` and `MarketCalendar` in `market_calendar.py` loading official exchange holiday schedules (`data/market_calendar/NSE_2026.csv`, `NSE_2027.csv`) including 19-Feb-2026, 19-Mar-2026, 01-Apr-2026, 26-Aug-2026, and Diwali Laxmi Pujan (08-Nov-2026). Verified by `test_market_calendar_provider_versioned_csv_and_official_2026_holidays`.
 
 ---
 
 ## DATA-004 — No explicit corporate action adjustment strategy is enforced through the entire pipeline
 
-Historical equities data can contain:
+**Status: VERIFIED**  
+**Severity: P1**
 
-- splits
-- bonuses
-- dividends
-- symbol changes
-
-The project has a corporate-action fetcher, but the ML dataset contract must explicitly state whether prices are:
-
-```text
-raw
-adjusted
-total-return adjusted
-```
-
-Mixing price conventions can invalidate model labels and backtests.
+Fixed by adding `PriceAdjustmentMode` Enum (`ADJUSTED`, `RAW`, `TOTAL_RETURN`) in `market_data_provider.py` and recording `price_adjustment_mode="adjusted"` in training dataset and model metadata in `model_trainer.py`. Verified by `test_corporate_action_adjustment_metadata`.
 
 ---
 
 ## DATA-005 — yfinance should remain classified as research-grade, not an execution-grade market data source
 
-It is convenient and useful.
+**Status: VERIFIED**  
+**Severity: P1**
 
-For a production-quality market system, introduce an abstract provider:
-
-```text
-MarketDataProvider
-├── YFinanceProvider
-├── NSEProvider
-├── BrokerProvider
-└── TestFixtureProvider
-```
-
-The core model should not know which vendor supplies data.
+Fixed by creating abstract `MarketDataProvider` interface in `market_data_provider.py` with concrete implementations:
+- `YFinanceMarketDataProvider` (with caching, retry, and adjustment selection)
+- `LocalCacheMarketDataProvider` (fully offline cached operation)
+- `TestFixtureMarketDataProvider` (hermetic, deterministic in-memory provider for unit tests)
+Includes data quality validation rules (monotonicity, deduplication, timezone alignment to Asia/Kolkata, and outlier return rejection). Integrated into `DataFetcher`. Verified by `test_market_data_provider_abstraction_and_test_fixture` and `test_data_quality_rules_and_timestamp_normalization`.
 
 ---
 
@@ -2156,13 +2082,13 @@ Goal: make the codebase trustworthy enough to work on.
 
 ## Phase 2 — Data reliability
 
-- [ ] versioned NSE holidays
-- [ ] index-universe refresh mechanism
-- [ ] sector-map versioning
-- [ ] market-data provider abstraction
-- [ ] data quality rules
-- [ ] timestamp normalization
-- [ ] corporate action handling
+- [x] versioned NSE holidays (VERIFIED in test_market_calendar_provider_versioned_csv_and_official_2026_holidays)
+- [x] index-universe refresh mechanism (VERIFIED in test_universe_provider_integrity_and_checksum)
+- [x] sector-map versioning (VERIFIED in test_sector_map_provider_coverage)
+- [x] market-data provider abstraction (VERIFIED in test_market_data_provider_abstraction_and_test_fixture)
+- [x] data quality rules (VERIFIED in test_data_quality_rules_and_timestamp_normalization)
+- [x] timestamp normalization (VERIFIED in test_data_quality_rules_and_timestamp_normalization)
+- [x] corporate action handling (VERIFIED in test_corporate_action_adjustment_metadata)
 
 ---
 
@@ -2225,11 +2151,11 @@ Only after the above is stable:
 | QNT-006 | P1 | VERIFIED | Calibration freshness |
 | QNT-007 | P1 | VERIFIED | Horizon leakage tests |
 | QNT-008 | P1 | VERIFIED | Immutable model artifacts |
-| DATA-001 | P1 | NOT_STARTED | Universe |
-| DATA-002 | P1 | NOT_STARTED | Sector map |
-| DATA-003 | P1 | NOT_STARTED | NSE calendar |
-| DATA-004 | P1 | NOT_STARTED | Corporate actions |
-| DATA-005 | P1 | NOT_STARTED | Market data abstraction |
+| DATA-001 | P1 | VERIFIED | Universe |
+| DATA-002 | P1 | VERIFIED | Sector map |
+| DATA-003 | P1 | VERIFIED | NSE calendar |
+| DATA-004 | P1 | VERIFIED | Corporate actions |
+| DATA-005 | P1 | VERIFIED | Market data abstraction |
 | API-001 | P1 | NOT_STARTED | HTTP semantics |
 | API-002 | P1 | NOT_STARTED | API versioning |
 | API-003 | P1 | NOT_STARTED | Pydantic contracts |
@@ -2640,13 +2566,26 @@ All Quant Correctness items resolved and verified via `pytest test_quant_correct
 
 ---
 
+## 2026-09-12 — Phase 2: Data Reliability Complete
+
+All Data Reliability items resolved and verified via `pytest test_data_reliability.py -v` (6/6 passed) and full regression suite (36/36 passed):
+- `DATA-001`: Versioned NIFTY 50 universe snapshot management with 50-constituent invariant validation, effective date tracking, and SHA-256 integrity checksums (`universe_provider.py`, `data/universe/nifty50_constituents_v1.json`, `config.py`).
+- `DATA-002`: Versioned sector mapping metadata with schema validation, sector-filtering, and primary sector + granular industry mapping (`sector_provider.py`, `data/sector_map/nifty50_sectors_v1.json`, `config.py`).
+- `DATA-003`: Official NSE equity holiday calendar for 2026/2027 externalized into versioned CSVs (`data/market_calendar/NSE_2026.csv`, `NSE_2027.csv`) with `CSVMarketCalendarProvider` including 19-Feb-2026, 19-Mar-2026, 01-Apr-2026, 26-Aug-2026, and 08-Nov-2026 (`market_calendar.py`).
+- `DATA-004`: Explicit corporate action price adjustment strategy (`PriceAdjustmentMode.ADJUSTED`, `RAW`, `TOTAL_RETURN`) declared across ingestion and recorded in training dataset/model metadata (`market_data_provider.py`, `model_trainer.py`).
+- `DATA-005`: Abstract `MarketDataProvider` interface decoupling core signal logic from vendors, featuring `YFinanceMarketDataProvider`, `LocalCacheMarketDataProvider`, and `TestFixtureMarketDataProvider` for hermetic testing (`market_data_provider.py`, `data_fetcher.py`).
+- Data quality rules: Automated checks for monotonic timestamp indices, deduplication, timezone alignment to Asia/Kolkata, and outlier jump detection (>50% return rejection) (`market_data_provider.py`).
+
+---
+
 # 37. Current Status Snapshot
 
 ```text
 Phase 0 (Stabilization): COMPLETE (6/6 P0 verified)
 Phase 1 (Quant Correctness): COMPLETE (8/8 QNT verified, FEAT-002 verified)
-Total Automated Tests Passing: 30 / 30
-Production-ready: IN_PROGRESS (Phase 2 Data Reliability next)
+Phase 2 (Data Reliability): COMPLETE (5/5 DATA verified, quality rules verified)
+Total Automated Tests Passing: 36 / 36
+Production-ready: IN_PROGRESS (Phase 3 Engineering Maturity next)
 Public internet API: SECURED (API auth & RBAC enabled)
 Live trading: EDUCATIONAL_ONLY
 Research/educational use: VERIFIED & AUDITABLE

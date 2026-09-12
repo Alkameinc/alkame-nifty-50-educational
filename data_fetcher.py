@@ -29,6 +29,16 @@ from config import (
     MARKET_TIMEZONE,
 )
 from health_monitor import registry as health_registry
+from market_data_provider import (
+    DataStatus,
+    PriceAdjustmentMode,
+    MarketDataResult,
+    MarketDataProvider,
+    YFinanceMarketDataProvider,
+    LocalCacheMarketDataProvider,
+    TestFixtureMarketDataProvider,
+    DataQualityReport,
+)
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -40,32 +50,19 @@ MAX_RETRIES = 3
 RETRY_BACKOFF_SECONDS = 2
 REQUIRED_COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
 
-class DataStatus(Enum):
-    LIVE = "LIVE"
-    CACHED_FRESH = "CACHED_FRESH"
-    CACHED_STALE = "CACHED_STALE"
-    UNAVAILABLE = "UNAVAILABLE"
-
-@dataclass
-class MarketDataResult:
-    data: Optional[pd.DataFrame]
-    status: DataStatus
-    source: str
-
-
 # ---------------------------------------------------------------------------
 # 6. Classes and functions
 # ---------------------------------------------------------------------------
 class DataFetcher:
     """
-    Single interface to yfinance for OHLCV bars. Every fetch goes through
-    retry logic; on total failure it falls back to the last good cached CSV
-    for that ticker (if one exists) so the pipeline degrades gracefully
-    instead of crashing.
+    Interface for OHLCV bars and fundamentals, wrapping an underlying
+    MarketDataProvider (DATA-005) with caching, quality verification,
+    and staleness detection.
     """
 
-    def __init__(self, cache_dir: Path = CACHE_DIR):
+    def __init__(self, cache_dir: Path = CACHE_DIR, provider: Optional[MarketDataProvider] = None):
         self.cache_dir = cache_dir
+        self.provider = provider or YFinanceMarketDataProvider(cache_dir=cache_dir)
         ensure_directories()
 
     def _cache_path(self, ticker: str, interval: str = BAR_INTERVAL) -> Path:
