@@ -1,18 +1,18 @@
 # 1. Standard library imports
 import logging
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 
 # 2. Third-party imports
 # 3. Local imports
 from config import (
-    DB_PATH,
     HEALTH_DEGRADED_THRESHOLD,
     HEALTH_DOWN_THRESHOLD,
     HEALTH_THRESHOLD_OVERRIDES,
     configure_logging,
 )
+from database import SessionLocal
+from models import HealthStatus as DBHealthStatus
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -36,50 +36,21 @@ class HealthStatus:
 # 6. Classes
 # ---------------------------------------------------------------------------
 class HealthRegistry:
-    def __init__(self, db_path=DB_PATH):
-        self.db_path = str(db_path)
-        self._init_db()
-
-    def _init_db(self):
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS health_status (
-                        component TEXT PRIMARY KEY,
-                        status TEXT,
-                        last_success_at TEXT,
-                        last_error TEXT,
-                        last_error_at TEXT,
-                        consecutive_failures INTEGER,
-                        detail TEXT
-                    )
-                """)
-        except Exception as e:
-            logger.error(f"Failed to initialize health_status table: {e}")
+    def __init__(self, db_path=None):
+        pass
 
     def report(self, component: str, ok: bool, detail: str = "", error: str | None = None) -> HealthStatus:
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT * FROM health_status WHERE component = ?", (component,))
-                row = cursor.fetchone()
+            with SessionLocal() as db:
+                row = db.query(DBHealthStatus).filter(DBHealthStatus.component == component).first()
 
                 now_str = datetime.now().isoformat()
 
                 if row:
-                    (
-                        _,
-                        curr_status,
-                        curr_last_success,
-                        curr_last_error,
-                        curr_last_error_at,
-                        curr_failures,
-                        curr_detail,
-                    ) = row
-                    consecutive_failures = 0 if ok else (curr_failures + 1)
-                    last_success_at = now_str if ok else curr_last_success
-                    last_error = error if not ok else curr_last_error
-                    last_error_at = now_str if not ok else curr_last_error_at
+                    consecutive_failures = 0 if ok else (row.consecutive_failures + 1)
+                    last_success_at = now_str if ok else row.last_success_at
+                    last_error = error if not ok else row.last_error
+                    last_error_at = now_str if not ok else row.last_error_at
                 else:
                     consecutive_failures = 0 if ok else 1
                     last_success_at = now_str if ok else None
@@ -98,31 +69,33 @@ class HealthRegistry:
                 else:
                     status = "OK"
 
-                cursor.execute(
-                    """
-                    INSERT INTO health_status (component, status, last_success_at, last_error, last_error_at, consecutive_failures, detail)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(component) DO UPDATE SET
-                        status = excluded.status,
-                        last_success_at = excluded.last_success_at,
-                        last_error = excluded.last_error,
-                        last_error_at = excluded.last_error_at,
-                        consecutive_failures = excluded.consecutive_failures,
-                        detail = excluded.detail
-                """,
-                    (component, status, last_success_at, last_error, last_error_at, consecutive_failures, detail),
-                )
-                conn.commit()
+                if row:
+                    row.consecutive_failures = consecutive_failures
+                    row.last_success_at = last_success_at
+                    row.last_error = last_error
+                    row.last_error_at = last_error_at
+                    row.status = status
+                    row.detail = detail
+                else:
+                    row = DBHealthStatus(
+                        component=component,
+                        status=status,
+                        last_success_at=last_success_at,
+                        last_error=last_error,
+                        last_error_at=last_error_at,
+                        consecutive_failures=consecutive_failures,
+                        detail=detail,
+                    )
+                    db.add(row)
 
-                def parse_dt(dt_str):
-                    return datetime.fromisoformat(dt_str) if dt_str else None
+                db.commit()
 
                 return HealthStatus(
                     component=component,
                     status=status,
-                    last_success_at=parse_dt(last_success_at),
+                    last_success_at=datetime.fromisoformat(last_success_at) if last_success_at else None,
                     last_error=last_error,
-                    last_error_at=parse_dt(last_error_at),
+                    last_error_at=datetime.fromisoformat(last_error_at) if last_error_at else None,
                     consecutive_failures=consecutive_failures,
                     detail=detail,
                 )
@@ -133,34 +106,32 @@ class HealthRegistry:
                 status="UNKNOWN",
                 last_success_at=None,
                 last_error=str(e),
-                last_error_at=datetime.now(),
+                last_error_at=None,
                 consecutive_failures=0,
                 detail="Failed to write to DB",
             )
 
     def get_status(self, component: str | None = None) -> list[HealthStatus]:
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
+            with SessionLocal() as db:
                 if component:
-                    cursor.execute("SELECT * FROM health_status WHERE component = ?", (component,))
-                    rows = cursor.fetchall()
+                    rows = db.query(DBHealthStatus).filter(DBHealthStatus.component == component).all()
                 else:
-                    cursor.execute("SELECT * FROM health_status")
-                    rows = cursor.fetchall()
+                    rows = db.query(DBHealthStatus).all()
 
                 statuses = []
                 for row in rows:
-                    comp, stat, ls, le, lea, cf, det = row
                     statuses.append(
                         HealthStatus(
-                            component=comp,
-                            status=stat,
-                            last_success_at=datetime.fromisoformat(ls) if ls else None,
-                            last_error=le,
-                            last_error_at=datetime.fromisoformat(lea) if lea else None,
-                            consecutive_failures=cf,
-                            detail=det,
+                            component=row.component,
+                            status=row.status,
+                            last_success_at=(
+                                datetime.fromisoformat(row.last_success_at) if row.last_success_at else None
+                            ),
+                            last_error=row.last_error,
+                            last_error_at=datetime.fromisoformat(row.last_error_at) if row.last_error_at else None,
+                            consecutive_failures=row.consecutive_failures,
+                            detail=row.detail,
                         )
                     )
                 return statuses
@@ -190,20 +161,31 @@ registry = HealthRegistry()
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import os
+    import tempfile
 
-    from config import DB_DIR
+    # For tests, we use a separate test db, so we patch SessionLocal
+    from database import Base
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
 
     configure_logging(log_filename="health_monitor_selftest.log")
     logger.info("Running health_monitor.py self-test...")
 
-    test_db_path = DB_DIR / "test_health_selftest.sqlite3"
-    if test_db_path.exists():
-        os.remove(test_db_path)
+    test_db_path = tempfile.mktemp(suffix=".sqlite3")
+    engine = create_engine(f"sqlite:///{test_db_path}")
+    import models
+
+    Base.metadata.create_all(bind=engine)
+    TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    import health_monitor
+
+    health_monitor.SessionLocal = TestSessionLocal
 
     try:
-        registry = HealthRegistry(db_path=test_db_path)
+        print("\n=== HEALTH MONITOR SELF-TEST RESULT ===")
 
-        # Test: empty registry returns UNKNOWN
+        # Test: empty DB should return UNKNOWN (fixed fail-open)
         assert registry.get_overall_status() == "UNKNOWN"
 
         # Test: report a success, confirm status == "OK"
@@ -248,8 +230,7 @@ if __name__ == "__main__":
         logger.error(f"health_monitor.py self-test crashed: {e}")
         print(f"STATUS: FAIL — {e}")
     finally:
-        if test_db_path.exists():
-            try:
-                os.remove(test_db_path)
-            except:
-                pass
+        try:
+            os.remove(test_db_path)
+        except:
+            pass
