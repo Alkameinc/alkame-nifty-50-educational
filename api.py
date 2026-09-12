@@ -6,6 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 
+from api_schemas import (
+    ErrorResponse,
+    HealthResponse,
+    MultiHorizonSignalResponse,
+    SymbolsResponse,
+)
 from config import (
     API_AUTH_ENABLED,
     API_KEYS_ROLE_MAP,
@@ -16,15 +22,6 @@ from config import (
 )
 from health_monitor import registry as health_registry
 from history_manager import HistoryManager
-from api_schemas import (
-    MultiHorizonSignalResponse,
-    HealthResponse,
-    SymbolsResponse,
-    HistoryResponse,
-    OverrideRequest,
-    OverrideResponse,
-    ErrorResponse,
-)
 from scalping import ScalpingEngine
 from scheduler import Scheduler
 
@@ -200,7 +197,7 @@ def get_signal(symbol: str):
     )
 
     all_horizons_data = {}
-    for hor, sig in signals.items():
+    for hor, sig in multi_signal.signals.items():
         if sig.action == "BUY":
             verdict_text = "Strong opportunity identified. Proceed with entry according to your risk parameters."
         elif sig.action == "SELL":

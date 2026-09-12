@@ -30,10 +30,6 @@ from sklearn.metrics import accuracy_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-# 3. Local imports
-from database import SessionLocal
-from models import ModelRegistry
-from sqlalchemy import update
 from config import (
     ENSEMBLE_LR_MAX_ITER,
     ENSEMBLE_MODEL_TYPES,
@@ -50,8 +46,12 @@ from config import (
     configure_logging,
     ensure_directories,
 )
+
+# 3. Local imports
+from database import SessionLocal
 from health_monitor import registry as health_registry
 from model_trainer import ModelTrainer
+from models import ModelRegistry
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)

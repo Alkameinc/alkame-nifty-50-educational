@@ -4,18 +4,18 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
-from sqlalchemy import or_, and_, update
 from sqlalchemy.orm import sessionmaker
 
-from config import DB_PATH, HORIZON_INTRADAY, HORIZON_3D, configure_logging, ensure_directories
+from config import DB_PATH, configure_logging, ensure_directories
 
 TICKER_DELIMITER = ","
 from database import SessionLocal
-from health_monitor import registry as health_registry
-from predictor import PredictionSignal
-from models import Prediction as DBPrediction, Event as DBEvent, BacktestMetric as DBBacktestMetric
-
 from event_classifier import Event
+from health_monitor import registry as health_registry
+from models import BacktestMetric as DBBacktestMetric
+from models import Event as DBEvent
+from models import Prediction as DBPrediction
+from predictor import PredictionSignal
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,7 @@ class HistoryManager:
         self.db_path = db_path
         if db_path and str(db_path) != str(DB_PATH):
             from sqlalchemy import create_engine
+
             from database import Base
 
             self.engine = create_engine(f"sqlite:///{db_path}")
@@ -162,13 +163,13 @@ class HistoryManager:
                 if horizon:
                     query = query.filter(DBPrediction.horizon == horizon)
                 if only_unresolved:
-                    query = query.filter(DBPrediction.outcome_resolved == False)
+                    query = query.filter(DBPrediction.outcome_resolved.is_(False))
                 if model_version:
                     query = query.filter(DBPrediction.model_version == model_version)
                 if feature_version:
                     query = query.filter(DBPrediction.feature_version == feature_version)
                 if only_out_of_sample:
-                    query = query.filter(DBPrediction.is_out_of_sample == True)
+                    query = query.filter(DBPrediction.is_out_of_sample.is_(True))
 
                 rows = query.order_by(DBPrediction.id.desc()).limit(limit).all()
 
@@ -359,6 +360,7 @@ class HistoryManager:
 
 if __name__ == "__main__":
     import os
+
     from config import DB_DIR
 
     configure_logging(log_filename="history_manager_selftest.log")

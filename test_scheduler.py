@@ -1,9 +1,8 @@
-import logging
-import pandas as pd
-import pytest
-from scheduler import Scheduler
-
 from unittest.mock import patch
+
+import pandas as pd
+
+from scheduler import Scheduler
 
 
 def test_scheduler_run_one_cycle_success():
