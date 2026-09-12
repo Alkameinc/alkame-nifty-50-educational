@@ -163,17 +163,17 @@ if __name__ == "__main__":
     import os
     import tempfile
 
-    # For tests, we use a separate test db, so we patch SessionLocal
-    from database import Base
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+
+    # For tests, we use a separate test db, so we patch SessionLocal
+    from database import Base
 
     configure_logging(log_filename="health_monitor_selftest.log")
     logger.info("Running health_monitor.py self-test...")
 
     test_db_path = tempfile.mktemp(suffix=".sqlite3")
     engine = create_engine(f"sqlite:///{test_db_path}")
-    import models
 
     Base.metadata.create_all(bind=engine)
     TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
