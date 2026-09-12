@@ -201,9 +201,7 @@ class RuntimeValidator:
                 bins=[],
             )
 
-    def get_calibrated_confidence(
-        self, raw_confidence: float, calibration_result: CalibrationResult
-    ) -> float | None:
+    def get_calibrated_confidence(self, raw_confidence: float, calibration_result: CalibrationResult) -> float | None:
         """
         Returns the historically-observed empirical accuracy for the bin that
         raw_confidence falls into — i.e. what confidence SHOULD actually be

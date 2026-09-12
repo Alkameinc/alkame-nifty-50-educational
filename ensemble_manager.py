@@ -498,9 +498,7 @@ class EnsembleManager:
         versions.sort(key=lambda x: x.get("trained_at", ""), reverse=True)
         return versions
 
-    def predict(
-        self, symbol: str, X: pd.DataFrame, horizon: str = HORIZON_INTRADAY
-    ) -> list[EnsemblePrediction] | None:
+    def predict(self, symbol: str, X: pd.DataFrame, horizon: str = HORIZON_INTRADAY) -> list[EnsemblePrediction] | None:
         """Runs the saved ensemble on new feature rows (must already be the
         '_feat'-lagged columns matching what the ensemble was trained on)."""
         loaded = self.load_ensemble(symbol, horizon=horizon)
