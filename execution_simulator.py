@@ -1,7 +1,7 @@
-# 1. Standard library imports
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import cast
 
 # 2. Third-party imports
 import numpy as np
@@ -155,10 +155,11 @@ class ExecutionSimulator:
         Runs simulation across df bars using signals series (indexed by timestamp, values: 1=UP, -1=DOWN, 0=FLAT).
         """
         scenario = cost_scenario or self.cost_scenario
-        horizon_bars = HORIZON_CONFIG.get(horizon, {}).get("horizon_bars", 5)
+        horizon_cfg = HORIZON_CONFIG.get(horizon, HORIZON_CONFIG["INTRADAY"])
+        horizon_bars = cast(int, horizon_cfg.get("horizon_bars", 5))
 
         # Default stop/target derived from horizon deadband if not explicitly given
-        deadband = HORIZON_CONFIG.get(horizon, {}).get("deadband_pct_default", 0.5)
+        deadband = cast(float, horizon_cfg.get("deadband_pct_default", 0.5))
         sl_pct = stop_loss_pct if stop_loss_pct is not None else deadband * 1.5
         tp_pct = profit_target_pct if profit_target_pct is not None else deadband * 2.5
 

@@ -383,7 +383,7 @@ class DataFetcher:
                     f"{ticker} data is STALE: last bar is {age_minutes:.1f} minutes old "
                     f"(threshold={DATA_STALENESS_THRESHOLD_MINUTES}m)"
                 )
-            return is_stale
+            return bool(is_stale)
         except Exception as e:
             logger.error(f"Failed staleness check for {ticker}: {e}")
             return True  # fail safe: treat unknown state as stale/unsafe
@@ -420,7 +420,7 @@ class DataFetcher:
                     f"{ticker} daily data is STALE: last bar is {trading_days} trading days old "
                     f"(threshold={DATA_STALENESS_THRESHOLD_TRADING_DAYS})"
                 )
-            return is_stale
+            return bool(is_stale)
         except Exception as e:
             logger.error(f"Failed daily staleness check for {ticker}: {e}")
             return True
@@ -440,7 +440,8 @@ if __name__ == "__main__":
         print("\n=== DATA FETCHER SELF-TEST RESULT ===")
 
         # Test 1: single ticker fetch
-        df = fetcher.fetch_ohlcv(test_symbol)
+        raw_df = fetcher.fetch_ohlcv(test_symbol)
+        df = raw_df if isinstance(raw_df, pd.DataFrame) else None
         single_ok = df is not None and not df.empty
         print(
             f"Single ticker fetch ({test_symbol}): {'OK' if single_ok else 'FAILED'}"
@@ -461,14 +462,16 @@ if __name__ == "__main__":
             print(f"Staleness check ran successfully. Stale={stale}")
 
         # Test 3: NIFTY index fetch
-        index_df = fetcher.fetch_nifty_index()
+        raw_index = fetcher.fetch_nifty_index()
+        index_df = raw_index if isinstance(raw_index, pd.DataFrame) else None
         index_ok = index_df is not None and not index_df.empty
         print(
             f"NIFTY index fetch: {'OK' if index_ok else 'FAILED'}" f" — rows={0 if index_df is None else len(index_df)}"
         )
 
         # Test 4: one global ticker fetch (Gold) to confirm the mapping works
-        gold_df = fetcher.fetch_ohlcv(GLOBAL_TICKERS["GOLD"])
+        raw_gold = fetcher.fetch_ohlcv(GLOBAL_TICKERS["GOLD"])
+        gold_df = raw_gold if isinstance(raw_gold, pd.DataFrame) else None
         gold_ok = gold_df is not None and not gold_df.empty
         print(
             f"Global ticker fetch (Gold, {GLOBAL_TICKERS['GOLD']}): {'OK' if gold_ok else 'FAILED'}"

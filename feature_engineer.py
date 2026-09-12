@@ -626,6 +626,7 @@ if __name__ == "__main__":
             "pct_from_user_avg_cost_feat",
             "has_position_feat",
         ]
+        assert features is not None
         missing_cols = [c for c in expected_cols if c not in features.columns]
         print(
             f"All expected columns present: {len(missing_cols) == 0}"
@@ -642,6 +643,7 @@ if __name__ == "__main__":
         mutated_df.iloc[-1, mutated_df.columns.get_loc("Volume")] *= 20
 
         mutated_features = engineer.engineer_features(mutated_df, index_df)
+        assert mutated_features is not None
 
         feat_cols = [c for c in features.columns if c.endswith(ML_SAFE_SUFFIX)]
         no_lookahead = True
@@ -672,7 +674,8 @@ if __name__ == "__main__":
             stock_df_long, index_df_long, horizon="30D"  # Any non-INTRADAY horizon
         )
 
-        horizon_ok = features_long is not None and not features_long.empty
+        assert features_long is not None
+        horizon_ok = not features_long.empty
         print(f"Multi-horizon feature computation ran: {'OK' if horizon_ok else 'FAILED'}")
 
         intraday_excluded = "vwap_feat" not in features_long.columns and "gap_pct_feat" not in features_long.columns

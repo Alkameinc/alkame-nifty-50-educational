@@ -1,6 +1,7 @@
 import json
 import logging
 
+import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException, Response, Security, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -215,17 +216,20 @@ def get_signal(symbol: str):
         raise HTTPException(status_code=404, detail="Invalid symbol")
 
     yf_ticker = to_yfinance_ticker(symbol)
-    stock_df = scheduler.data_fetcher.fetch_ohlcv(yf_ticker)
-    index_df = scheduler.data_fetcher.fetch_nifty_index()
+    raw_stock = scheduler.data_fetcher.fetch_ohlcv(yf_ticker)
+    raw_index = scheduler.data_fetcher.fetch_nifty_index()
+    stock_df = getattr(raw_stock, "df", raw_stock)
+    index_df = getattr(raw_index, "df", raw_index)
 
-    if stock_df is None or stock_df.empty:
+    if stock_df is None or not isinstance(stock_df, pd.DataFrame) or stock_df.empty:
         raise HTTPException(status_code=503, detail=f"Could not fetch data for {symbol}")
 
     scheduler.resolve_pending_outcomes(symbol, stock_df)
-    multi_signal = scheduler.run_one_cycle_for_symbol(
+    cycle_res = scheduler.run_one_cycle_for_symbol(
         symbol, stock_df, index_df, macro_events=[], corporate_events=[], news_articles=[]
     )
-    if multi_signal is None or not getattr(multi_signal, "signals", None):
+    multi_signal = getattr(cycle_res, "signal", cycle_res)
+    if multi_signal is None or not hasattr(multi_signal, "signals") or not multi_signal.signals:
         raise HTTPException(status_code=503, detail=f"No signal available for {symbol}")
 
     # We can fetch narrative once
@@ -281,10 +285,12 @@ def stream_signal(symbol: str):
         raise HTTPException(status_code=404, detail="Invalid symbol")
 
     yf_ticker = to_yfinance_ticker(symbol)
-    stock_df = scheduler.data_fetcher.fetch_ohlcv(yf_ticker)
-    index_df = scheduler.data_fetcher.fetch_nifty_index()
+    raw_stock = scheduler.data_fetcher.fetch_ohlcv(yf_ticker)
+    raw_index = scheduler.data_fetcher.fetch_nifty_index()
+    stock_df = getattr(raw_stock, "df", raw_stock)
+    index_df = getattr(raw_index, "df", raw_index)
 
-    if stock_df is None or stock_df.empty:
+    if stock_df is None or not isinstance(stock_df, pd.DataFrame) or stock_df.empty:
         raise HTTPException(status_code=503, detail=f"Could not fetch data for {symbol}")
 
     scheduler.resolve_pending_outcomes(symbol, stock_df)
@@ -348,8 +354,8 @@ import threading
 import time
 
 # --- Refresh protection state ---
-_refresh_locks: dict = {}  # symbol -> threading.Lock
-_refresh_last_time: dict = {}  # symbol -> float (epoch)
+_refresh_locks: dict[str, threading.Lock] = {}  # symbol -> threading.Lock
+_refresh_last_time: dict[str, float] = {}  # symbol -> float (epoch)
 _REFRESH_COOLDOWN_SECONDS = 60  # Minimum seconds between refreshes for the same symbol
 
 
@@ -384,9 +390,11 @@ def refresh_backtest(symbol: str, response: Response = Response(), client: Clien
             }
 
         yf_ticker = to_yfinance_ticker(symbol)
-        stock_df = scheduler.data_fetcher.fetch_ohlcv(yf_ticker)
-        index_df = scheduler.data_fetcher.fetch_nifty_index()
-        if stock_df is not None and index_df is not None:
+        raw_stock = scheduler.data_fetcher.fetch_ohlcv(yf_ticker)
+        raw_index = scheduler.data_fetcher.fetch_nifty_index()
+        stock_df = getattr(raw_stock, "df", raw_stock)
+        index_df = getattr(raw_index, "df", raw_index)
+        if isinstance(stock_df, pd.DataFrame) and isinstance(index_df, pd.DataFrame) and not stock_df.empty and not index_df.empty:
             scheduler.refresh_live_worthiness(symbol, stock_df, index_df)
             _refresh_last_time[symbol] = time.time()
             return {"status": "success"}
@@ -424,11 +432,12 @@ def get_chart(symbol: str, horizon: str = "INTRADAY"):
     yf_ticker = to_yfinance_ticker(symbol)
 
     cfg = HORIZON_CONFIG.get(horizon, HORIZON_CONFIG["INTRADAY"])
-    interval = cfg["bar_interval"]
-    period = cfg["history_period"]
+    interval = str(cfg["bar_interval"])
+    period = str(cfg["history_period"])
 
-    stock_df = scheduler.data_fetcher.fetch_ohlcv(yf_ticker, interval=interval, period=period)
-    if stock_df is None or stock_df.empty:
+    raw_stock = scheduler.data_fetcher.fetch_ohlcv(yf_ticker, interval=interval, period=period)
+    stock_df = getattr(raw_stock, "df", raw_stock)
+    if stock_df is None or not isinstance(stock_df, pd.DataFrame) or stock_df.empty:
         return {"error": "No data"}
 
     # Return last 100 bars for charting

@@ -59,22 +59,23 @@ def configure_logging(log_filename: str = "app.log", level: int = logging.INFO) 
         file_handler = logging.FileHandler(log_path, encoding="utf-8")
         stream_handler = logging.StreamHandler()
 
+        formatter: logging.Formatter
         if log_format_env == "json":
             try:
-                try:
-                    from pythonjsonlogger import json as jsonlogger
+                from pythonjsonlogger.json import JsonFormatter
 
-                    formatter = jsonlogger.JsonFormatter(
+                formatter = JsonFormatter(
+                    "%(asctime)s %(levelname)s %(name)s %(message)s %(filename)s %(lineno)d"
+                )
+            except ImportError:
+                try:
+                    from pythonjsonlogger.jsonlogger import JsonFormatter as OldJsonFormatter
+
+                    formatter = OldJsonFormatter(
                         "%(asctime)s %(levelname)s %(name)s %(message)s %(filename)s %(lineno)d"
                     )
                 except ImportError:
-                    from pythonjsonlogger import jsonlogger
-
-                    formatter = jsonlogger.JsonFormatter(
-                        "%(asctime)s %(levelname)s %(name)s %(message)s %(filename)s %(lineno)d"
-                    )
-            except ImportError:
-                formatter = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
+                    formatter = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
         else:
             formatter = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
 

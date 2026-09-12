@@ -46,11 +46,16 @@ class HealthRegistry:
 
                 now_str = datetime.now().isoformat()
 
+                last_success_at: str | None = None
+                last_error: str | None = None
+                last_error_at: str | None = None
+                consecutive_failures: int = 0
+
                 if row:
-                    consecutive_failures = 0 if ok else (row.consecutive_failures + 1)
-                    last_success_at = now_str if ok else row.last_success_at
-                    last_error = error if not ok else row.last_error
-                    last_error_at = now_str if not ok else row.last_error_at
+                    consecutive_failures = 0 if ok else (int(row.consecutive_failures) + 1)
+                    last_success_at = now_str if ok else (str(row.last_success_at) if row.last_success_at else None)
+                    last_error = error if not ok else (str(row.last_error) if row.last_error else None)
+                    last_error_at = now_str if not ok else (str(row.last_error_at) if row.last_error_at else None)
                 else:
                     consecutive_failures = 0 if ok else 1
                     last_success_at = now_str if ok else None
@@ -70,12 +75,12 @@ class HealthRegistry:
                     status = "OK"
 
                 if row:
-                    row.consecutive_failures = consecutive_failures
-                    row.last_success_at = last_success_at
-                    row.last_error = last_error
-                    row.last_error_at = last_error_at
-                    row.status = status
-                    row.detail = detail
+                    setattr(row, "consecutive_failures", consecutive_failures)
+                    setattr(row, "last_success_at", last_success_at)
+                    setattr(row, "last_error", last_error)
+                    setattr(row, "last_error_at", last_error_at)
+                    setattr(row, "status", status)
+                    setattr(row, "detail", detail)
                 else:
                     row = DBHealthStatus(
                         component=component,
@@ -123,15 +128,17 @@ class HealthRegistry:
                 for row in rows:
                     statuses.append(
                         HealthStatus(
-                            component=row.component,
-                            status=row.status,
+                            component=str(row.component),
+                            status=str(row.status),
                             last_success_at=(
-                                datetime.fromisoformat(row.last_success_at) if row.last_success_at else None
+                                datetime.fromisoformat(str(row.last_success_at)) if row.last_success_at else None
                             ),
-                            last_error=row.last_error,
-                            last_error_at=datetime.fromisoformat(row.last_error_at) if row.last_error_at else None,
-                            consecutive_failures=row.consecutive_failures,
-                            detail=row.detail,
+                            last_error=str(row.last_error) if row.last_error else None,
+                            last_error_at=datetime.fromisoformat(str(row.last_error_at))
+                            if row.last_error_at
+                            else None,
+                            consecutive_failures=int(row.consecutive_failures),
+                            detail=str(row.detail),
                         )
                     )
                 return statuses

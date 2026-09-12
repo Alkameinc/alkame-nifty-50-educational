@@ -122,7 +122,7 @@ class HistoryManager:
                 db.commit()
                 db.refresh(prediction)
             health_registry.report("history_manager", ok=True)
-            return prediction.id
+            return int(prediction.id) if prediction and prediction.id is not None else None
         except Exception as e:
             logger.error(f"Failed saving prediction for {signal.symbol}: {e}")
             health_registry.report("history_manager", ok=False, detail="Failed saving prediction", error=str(e))
@@ -133,10 +133,10 @@ class HistoryManager:
             with self.SessionLocal() as db:
                 prediction = db.query(DBPrediction).filter(DBPrediction.id == prediction_id).first()
                 if prediction:
-                    prediction.outcome_resolved = True
-                    prediction.outcome_correct = prediction.model_predicted_class == actual_class
-                    prediction.outcome_actual_class = actual_class
-                    prediction.resolved_at = datetime.now().isoformat()
+                    setattr(prediction, "outcome_resolved", True)
+                    setattr(prediction, "outcome_correct", prediction.model_predicted_class == actual_class)
+                    setattr(prediction, "outcome_actual_class", actual_class)
+                    setattr(prediction, "resolved_at", datetime.now().isoformat())
                     db.commit()
             health_registry.report("history_manager", ok=True)
             return True
@@ -177,24 +177,26 @@ class HistoryManager:
                 for row in rows:
                     records.append(
                         PredictionRecord(
-                            id=row.id,
-                            symbol=row.symbol,
-                            horizon=row.horizon,
-                            model_version=row.model_version,
-                            feature_version=row.feature_version,
-                            narrative=row.narrative,
-                            dca_ladder=json.loads(row.dca_ladder) if row.dca_ladder else None,
-                            timestamp=row.timestamp,
-                            action=row.action,
-                            model_predicted_class=row.model_predicted_class,
-                            raw_confidence=row.raw_confidence,
-                            risk_adjusted_confidence=row.risk_adjusted_confidence,
-                            calibrated_confidence=row.calibrated_confidence,
-                            agreement_fraction=row.agreement_fraction,
+                            id=int(row.id),
+                            symbol=str(row.symbol),
+                            horizon=str(row.horizon),
+                            model_version=str(row.model_version),
+                            feature_version=str(row.feature_version),
+                            narrative=str(row.narrative) if row.narrative else "",
+                            dca_ladder=str(row.dca_ladder) if row.dca_ladder else "",
+                            timestamp=str(row.timestamp),
+                            action=str(row.action),
+                            model_predicted_class=str(row.model_predicted_class),
+                            raw_confidence=float(row.raw_confidence),
+                            risk_adjusted_confidence=float(row.risk_adjusted_confidence),
+                            calibrated_confidence=float(row.calibrated_confidence)
+                            if row.calibrated_confidence is not None
+                            else None,
+                            agreement_fraction=float(row.agreement_fraction),
                             outcome_resolved=bool(row.outcome_resolved),
                             outcome_correct=bool(row.outcome_correct) if row.outcome_correct is not None else None,
-                            outcome_actual_class=row.outcome_actual_class,
-                            resolved_at=row.resolved_at,
+                            outcome_actual_class=str(row.outcome_actual_class) if row.outcome_actual_class else None,
+                            resolved_at=str(row.resolved_at) if row.resolved_at else None,
                             is_out_of_sample=bool(row.is_out_of_sample),
                         )
                     )
@@ -287,21 +289,21 @@ class HistoryManager:
 
                 records = []
                 for row in rows:
-                    tickers = [t for t in row.affected_tickers.split(TICKER_DELIMITER) if t]
+                    tickers = [t for t in str(row.affected_tickers).split(TICKER_DELIMITER) if t]
                     records.append(
                         EventRecord(
-                            id=row.id,
-                            event_id=row.event_id,
-                            source=row.source,
-                            event_type=row.event_type,
-                            timestamp=row.timestamp,
-                            scope=row.scope,
+                            id=int(row.id),
+                            event_id=str(row.event_id),
+                            source=str(row.source),
+                            event_type=str(row.event_type),
+                            timestamp=str(row.timestamp),
+                            scope=str(row.scope),
                             affected_tickers=tickers,
-                            sector=row.sector,
-                            confidence_in_scope=row.confidence_in_scope,
-                            headline_or_label=row.headline_or_label,
-                            sentiment_score=row.sentiment_score,
-                            magnitude_estimate=row.magnitude_estimate,
+                            sector=str(row.sector) if row.sector else None,
+                            confidence_in_scope=float(row.confidence_in_scope),
+                            headline_or_label=str(row.headline_or_label),
+                            sentiment_score=float(row.sentiment_score) if row.sentiment_score is not None else None,
+                            magnitude_estimate=str(row.magnitude_estimate),
                         )
                     )
             health_registry.report("history_manager", ok=True)
@@ -327,14 +329,14 @@ class HistoryManager:
             with self.SessionLocal() as db:
                 row = db.query(DBBacktestMetric).filter_by(symbol=symbol, horizon=horizon).first()
                 if row:
-                    row.strategy_cumulative_return_pct = strategy_ret
-                    row.baseline_cumulative_return_pct = base_ret
-                    row.alpha_pct = alpha
-                    row.edge_check_status = edge
-                    row.calibration_status = calib
-                    row.calibration_ece = ece
-                    row.is_live_worthy = live_worthy
-                    row.updated_at = datetime.now().isoformat()
+                    setattr(row, "strategy_cumulative_return_pct", strategy_ret)
+                    setattr(row, "baseline_cumulative_return_pct", base_ret)
+                    setattr(row, "alpha_pct", alpha)
+                    setattr(row, "edge_check_status", edge)
+                    setattr(row, "calibration_status", calib)
+                    setattr(row, "calibration_ece", ece)
+                    setattr(row, "is_live_worthy", live_worthy)
+                    setattr(row, "updated_at", datetime.now().isoformat())
                 else:
                     metric = DBBacktestMetric(
                         symbol=symbol,
@@ -398,17 +400,18 @@ if __name__ == "__main__":
                 is_safe_to_trade_live=False,
                 data_stale=False,
                 suppressed=False,
-                suppression_reasons=None,
+                suppression_reasons=[],
                 horizon="INTRADAY",
                 model_version="v1.0",
                 feature_version="v1.0",
             )
             pid = manager.save_prediction(s)
-            manager.resolve_outcome(pid, actual_class=actual)
+            if pid is not None:
+                manager.resolve_outcome(pid, actual_class=actual)
 
-            if i == 0:
-                print(f"Prediction saved: id={pid}")
-                resolved_ok = manager.resolve_outcome(pid, actual_class="UP")
+                if i == 0:
+                    print(f"Prediction saved: id={pid}")
+                    resolved_ok = manager.resolve_outcome(pid, actual_class="UP")
                 predictions = manager.get_predictions(test_symbol)
                 print(f"Outcome resolved: {resolved_ok}, outcome_correct={predictions[0].outcome_correct}")
                 assert resolved_ok and predictions[0].outcome_correct is True

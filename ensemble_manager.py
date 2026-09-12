@@ -8,6 +8,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any, cast
 
 
 def _get_git_commit_sha() -> str:
@@ -176,7 +177,7 @@ class EnsembleManager:
                 )
             X, y, feature_columns = prepared
 
-            min_training_samples = HORIZON_CONFIG[horizon]["min_training_samples"]
+            min_training_samples = cast(int, HORIZON_CONFIG[horizon]["min_training_samples"])
             if len(X) < min_training_samples:
                 msg = f"Only {len(X)} usable samples for {symbol} ({horizon}), need >= {min_training_samples}."
                 logger.error(msg)
@@ -193,7 +194,7 @@ class EnsembleManager:
                     error=msg,
                 )
 
-            horizon_bars = HORIZON_CONFIG.get(horizon, {}).get("horizon_bars", 0)
+            horizon_bars = cast(int, HORIZON_CONFIG.get(horizon, {}).get("horizon_bars", 0))
             X_train, X_test, y_train, y_test = self.model_trainer.time_based_split(X, y, purge_window=horizon_bars)
             if len(X_train) > 0 and len(X_test) > 0:
                 assert (
@@ -209,7 +210,7 @@ class EnsembleManager:
             proba_matrices: dict[str, np.ndarray] = {}
 
             for name, estimator in estimators.items():
-                estimator.fit(X_train, y_train)
+                cast(Any, estimator).fit(X_train, y_train)
                 fitted_models[name] = estimator
                 proba = self._reindexed_proba(estimator, X_test)
                 proba_matrices[name] = proba
@@ -606,7 +607,7 @@ if __name__ == "__main__":
         rows, timestamps = [], []
         price = 1000.0
         base_date = pd.Timestamp("2026-01-05 09:15:00")
-        recent_closes = []
+        recent_closes: list[float] = []
 
         for day in range(n_days):
             day_start = base_date + pd.Timedelta(days=day)
@@ -617,12 +618,12 @@ if __name__ == "__main__":
                     bias = 1.5 if recent_trend < -6 else (-1.5 if recent_trend > 6 else 0.0)
                 else:
                     bias = 0.0
-                drift = rng.normal(bias, 1.5)
+                drift = float(rng.normal(bias, 1.5))
                 price = max(1.0, price + drift)
                 open_p = price
-                close_p = max(1.0, price + rng.normal(bias * 0.5, 1.0))
-                high_p = max(open_p, close_p) + abs(rng.normal(0, 0.5))
-                low_p = min(open_p, close_p) - abs(rng.normal(0, 0.5))
+                close_p = max(1.0, price + float(rng.normal(bias * 0.5, 1.0)))
+                high_p = max(open_p, close_p) + abs(float(rng.normal(0, 0.5)))
+                low_p = min(open_p, close_p) - abs(float(rng.normal(0, 0.5)))
                 vol = int(abs(rng.normal(50000, 15000)))
                 rows.append([open_p, high_p, low_p, close_p, vol])
                 timestamps.append(ts)
@@ -670,7 +671,7 @@ if __name__ == "__main__":
                 _, X_test, _, _ = manager.model_trainer.time_based_split(X, y)
                 sample_predictions = manager.predict(test_symbol, X_test.iloc[:10])
                 predict_ok = sample_predictions is not None and len(sample_predictions) == 10
-                if predict_ok:
+                if sample_predictions is not None:
                     agreement_in_range = all(0.0 <= p.agreement_fraction <= 1.0 for p in sample_predictions)
                     confidences_in_range = all(0.0 <= p.confidence <= 1.0 for p in sample_predictions)
                     print(f"Sample prediction agreement fractions valid [0,1]: {agreement_in_range}")

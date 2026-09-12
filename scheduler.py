@@ -3,7 +3,7 @@ import logging
 import time as time_module
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Optional, cast
 from zoneinfo import ZoneInfo
 
 # 2. Third-party imports
@@ -90,7 +90,7 @@ class Scheduler:
         self.event_classifier = event_classifier or EventClassifier()
         self.history_manager = history_manager or HistoryManager()
         self.backtester = backtester or Backtester()
-        self._live_worthiness_cache: dict[str, LiveWorthinessSnapshot] = {}
+        self._live_worthiness_cache: dict[tuple[str, str], LiveWorthinessSnapshot] = {}
 
     # -----------------------------------------------------------------
     # Market hours
@@ -265,8 +265,11 @@ class Scheduler:
             yield PredictionSignal(
                 symbol=symbol,
                 timestamp=stock_df.index[-1] if not stock_df.empty else pd.Timestamp.now(),
+                horizon="INTRADAY",
                 action="HOLD",
                 model_predicted_class="FLAT",
+                model_version="v1.0",
+                feature_version="v1.0",
                 raw_confidence=0.0,
                 risk_adjusted_confidence=0.0,
                 calibrated_confidence=None,
@@ -309,10 +312,11 @@ class Scheduler:
                     continue
 
                 # Determine how much time to add based on horizon
+                h_bars = cast(int, h_config["horizon_bars"])
                 if h_config["bar_interval"] == "1d":
-                    horizon_delta = pd.Timedelta(days=h_config["horizon_bars"])
+                    horizon_delta = pd.Timedelta(days=h_bars)
                 else:
-                    horizon_delta = pd.Timedelta(minutes=h_config["horizon_bars"] * BAR_INTERVAL_MINUTES)
+                    horizon_delta = pd.Timedelta(minutes=h_bars * BAR_INTERVAL_MINUTES)
 
                 pred_time = pd.Timestamp(record.timestamp)
                 if pred_time.tzinfo is not None and stock_df.index.tz is None:
@@ -334,9 +338,10 @@ class Scheduler:
                 end_close = stock_df.loc[bars_at_or_after_target[0], "Close"]
                 pct_move = (end_close - start_close) / start_close * 100.0
 
-                if pct_move > PREDICTION_DEADBAND_PCT:
+                deadband = cast(float, PREDICTION_DEADBAND_PCT)
+                if pct_move > deadband:
                     actual_class = "UP"
-                elif pct_move < -PREDICTION_DEADBAND_PCT:
+                elif pct_move < -deadband:
                     actual_class = "DOWN"
                 else:
                     actual_class = "FLAT"
@@ -402,7 +407,7 @@ if __name__ == "__main__":
         rows, timestamps = [], []
         price = 1000.0
         base_date = pd.Timestamp("2026-01-05 09:15:00")
-        recent_closes = []
+        recent_closes: list[float] = []
         for day in range(n_days):
             day_start = base_date + pd.Timedelta(days=day)
             for bar in range(bars_per_day):
@@ -412,12 +417,12 @@ if __name__ == "__main__":
                     bias = 1.5 if trend < -6 else (-1.5 if trend > 6 else 0.0)
                 else:
                     bias = 0.0
-                drift = rng.normal(bias, 1.5)
+                drift = float(rng.normal(bias, 1.5))
                 price = max(1.0, price + drift)
                 open_p = price
-                close_p = max(1.0, price + rng.normal(bias * 0.5, 1.0))
-                high_p = max(open_p, close_p) + abs(rng.normal(0, 0.5))
-                low_p = min(open_p, close_p) - abs(rng.normal(0, 0.5))
+                close_p = max(1.0, price + float(rng.normal(bias * 0.5, 1.0)))
+                high_p = max(open_p, close_p) + abs(float(rng.normal(0, 0.5)))
+                low_p = min(open_p, close_p) - abs(float(rng.normal(0, 0.5)))
                 vol = int(abs(rng.normal(50000, 15000)))
                 rows.append([open_p, high_p, low_p, close_p, vol])
                 timestamps.append(ts)
@@ -471,7 +476,16 @@ if __name__ == "__main__":
             test_symbol, stock_df, index_df, macro_events=[], corporate_events=[], news_articles=[]
         )
         after_count = len(history_manager.get_predictions(test_symbol))
-        print(f"Signal generated: action={signal.primary_action if signal else None}")
+        from predictor import MultiHorizonSignal
+
+        action_str = (
+            signal.signals["INTRADAY"].action
+            if isinstance(signal, MultiHorizonSignal)
+            and "INTRADAY" in signal.signals
+            and signal.signals["INTRADAY"] is not None
+            else None
+        )
+        print(f"Signal generated: action={action_str}")
         print(f"Predictions persisted: before={before_count}, after={after_count}")
         assert signal is not None
         assert after_count > before_count

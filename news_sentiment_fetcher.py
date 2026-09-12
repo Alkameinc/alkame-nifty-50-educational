@@ -86,11 +86,11 @@ class NewsSentimentFetcher:
             return []
 
         search_term = company_name or symbol
-        params = {
-            "api_token": MARKETAUX_API_KEY,
-            "search": search_term,
-            "countries": MARKETAUX_COUNTRY,
-            "limit": NEWS_FETCH_LIMIT,
+        params: dict[str, str | int] = {
+            "api_token": str(MARKETAUX_API_KEY),
+            "search": str(search_term),
+            "countries": str(MARKETAUX_COUNTRY),
+            "limit": int(NEWS_FETCH_LIMIT),
             "language": "en",
         }
 
@@ -168,7 +168,8 @@ class NewsSentimentFetcher:
                 published_at = None
                 if entry.get("published_parsed"):
                     try:
-                        published_at = datetime(*entry.published_parsed[:6], tzinfo=UTC)
+                        p = entry.published_parsed
+                        published_at = datetime(p[0], p[1], p[2], p[3], p[4], p[5], tzinfo=UTC)
                     except Exception:
                         published_at = None
 

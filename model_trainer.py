@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import joblib
 
@@ -133,7 +134,7 @@ class ModelTrainer:
         Returns one of: MA, SUPPORT, RESISTANCE, USER_COST, NONE.
         """
         try:
-            horizon_bars = HORIZON_CONFIG[horizon]["horizon_bars"]
+            horizon_bars = cast(int, HORIZON_CONFIG[horizon]["horizon_bars"])
             price = df["Close"].values
             # Compute absolute levels from the unlagged percentage features
             ma = price / (1 + df["pct_from_ma"].values / 100.0)
@@ -194,8 +195,8 @@ class ModelTrainer:
         lagged before it gets here.
         """
         try:
-            horizon_bars = HORIZON_CONFIG[horizon]["horizon_bars"]
-            deadband_pct = HORIZON_CONFIG[horizon]["deadband_pct_default"]
+            horizon_bars = cast(int, HORIZON_CONFIG[horizon]["horizon_bars"])
+            deadband_pct = cast(float, HORIZON_CONFIG[horizon]["deadband_pct_default"])
 
             adaptive_deadband = self.compute_adaptive_deadband(df, horizon_bars, deadband_pct)
 
@@ -629,7 +630,7 @@ class ModelTrainer:
                 )
             X, y, feature_columns = prepared
 
-            min_training_samples = HORIZON_CONFIG[horizon]["min_training_samples"]
+            min_training_samples = cast(int, HORIZON_CONFIG[horizon]["min_training_samples"])
             if len(X) < min_training_samples:
                 msg = f"Only {len(X)} usable samples for {symbol} ({horizon}), need >= {min_training_samples}."
                 logger.error(msg)
@@ -645,7 +646,7 @@ class ModelTrainer:
                     error=msg,
                 )
 
-            horizon_bars = HORIZON_CONFIG.get(horizon, {}).get("horizon_bars", 0)
+            horizon_bars = cast(int, HORIZON_CONFIG.get(horizon, {}).get("horizon_bars", 0))
             X_train, X_test, y_train, y_test = self.time_based_split(X, y, purge_window=horizon_bars)
 
             # Hard runtime guarantee that the split is genuinely chronological and purged —
@@ -705,7 +706,7 @@ if __name__ == "__main__":
         rows, timestamps = [], []
         price = 1000.0
         base_date = pd.Timestamp("2026-01-05 09:15:00")
-        recent_closes = []
+        recent_closes: list[float] = []
 
         for day in range(n_days):
             day_start = base_date + pd.Timedelta(days=day)
@@ -716,12 +717,12 @@ if __name__ == "__main__":
                     bias = 3.0 if recent_trend < -6 else (-3.0 if recent_trend > 6 else 0.0)
                 else:
                     bias = 0.0
-                drift = rng.normal(bias, 1.5)
+                drift = float(rng.normal(bias, 1.5))
                 price = max(1.0, price + drift)
                 open_p = price
-                close_p = max(1.0, price + rng.normal(bias * 0.5, 1.0))
-                high_p = max(open_p, close_p) + abs(rng.normal(0, 0.5))
-                low_p = min(open_p, close_p) - abs(rng.normal(0, 0.5))
+                close_p = max(1.0, price + float(rng.normal(bias * 0.5, 1.0)))
+                high_p = max(open_p, close_p) + abs(float(rng.normal(0, 0.5)))
+                low_p = min(open_p, close_p) - abs(float(rng.normal(0, 0.5)))
                 vol = int(abs(rng.normal(50000, 15000)))
                 rows.append([open_p, high_p, low_p, close_p, vol])
                 timestamps.append(ts)
@@ -776,7 +777,7 @@ if __name__ == "__main__":
         print(f"Model save/load round trip: {'OK' if load_ok else 'FAILED'}")
 
         predictions_match = False
-        if load_ok:
+        if loaded is not None:
             loaded_model, metadata = loaded
             prepared = trainer.prepare_dataset(stock_df, index_df, horizon=HORIZON_INTRADAY)
             if prepared is not None:

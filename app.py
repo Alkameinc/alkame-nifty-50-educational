@@ -136,10 +136,13 @@ def render_dashboard() -> None:
     # --- Fetch data for selected symbol ---
     yf_ticker = to_yfinance_ticker(symbol)
     with st.spinner(f"Fetching data for {symbol}..."):
-        stock_df = scheduler.data_fetcher.fetch_ohlcv(yf_ticker)
-        index_df = scheduler.data_fetcher.fetch_nifty_index()
+        raw_stock = scheduler.data_fetcher.fetch_ohlcv(yf_ticker)
+        raw_index = scheduler.data_fetcher.fetch_nifty_index()
 
-    if stock_df is None or index_df is None:
+    stock_df = getattr(raw_stock, "df", raw_stock)
+    index_df = getattr(raw_index, "df", raw_index)
+
+    if stock_df is None or index_df is None or not isinstance(stock_df, pd.DataFrame) or not isinstance(index_df, pd.DataFrame):
         st.error(
             "Could not fetch live market data right now (network issue or data provider unavailable). "
             "No signal can be safely shown without real data."
@@ -152,9 +155,10 @@ def render_dashboard() -> None:
         st.success("Live-worthiness refreshed.")
 
     scheduler.resolve_pending_outcomes(symbol, stock_df)
-    signal = scheduler.run_one_cycle_for_symbol(
+    cycle_res = scheduler.run_one_cycle_for_symbol(
         symbol, stock_df, index_df, macro_events=[], corporate_events=[], news_articles=[]
     )
+    signal = getattr(cycle_res, "signal", cycle_res)
 
     if signal is None:
         st.error("Signal could not be generated for this stock right now.")
@@ -174,23 +178,23 @@ def render_dashboard() -> None:
     col_f1, col_f2, col_f3, col_f4 = st.columns(4)
     with col_f1:
         st.metric("Current Price (CMP)", f"₹{cmp:,.2f}")
-        st.metric("P/E Ratio", fundamentals.get("pe_ratio", "N/A"))
+        st.metric("P/E Ratio", str(fundamentals.get("pe_ratio", "N/A")))
     with col_f2:
-        st.metric("Market Cap", fundamentals.get("market_cap", "N/A"))
-        st.metric("Price / Book (P/B)", fundamentals.get("price_to_book", "N/A"))
+        st.metric("Market Cap", str(fundamentals.get("market_cap", "N/A")))
+        st.metric("Price / Book (P/B)", str(fundamentals.get("price_to_book", "N/A")))
     with col_f3:
-        st.metric("52-Week High", fundamentals.get("fifty_two_week_high", "N/A"))
-        st.metric("Trailing EPS", fundamentals.get("eps", "N/A"))
+        st.metric("52-Week High", str(fundamentals.get("fifty_two_week_high", "N/A")))
+        st.metric("Trailing EPS", str(fundamentals.get("eps", "N/A")))
     with col_f4:
-        st.metric("52-Week Low", fundamentals.get("fifty_two_week_low", "N/A"))
-        st.metric("Dividend Yield", fundamentals.get("dividend_yield", "N/A"))
+        st.metric("52-Week Low", str(fundamentals.get("fifty_two_week_low", "N/A")))
+        st.metric("Dividend Yield", str(fundamentals.get("dividend_yield", "N/A")))
 
     st.caption(f"Sector: **{fundamentals.get('sector', 'N/A')}** | Industry: **{fundamentals.get('industry', 'N/A')}**")
 
     # Valuation Evaluation Card (Underpriced / Fair Priced / Overpriced)
-    val_status = fundamentals.get("valuation_status", "FAIR PRICED")
-    val_badge = fundamentals.get("valuation_badge", "🟡 FAIR PRICED")
-    val_rationale = fundamentals.get("valuation_rationale", "Valuation metrics evaluated against baseline norms.")
+    val_status = str(fundamentals.get("valuation_status", "FAIR PRICED"))
+    val_badge = str(fundamentals.get("valuation_badge", "🟡 FAIR PRICED"))
+    val_rationale = str(fundamentals.get("valuation_rationale", "Valuation metrics evaluated against baseline norms."))
 
     val_box_type = "info"
     if "UNDERPRICED" in val_status:
@@ -203,12 +207,16 @@ def render_dashboard() -> None:
     st.divider()
 
     # Extract primary/intraday prediction signal if MultiHorizonSignal is returned
-    if isinstance(signal, MultiHorizonSignal):
-        multi_sig = signal
-        active_signal = multi_sig.signals.get(multi_sig.primary_horizon) or next(iter(multi_sig.signals.values()))
-    else:
+    if isinstance(signal, MultiHorizonSignal) and signal.signals:
+        multi_sig: MultiHorizonSignal | None = signal
+        sig_map = signal.signals
+        active_signal: PredictionSignal = sig_map.get(signal.primary_horizon) or next(iter(sig_map.values()))
+    elif isinstance(signal, PredictionSignal):
         multi_sig = None
         active_signal = signal
+    else:
+        st.error("Invalid signal format returned.")
+        return
 
     # --- Signal panel: downside ALWAYS before upside ---
     st.subheader(f"{symbol} — {format_action_label(active_signal.action)}")

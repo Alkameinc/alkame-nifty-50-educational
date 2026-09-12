@@ -453,7 +453,7 @@ class Predictor:
                 if avg_vol > 0 and recent_vol > (avg_vol * 1.5):
                     target_mult += 0.5
 
-            # Direction lean determines target & stop loss calculation
+            peak_potential_price: float | None = None
             lean = ensemble_pred.predicted_class
             if final_action == ACTION_BUY or (final_action == ACTION_HOLD and lean == "UP"):
                 target_price = float(round(cmp + (target_mult * atr_val), 2))
@@ -566,7 +566,7 @@ class Predictor:
             if HORIZON_CONFIG[h].get("bar_interval") == "1d":
                 from config import to_yfinance_ticker
 
-                period = HORIZON_CONFIG[h].get("history_period", "5y")
+                period = str(HORIZON_CONFIG[h].get("history_period", "5y"))
                 # Attempt to fetch daily data
                 daily_stock = self.data_fetcher.fetch_daily_ohlcv_incremental(
                     to_yfinance_ticker(symbol), full_period=period
@@ -617,7 +617,7 @@ class Predictor:
             if HORIZON_CONFIG[h].get("bar_interval") == "1d":
                 from config import to_yfinance_ticker
 
-                period = HORIZON_CONFIG[h].get("history_period", "5y")
+                period = str(HORIZON_CONFIG[h].get("history_period", "5y"))
                 # Attempt to fetch daily data
                 daily_stock = self.data_fetcher.fetch_daily_ohlcv_incremental(
                     to_yfinance_ticker(symbol), full_period=period
@@ -751,7 +751,7 @@ if __name__ == "__main__":
         rows, timestamps = [], []
         price = 1000.0
         base_date = pd.Timestamp("2026-01-05 09:15:00")
-        recent_closes = []
+        recent_closes: list[float] = []
         for day in range(n_days):
             day_start = base_date + pd.Timedelta(days=day)
             for bar in range(bars_per_day):

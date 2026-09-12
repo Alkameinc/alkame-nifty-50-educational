@@ -198,7 +198,7 @@ class CorporateEventsFetcher:
         """Normalize raw nse-package dicts into a consistent shape:
         {symbol, category, raw, fetched_at}. Downstream event_classifier.py
         is responsible for further scope/sector tagging."""
-        normalized = []
+        normalized: list[dict] = []
         if not raw_items:
             return normalized
         try:

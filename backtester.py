@@ -1,6 +1,7 @@
 # 1. Standard library imports
 import logging
 from dataclasses import dataclass, field
+from typing import Any, cast
 
 # 2. Third-party imports
 import numpy as np
@@ -121,8 +122,9 @@ class Backtester:
                     success=False,
                     error="Dataset preparation failed for backtest.",
                 )
+
             X, y, _ = prepared
-            horizon_bars = HORIZON_CONFIG.get(horizon, {}).get("horizon_bars", 0)
+            horizon_bars = cast(int, HORIZON_CONFIG.get(horizon, {}).get("horizon_bars", 0))
             _, X_test, _, y_test = self.ensemble_manager.model_trainer.time_based_split(X, y, purge_window=horizon_bars)
 
             if len(X_test) == 0:
@@ -303,8 +305,8 @@ class Backtester:
                     error="Dataset preparation failed for walk-forward backtest.",
                 )
             X, y, feature_columns = prepared
-            horizon_bars = HORIZON_CONFIG.get(horizon, {}).get("horizon_bars", 5)
-            p_win = purge_window if purge_window is not None else horizon_bars
+            horizon_bars = cast(int, HORIZON_CONFIG.get(horizon, {}).get("horizon_bars", 5))
+            p_win = cast(int, purge_window if purge_window is not None else horizon_bars)
 
             stock_forward_return = self._forward_return_pct(stock_df["Close"], horizon_bars)
             index_forward_return = self._forward_return_pct(index_df["Close"], horizon_bars)
@@ -331,11 +333,13 @@ class Backtester:
 
                 # Train models for this fold
                 models = {}
+                base_estimators = self.ensemble_manager._build_base_estimators()
                 for m_name in ["gradient_boosting", "random_forest", "logistic_regression"]:
                     try:
-                        m_instance = self.ensemble_manager._create_model(m_name)
-                        m_instance.fit(X_train, y_train)
-                        models[m_name] = m_instance
+                        m_instance = base_estimators.get(m_name)
+                        if m_instance is not None:
+                            cast(Any, m_instance).fit(X_train, y_train)
+                            models[m_name] = m_instance
                     except Exception as me:
                         logger.warning(f"Failed training fold model {m_name}: {me}")
 
@@ -347,7 +351,7 @@ class Backtester:
                 fold_confs = []
                 for idx in range(len(X_test)):
                     x_row = X_test.iloc[[idx]]
-                    preds = [m.predict(x_row)[0] for m in models.values()]
+                    preds = [cast(Any, m).predict(x_row)[0] for m in models.values()]
                     # Plurality vote
                     vote = max(set(preds), key=preds.count)
                     agreement = preds.count(vote) / len(preds)
@@ -511,7 +515,7 @@ if __name__ == "__main__":
         rows, timestamps = [], []
         price = 1000.0
         base_date = pd.Timestamp("2026-01-05 09:15:00")
-        recent_closes = []
+        recent_closes: list[float] = []
         for day in range(n_days):
             day_start = base_date + pd.Timedelta(days=day)
             for bar in range(bars_per_day):

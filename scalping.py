@@ -1,5 +1,6 @@
 import logging
 from dataclasses import dataclass
+from typing import Any, cast
 
 import pandas as pd
 
@@ -42,13 +43,14 @@ class ScalpingEngine:
         logger.info("Scanning for intraday scalping setups...")
         opportunities = []
 
-        index_ticker = "^NSEI"
-        index_df = self.data_fetcher.fetch_ohlcv(index_ticker, interval="5m")
+        index_raw = self.data_fetcher.fetch_nifty_index(interval="5m")
+        index_df = index_raw if isinstance(index_raw, pd.DataFrame) else None
 
         for symbol in NIFTY50_SYMBOLS:
             try:
                 yf_ticker = to_yfinance_ticker(symbol)
-                stock_df = self.data_fetcher.fetch_ohlcv(yf_ticker, interval="5m")
+                stock_raw = self.data_fetcher.fetch_ohlcv(yf_ticker, interval="5m")
+                stock_df = stock_raw if isinstance(stock_raw, pd.DataFrame) else None
 
                 if stock_df is None or stock_df.empty:
                     continue
@@ -73,13 +75,15 @@ class ScalpingEngine:
                         continue
 
                     # Calculate ATR-based targets and stops
-                    features = self.feature_engineer.engineer_features_for_horizon(stock_df, index_df, HORIZON_INTRADAY)
-                    if features.empty:
+                    features = self.feature_engineer.engineer_features_for_horizon(
+                        stock_df, index_df, horizon=HORIZON_INTRADAY
+                    )
+                    if features is None or features.empty:
                         continue
 
                     latest = features.iloc[-1]
-                    cmp = stock_df["Close"].iloc[-1]
-                    atr = latest["atr"] if "atr" in latest and not pd.isna(latest["atr"]) else (cmp * 0.005)
+                    cmp = float(stock_df["Close"].iloc[-1])
+                    atr = float(latest["atr"]) if "atr" in latest and not pd.isna(latest["atr"]) else (cmp * 0.005)
 
                     if sig.action == ACTION_BUY:
                         sl = cmp - (1.5 * atr)
@@ -153,7 +157,7 @@ if __name__ == "__main__":
 
             return pd.DataFrame({"atr": [5, 5, 5, 5]})
 
-    engine = ScalpingEngine(MockPredictor(), MockDataFetcher(), MockFeatureEngineer())
+    engine = ScalpingEngine(cast(Any, MockPredictor()), cast(Any, MockDataFetcher()), cast(Any, MockFeatureEngineer()))
     results = engine.find_opportunities(limit=2)
 
     print(f"Found {len(results)} scalping setups.")

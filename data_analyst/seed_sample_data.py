@@ -84,7 +84,7 @@ def _simulate_symbol_history(symbol: str, n_predictions: int, rng: np.random.Gen
         )
         pred_id = manager.save_prediction(signal)
         if pred_id is not None:
-            manager.resolve_outcome(pred_id, actual_class=actual_class)
+            manager.resolve_outcome(pred_id, actual_class=str(actual_class))
 
 
 def _simulate_symbol_events(symbol: str, n_events: int, rng: np.random.Generator) -> None:

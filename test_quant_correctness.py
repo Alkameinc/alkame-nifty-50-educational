@@ -34,7 +34,7 @@ def _build_synthetic_ohlcv(n_days: int = 15, bars_per_day: int = 75, seed: int =
     rows, timestamps = [], []
     price = 1000.0
     base_date = pd.Timestamp("2026-01-05 09:15:00")
-    recent_closes = []
+    recent_closes: list[float] = []
     for day in range(n_days):
         day_start = base_date + pd.Timedelta(days=day)
         for bar in range(bars_per_day):

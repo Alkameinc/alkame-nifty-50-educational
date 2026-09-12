@@ -1,5 +1,6 @@
 import logging
 from dataclasses import dataclass, field
+from typing import Any, cast
 
 import pandas as pd
 
@@ -244,7 +245,7 @@ if __name__ == "__main__":
                 reasoning=[],
             )
 
-    scanner = OpportunityScanner(predictor=MockPredictor(), data_fetcher=MockDataFetcher())
+    scanner = OpportunityScanner(predictor=cast(Any, MockPredictor()), data_fetcher=cast(Any, MockDataFetcher()))
 
     # Test scan() backward compatibility
     results = scanner.scan(limit=3)

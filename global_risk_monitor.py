@@ -84,6 +84,8 @@ class GlobalRiskMonitor:
         self.data_fetcher = data_fetcher or DataFetcher()
         ensure_directories()
         self._toggle_state = self._load_toggle_state()
+        self._cached_reading: GlobalRiskReading | None = None
+        self._cached_time: datetime | None = None
 
     # -----------------------------------------------------------------
     # Toggle state persistence
@@ -166,7 +168,7 @@ class GlobalRiskMonitor:
         the whole computation — degrades gracefully.
         """
         now = datetime.now()
-        if hasattr(self, "_cached_reading") and hasattr(self, "_cached_time"):
+        if self._cached_reading is not None and self._cached_time is not None:
             if (now - self._cached_time).total_seconds() < 300:  # 5 minutes
                 return self._cached_reading
 
