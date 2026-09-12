@@ -546,6 +546,7 @@ class ModelTrainer:
                 "prediction_horizon_bars": HORIZON_CONFIG[horizon]["horizon_bars"],
                 "deadband_pct": HORIZON_CONFIG[horizon]["deadband_pct_default"],
                 "test_accuracy": metrics["accuracy"],
+                "price_adjustment_mode": "adjusted",  # DATA-004: Corporate action adjusted strategy
             }
             f = None
             try:

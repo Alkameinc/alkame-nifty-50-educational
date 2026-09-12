@@ -1,0 +1,23 @@
+﻿date,holiday_name,day_of_week,holiday_type
+2026-01-15,Municipal Corporation Election - Maharashtra,Thursday,TRADING_HOLIDAY
+2026-01-26,Republic Day,Monday,TRADING_HOLIDAY
+2026-02-19,Chhatrapati Shivaji Maharaj Jayanti,Thursday,TRADING_HOLIDAY
+2026-03-03,Holi,Tuesday,TRADING_HOLIDAY
+2026-03-19,Gudi Padwa,Thursday,TRADING_HOLIDAY
+2026-03-26,Shri Ram Navami,Thursday,TRADING_HOLIDAY
+2026-03-31,Shri Mahavir Jayanti,Tuesday,TRADING_HOLIDAY
+2026-04-01,Annual Bank Closing,Wednesday,TRADING_HOLIDAY
+2026-04-03,Good Friday,Friday,TRADING_HOLIDAY
+2026-04-14,Dr. Baba Saheb Ambedkar Jayanti,Tuesday,TRADING_HOLIDAY
+2026-05-01,Maharashtra Day,Friday,TRADING_HOLIDAY
+2026-05-28,Bakri Id,Thursday,TRADING_HOLIDAY
+2026-06-26,Muharram,Friday,TRADING_HOLIDAY
+2026-08-15,Independence Day,Saturday,WEEKEND_HOLIDAY
+2026-08-26,Id-e-Milad,Wednesday,TRADING_HOLIDAY
+2026-09-14,Ganesh Chaturthi,Monday,TRADING_HOLIDAY
+2026-10-02,Mahatma Gandhi Jayanti,Friday,TRADING_HOLIDAY
+2026-10-20,Dussehra,Tuesday,TRADING_HOLIDAY
+2026-11-08,Diwali Laxmi Pujan (Muhurat Trading),Sunday,SPECIAL_MUHURAT_SESSION
+2026-11-10,Diwali-Balipratipada,Tuesday,TRADING_HOLIDAY
+2026-11-24,Guru Nanak Jayanti,Tuesday,TRADING_HOLIDAY
+2026-12-25,Christmas,Friday,TRADING_HOLIDAY
