@@ -26,7 +26,6 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + "/../")
 from database import Base
-from models import Prediction, Event, BacktestMetric, HealthStatus, ModelRegistry
 
 target_metadata = Base.metadata
 
