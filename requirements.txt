@@ -14,3 +14,6 @@ fastapi>=0.100.0
 uvicorn>=0.22.0
 sqlalchemy
 alembic
+prometheus-client>=0.17.0
+prometheus-fastapi-instrumentator>=6.1.0
+python-json-logger>=2.0.7
