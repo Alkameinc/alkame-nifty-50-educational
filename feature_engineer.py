@@ -102,7 +102,12 @@ class FeatureEngineer:
             avg_loss = loss.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
             rs = avg_gain / avg_loss.replace(0, np.nan)
             rsi = 100 - (100 / (1 + rs))
-            return rsi.fillna(50.0)  # neutral RSI where undefined (e.g. no losses yet)
+
+            rsi = rsi.mask((avg_loss == 0) & (avg_gain > 0), 100.0)
+            rsi = rsi.mask((avg_gain == 0) & (avg_loss > 0), 0.0)
+            rsi = rsi.mask((avg_gain == 0) & (avg_loss == 0), 50.0)
+
+            return rsi  # neutral RSI where undefined (e.g. no losses yet)
         except Exception as e:
             logger.error(f"Failed computing RSI: {e}")
             return pd.Series(np.nan, index=close.index)
