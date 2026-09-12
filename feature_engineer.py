@@ -184,9 +184,9 @@ class FeatureEngineer:
     def compute_opening_range_breakout(self, df: pd.DataFrame) -> Tuple[pd.Series, pd.Series, pd.Series]:
         """
         For each calendar day, computes the opening-range high/low from the
-        first `orb_bar_count` bars, then flags +1 (breakout up), -1 (breakout
-        down), or 0 for every bar in that day based on where Close sits
-        relative to that range.
+        first `orb_bar_count` bars. Bars within the opening range have NaN ORB levels.
+        After the opening range completes, flags +1 (breakout up), -1 (breakout
+        down), or 0 for subsequent bars based on where Close sits relative to that range.
         """
         try:
             or_high = pd.Series(np.nan, index=df.index)
@@ -194,20 +194,22 @@ class FeatureEngineer:
             breakout = pd.Series(0, index=df.index)
 
             for day, day_df in df.groupby(df.index.date):
-                if len(day_df) < self.orb_bar_count:
+                if len(day_df) <= self.orb_bar_count:
                     continue
                 opening_bars = day_df.iloc[: self.orb_bar_count]
                 day_or_high = opening_bars["High"].max()
                 day_or_low = opening_bars["Low"].min()
 
-                or_high.loc[day_df.index] = day_or_high
-                or_low.loc[day_df.index] = day_or_low
+                post_orb_index = day_df.index[self.orb_bar_count:]
+                or_high.loc[post_orb_index] = day_or_high
+                or_low.loc[post_orb_index] = day_or_low
 
+                post_orb_close = day_df.loc[post_orb_index, "Close"]
                 day_breakout = np.where(
-                    day_df["Close"] > day_or_high, 1,
-                    np.where(day_df["Close"] < day_or_low, -1, 0),
+                    post_orb_close > day_or_high, 1,
+                    np.where(post_orb_close < day_or_low, -1, 0),
                 )
-                breakout.loc[day_df.index] = day_breakout
+                breakout.loc[post_orb_index] = day_breakout
 
             return or_high, or_low, breakout
         except Exception as e:
@@ -326,6 +328,9 @@ class FeatureEngineer:
 
         try:
             out = stock_df.copy()
+            # Drop bars where all OHLCV are NaN or Close is missing
+            if out["Close"].isna().any():
+                out = out.dropna(subset=["Close"]).copy()
             close = out["Close"]
             volume = out["Volume"]
 

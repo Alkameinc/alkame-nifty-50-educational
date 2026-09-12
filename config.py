@@ -65,14 +65,48 @@ def configure_logging(log_filename: str = "app.log", level: int = logging.INFO) 
 MARKETAUX_API_KEY = os.environ.get("MARKETAUX_API_KEY", "")
 IMD_API_KEY = os.environ.get("IMD_API_KEY", "")
 
+# API Authentication & Authorization (P0-001 & P0-002)
+API_AUTH_ENABLED = os.environ.get("ALKAME_API_AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
+DEFAULT_DEV_API_KEY = "dev-alkame-key-insecure"
+API_ADMIN_KEY = os.environ.get("ALKAME_ADMIN_KEY", "dev-alkame-admin-key")
+API_READONLY_KEY = os.environ.get("ALKAME_READONLY_KEY", "dev-alkame-readonly-key")
+
+# Recognized keys mapped to roles: ADMIN, READ_ONLY
+API_KEYS_ROLE_MAP = {
+    API_ADMIN_KEY: "ADMIN",
+    API_READONLY_KEY: "READ_ONLY",
+    DEFAULT_DEV_API_KEY: "ADMIN",
+}
+
+_custom_admin_keys = [k.strip() for k in os.environ.get("ALKAME_ADMIN_KEYS", "").split(",") if k.strip()]
+for k in _custom_admin_keys:
+    API_KEYS_ROLE_MAP[k] = "ADMIN"
+
+_custom_readonly_keys = [k.strip() for k in os.environ.get("ALKAME_READONLY_KEYS", "").split(",") if k.strip()]
+for k in _custom_readonly_keys:
+    API_KEYS_ROLE_MAP[k] = "READ_ONLY"
+
+# CORS configuration: explicit allowlist, no wildcard with credentials
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "ALKAME_CORS_ORIGINS",
+        "http://localhost:8501,http://127.0.0.1:8501,http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000"
+    ).split(",")
+    if origin.strip()
+]
+CORS_ALLOW_CREDENTIALS = True
+
 REQUIRED_ENV_VARS = ["MARKETAUX_API_KEY"]   # IMD key is optional (monsoon feature degrades gracefully without it)
 
 
 # --- NIFTY 50 universe ----------------------------------------------------
 # NOTE: NSE Indices reviews NIFTY 50 composition semi-annually (March & September).
-# This list must be verified/updated after each review. Source of truth:
+# Universe & Sector Map are versioned via UniverseProvider and SectorMapProvider (DATA-001, DATA-002).
 # https://www.nseindia.com/products-services/indices-nifty50-index
-NIFTY50_SYMBOLS = [
+
+# Fallback static constituent list (50 stocks)
+_DEFAULT_NIFTY50_SYMBOLS = [
     "RELIANCE", "HDFCBANK", "ICICIBANK", "INFY", "TCS", "BHARTIARTL", "SBIN",
     "LT", "ITC", "HINDUNILVR", "BAJFINANCE", "KOTAKBANK", "AXISBANK", "MARUTI",
     "SUNPHARMA", "TITAN", "ULTRACEMCO", "NTPC", "HCLTECH", "ONGC", "ADANIENT",
@@ -80,8 +114,16 @@ NIFTY50_SYMBOLS = [
     "NESTLEIND", "POWERGRID", "JSWSTEEL", "TATASTEEL", "GRASIM",
     "TECHM", "HINDALCO", "CIPLA", "DRREDDY", "EICHERMOT", "BRITANNIA",
     "DIVISLAB", "BPCL", "HEROMOTOCO", "APOLLOHOSP", "SBILIFE", "HDFCLIFE",
-    "INDUSINDBK", "BAJAJ-AUTO", "UPL", "SHRIRAMFIN", "TATACONSUM",
+    "INDUSINDBK", "BAJAJ-AUTO", "TATAMOTORS", "SHRIRAMFIN", "TATACONSUM", "BEL",
 ]
+
+try:
+    from universe_provider import universe_provider
+    NIFTY50_SYMBOLS = universe_provider.get_constituents()
+    if not NIFTY50_SYMBOLS:
+        NIFTY50_SYMBOLS = _DEFAULT_NIFTY50_SYMBOLS
+except Exception:
+    NIFTY50_SYMBOLS = _DEFAULT_NIFTY50_SYMBOLS
 
 # yfinance requires the ".NS" suffix for NSE-listed equities.
 YFINANCE_SUFFIX = ".NS"
@@ -97,8 +139,7 @@ NIFTY50_YFINANCE_TICKERS = [to_yfinance_ticker(s) for s in NIFTY50_SYMBOLS]
 NIFTY_INDEX_TICKER = "^NSEI"  # NIFTY 50 index itself, used as the baseline for edge checks
 
 # --- Sector mapping (used by event_classifier.py for SECTOR-scope tagging) ---
-# Kept intentionally simple/broad; refine over time as real classification needs emerge.
-SECTOR_MAP = {
+_DEFAULT_SECTOR_MAP = {
     "RELIANCE": "Energy", "ONGC": "Energy", "BPCL": "Energy", "COALINDIA": "Energy",
     "NTPC": "Power", "POWERGRID": "Power", "ADANIENT": "Conglomerate", "ADANIPORTS": "Infra",
     "HDFCBANK": "Banking", "ICICIBANK": "Banking", "SBIN": "Banking", "KOTAKBANK": "Banking",
@@ -109,14 +150,22 @@ SECTOR_MAP = {
     "BHARTIARTL": "Telecom",
     "LT": "Infra", "ULTRACEMCO": "Cement", "GRASIM": "Cement",
     "ITC": "FMCG", "HINDUNILVR": "FMCG", "NESTLEIND": "FMCG", "BRITANNIA": "FMCG", "TATACONSUM": "FMCG",
-    "MARUTI": "Auto", "M&M": "Auto", "EICHERMOT": "Auto",
+    "MARUTI": "Auto", "M&M": "Auto", "EICHERMOT": "Auto", "TATAMOTORS": "Auto",
     "HEROMOTOCO": "Auto", "BAJAJ-AUTO": "Auto",
     "SUNPHARMA": "Pharma", "CIPLA": "Pharma", "DRREDDY": "Pharma", "DIVISLAB": "Pharma",
     "APOLLOHOSP": "Healthcare",
     "TITAN": "ConsumerDurables", "ASIANPAINT": "ConsumerDurables",
     "JSWSTEEL": "Metals", "TATASTEEL": "Metals", "HINDALCO": "Metals",
-    "UPL": "Agrochemicals",
+    "BEL": "CapitalGoods",
 }
+
+try:
+    from sector_provider import sector_map_provider
+    SECTOR_MAP = sector_map_provider.get_full_sector_dict()
+    if not SECTOR_MAP:
+        SECTOR_MAP = _DEFAULT_SECTOR_MAP
+except Exception:
+    SECTOR_MAP = _DEFAULT_SECTOR_MAP
 
 # Sectors considered exposed to specific macro/global-risk triggers.
 # Used by global_risk_monitor.py and event_classifier.py to scope MARKET-level events
@@ -230,22 +279,22 @@ HORIZON_CONFIG = {
     },
     HORIZON_30D: {
         "bar_interval": "1d", "horizon_bars": 21, "deadband_pct_default": 3.0,
-        "history_period": "5y", "min_training_samples": 500,
+        "history_period": "5y", "min_training_samples": 350,
         "retrain_cadence_days": 14,
     },
     HORIZON_3M: {
         "bar_interval": "1d", "horizon_bars": 63, "deadband_pct_default": 5.0,
-        "history_period": "7y", "min_training_samples": 500,
+        "history_period": "7y", "min_training_samples": 300,
         "retrain_cadence_days": 30,
     },
     HORIZON_6M: {
         "bar_interval": "1d", "horizon_bars": 126, "deadband_pct_default": 8.0,
-        "history_period": "10y", "min_training_samples": 400,
+        "history_period": "10y", "min_training_samples": 250,
         "retrain_cadence_days": 60,
     },
     HORIZON_1Y: {
         "bar_interval": "1d", "horizon_bars": 252, "deadband_pct_default": 12.0,
-        "history_period": "max", "min_training_samples": 300,
+        "history_period": "max", "min_training_samples": 200,
         "retrain_cadence_days": 90,
     },
 }

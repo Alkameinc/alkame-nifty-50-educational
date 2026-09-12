@@ -1,0 +1,49 @@
+[project]
+name = "alkame-nifty-50-educational"
+version = "0.3.0"
+description = "A reproducible, auditable, causality-safe NIFTY 50 research engine"
+requires-python = ">=3.12"
+license = {text = "MIT"}
+authors = [{name = "Alkame Inc"}]
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["."]
+python_files = "test_*.py"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"test_*.py" = ["E501"]
+
+[tool.black]
+line-length = 120
+target-version = ["py312"]
+
+[tool.mypy]
+ignore_missing_imports = true
+strict = false
+warn_return_any = true
+
+[tool.coverage.run]
+source = ["."]
+omit = ["test_*.py", "data/*", ".venv/*"]
+
+[tool.coverage.report]
+fail_under = 60
+
+[tool.bandit]
+exclude_dirs = ["tests", "test_*.py", ".venv"]
+skips = ["B101"]

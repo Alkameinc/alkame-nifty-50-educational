@@ -3,7 +3,7 @@ import logging
 import time as time_module
 from dataclasses import dataclass
 from datetime import datetime, time as dt_time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 from zoneinfo import ZoneInfo
 
 # 2. Third-party imports
@@ -22,7 +22,7 @@ from config import (
     configure_logging,
 )
 from data_fetcher import DataFetcher
-from predictor import Predictor, PredictionSignal
+from predictor import Predictor, PredictionSignal, MultiHorizonSignal
 from event_classifier import EventClassifier
 from history_manager import HistoryManager
 from backtester import Backtester
@@ -54,6 +54,15 @@ class LiveWorthinessSnapshot:
     edge_check_result: EdgeCheckResult
     calibration_result: CalibrationResult
     refreshed_at: datetime
+
+
+@dataclass
+class CycleResult:
+    success: bool
+    status: str  # "SUCCESS", "DATA_UNAVAILABLE", "PREDICTION_FAILED", "ERROR"
+    symbol: str
+    signal: Optional['MultiHorizonSignal'] = None
+    error: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -89,71 +98,33 @@ class Scheduler:
     # -----------------------------------------------------------------
     @staticmethod
     def is_market_open(now: Optional[datetime] = None) -> bool:
-        """
-        Check if NSE equity market is open.
-        
-        Rules:
-        - Must be a weekday (Mon-Fri)
-        - Must be within MARKET_OPEN_TIME – MARKET_CLOSE_TIME (IST)
-        - Must NOT be an official NSE trading holiday for 2026
-        """
-        try:
-            tz = ZoneInfo(MARKET_TIMEZONE)
-            now = now.astimezone(tz) if now is not None else datetime.now(tz)
-
-            # Weekend check
-            if now.weekday() >= 5:  # Saturday=5, Sunday=6
-                return False
-
-            # Official NSE Equity Holidays 2026
-            nse_holidays_2026 = {
-                "2026-01-15",  # Municipal Corporation Election - Maharashtra
-                "2026-01-26",  # Republic Day
-                "2026-03-03",  # Holi
-                "2026-03-26",  # Shri Ram Navami
-                "2026-03-31",  # Shri Mahavir Jayanti
-                "2026-04-03",  # Good Friday
-                "2026-04-14",  # Dr. Baba Saheb Ambedkar Jayanti
-                "2026-05-01",  # Maharashtra Day
-                "2026-05-28",  # Bakri Id
-                "2026-06-26",  # Muharram
-                "2026-09-14",  # Ganesh Chaturthi
-                "2026-10-02",  # Mahatma Gandhi Jayanti
-                "2026-10-20",  # Dussehra
-                "2026-11-10",  # Diwali-Balipratipada
-                "2026-11-24",  # Guru Nanak Jayanti
-                "2026-12-25",  # Christmas
-            }
-
-            today_str = now.strftime("%Y-%m-%d")
-            if today_str in nse_holidays_2026:
-                return False
-
-            # Time window check
-            current_time = now.time()
-            return MARKET_OPEN_TIME <= current_time <= MARKET_CLOSE_TIME
-
-        except Exception as e:
-            logger.error(f"Failed checking market hours: {e}")
-            return False  # fail safe
+        """Check if NSE equity market is open, delegating to the unified market_calendar."""
+        from market_calendar import is_market_open as _is_open
+        return _is_open(now)
 
     # -----------------------------------------------------------------
     # Live-worthiness caching (backed by backtester, refreshed periodically)
     # -----------------------------------------------------------------
-    def refresh_live_worthiness(self, symbol: str, stock_df: pd.DataFrame, index_df: pd.DataFrame) -> LiveWorthinessSnapshot:
-        backtest_result = self.backtester.run_backtest_for_symbol(symbol, stock_df, index_df)
+    def refresh_live_worthiness(self, symbol: str, stock_df: pd.DataFrame, index_df: pd.DataFrame, horizon: str = "INTRADAY") -> LiveWorthinessSnapshot:
+        backtest_result = self.backtester.run_backtest_for_symbol(symbol, stock_df, index_df, horizon=horizon)
         edge_result = EdgeCheckResult(
             status=backtest_result.edge_check_status, n_periods=backtest_result.n_test_predictions,
             strategy_cumulative_return_pct=backtest_result.strategy_cumulative_return_pct,
             baseline_cumulative_return_pct=backtest_result.baseline_cumulative_return_pct,
             alpha_pct=backtest_result.alpha_pct,
         )
+        
+        # Get the current model version and feature version from the predictor's ensemble manager
+        from ensemble_manager import EnsemblePrediction
+        dummy_pred = EnsemblePrediction(predicted_class="FLAT", confidence=0.0, agreement_fraction=0.0, per_model_votes={})
+        current_model_ver = dummy_pred.model_version
+
         # Prefer REAL resolved history for calibration if enough exists; otherwise
         # fall back to the backtest's own calibration snapshot.
-        real_calibration_df = self.history_manager.build_calibration_dataset(symbol)
+        real_calibration_df = self.history_manager.build_calibration_dataset(symbol, horizon=horizon, model_version=current_model_ver)
         if len(real_calibration_df) >= self.predictor.runtime_validator.min_calibration_samples:
             calibration_result = self.predictor.runtime_validator.compute_calibration(real_calibration_df)
-            logger.info(f"Using REAL resolved history for {symbol} calibration ({len(real_calibration_df)} samples).")
+            logger.info(f"Using REAL resolved history for {symbol} ({horizon}) calibration ({len(real_calibration_df)} samples).")
         else:
             calibration_result = CalibrationResult(
                 status=backtest_result.calibration_status, n_samples=backtest_result.n_test_predictions,
@@ -162,16 +133,16 @@ class Scheduler:
                                      and backtest_result.calibration_ece <= self.predictor.runtime_validator.ece_threshold),
                 bins=[],
             )
-            logger.info(f"Not enough real resolved history for {symbol} yet — using backtest-derived calibration snapshot.")
+            logger.info(f"Not enough real resolved history for {symbol} ({horizon}) yet — using backtest-derived calibration snapshot.")
 
         snapshot = LiveWorthinessSnapshot(
             edge_check_result=edge_result, calibration_result=calibration_result, refreshed_at=datetime.now(),
         )
-        self._live_worthiness_cache[symbol] = snapshot
+        self._live_worthiness_cache[(symbol, horizon)] = snapshot
         return snapshot
 
-    def get_cached_live_worthiness(self, symbol: str) -> Optional[LiveWorthinessSnapshot]:
-        return self._live_worthiness_cache.get(symbol)
+    def get_cached_live_worthiness(self, symbol: str, horizon: str = "INTRADAY") -> Optional[LiveWorthinessSnapshot]:
+        return self._live_worthiness_cache.get((symbol, horizon))
 
     # -----------------------------------------------------------------
     # One cycle for one symbol
@@ -180,25 +151,44 @@ class Scheduler:
         self, symbol: str, stock_df: pd.DataFrame, index_df: pd.DataFrame,
         macro_events: Optional[List] = None, corporate_events: Optional[List[dict]] = None,
         news_articles: Optional[List[dict]] = None,
-    ) -> Optional[PredictionSignal]:
-        try:
-            snapshot = self.get_cached_live_worthiness(symbol)
-            calibration_result = snapshot.calibration_result if snapshot else None
-            edge_check_result = snapshot.edge_check_result if snapshot else None
+        return_structured: bool = False,
+    ) -> Union[Optional['MultiHorizonSignal'], CycleResult]:
+        if stock_df is None or stock_df.empty or index_df is None or index_df.empty:
+            logger.warning(f"Data unavailable for {symbol} in cycle run.")
+            if return_structured:
+                return CycleResult(success=False, status="DATA_UNAVAILABLE", symbol=symbol, signal=None, error="Empty stock or index data")
+            return None
 
-            signal = self.predictor.generate_signal(
-                symbol, stock_df, index_df, macro_events=macro_events, corporate_events=corporate_events,
-                news_articles=news_articles, calibration_result=calibration_result, edge_check_result=edge_check_result,
+        try:
+            from config import HORIZON_CONFIG
+            horizons = list(HORIZON_CONFIG.keys())
+            
+            calib_results = {}
+            edge_results = {}
+            for h in horizons:
+                snapshot = self.get_cached_live_worthiness(symbol, horizon=h)
+                if snapshot:
+                    calib_results[h] = snapshot.calibration_result
+                    edge_results[h] = snapshot.edge_check_result
+
+            multi_signal = self.predictor.generate_multi_horizon_signal(
+                symbol, horizons, stock_df, index_df, macro_events=macro_events, corporate_events=corporate_events,
+                news_articles=news_articles, calibration_results=calib_results, edge_check_results=edge_results,
             )
 
-            self.history_manager.save_prediction(signal)
-            for event in signal.contributing_events:
-                self.history_manager.save_event(event)
+            for h, sig in multi_signal.signals.items():
+                self.history_manager.save_prediction(sig)
+                for event in sig.contributing_events:
+                    self.history_manager.save_event(event)
 
-            return signal
+            if return_structured:
+                return CycleResult(success=True, status="SUCCESS", symbol=symbol, signal=multi_signal)
+            return multi_signal
 
         except Exception as e:
             logger.error(f"Cycle failed for {symbol}: {e}")
+            if return_structured:
+                return CycleResult(success=False, status="ERROR", symbol=symbol, signal=None, error=str(e))
             return None
 
     def run_cycle_stream_for_symbol(
@@ -238,8 +228,7 @@ class Scheduler:
     # -----------------------------------------------------------------
     # Outcome resolution — closes the loop that grows real calibration data
     # -----------------------------------------------------------------
-    def resolve_pending_outcomes(self, symbol: str, stock_df: pd.DataFrame,
-                                  horizon_bars: int = PREDICTION_HORIZON_BARS) -> int:
+    def resolve_pending_outcomes(self, symbol: str, stock_df: pd.DataFrame) -> int:
         """
         Finds unresolved predictions for `symbol` old enough that their
         outcome horizon has definitely elapsed, computes what actually
@@ -252,16 +241,26 @@ class Scheduler:
             if not pending or stock_df.empty:
                 return 0
 
-            horizon_minutes = horizon_bars * BAR_INTERVAL_MINUTES
-
+            from config import HORIZON_CONFIG
+            
             for record in pending:
+                h_config = HORIZON_CONFIG.get(record.horizon)
+                if not h_config:
+                    continue
+                
+                # Determine how much time to add based on horizon
+                if h_config["bar_interval"] == "1d":
+                    horizon_delta = pd.Timedelta(days=h_config["horizon_bars"])
+                else:
+                    horizon_delta = pd.Timedelta(minutes=h_config["horizon_bars"] * BAR_INTERVAL_MINUTES)
+
                 pred_time = pd.Timestamp(record.timestamp)
                 if pred_time.tzinfo is not None and stock_df.index.tz is None:
                     pred_time = pred_time.tz_localize(None)
                 elif pred_time.tzinfo is None and stock_df.index.tz is not None:
                     pred_time = pred_time.tz_localize(stock_df.index.tz)
 
-                target_time = pred_time + pd.Timedelta(minutes=horizon_minutes)
+                target_time = pred_time + horizon_delta
                 if stock_df.index.max() < target_time:
                     continue  # not enough time has passed yet to know the outcome
 
@@ -406,14 +405,15 @@ if __name__ == "__main__":
         before_count = len(history_manager.get_predictions(test_symbol))
         signal = scheduler.run_one_cycle_for_symbol(test_symbol, stock_df, index_df, macro_events=[], corporate_events=[], news_articles=[])
         after_count = len(history_manager.get_predictions(test_symbol))
-        print(f"Signal generated: action={signal.action if signal else None}")
+        print(f"Signal generated: action={signal.primary_action if signal else None}")
         print(f"Predictions persisted: before={before_count}, after={after_count}")
         assert signal is not None
-        assert after_count == before_count + 1
+        assert after_count > before_count
 
         # --- Test 4: resolve_pending_outcomes resolves a prediction whose horizon has elapsed ---
         old_signal = PredictionSignal(
             symbol=test_symbol, timestamp=stock_df.index[100], horizon="INTRADAY", action="BUY", model_predicted_class="UP",
+            model_version="UNKNOWN", feature_version="UNKNOWN",
             raw_confidence=0.7, risk_adjusted_confidence=0.7, calibrated_confidence=None, agreement_fraction=0.6,
             downside_summary="d", upside_summary="u", reasoning=[],
         )

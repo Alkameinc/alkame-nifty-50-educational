@@ -11,7 +11,17 @@ import numpy as np
 import pandas as pd
 import joblib
 from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import (
+    accuracy_score,
+    balanced_accuracy_score,
+    classification_report,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+    matthews_corrcoef,
+    log_loss,
+)
 
 # 3. Local imports
 from config import (
@@ -249,23 +259,72 @@ class ModelTrainer:
             return None
 
     # -----------------------------------------------------------------
-    # Time-based split (never shuffled)
+    # Time-based split (never shuffled, purged boundary)
     # -----------------------------------------------------------------
     @staticmethod
     def time_based_split(
-        X: pd.DataFrame, y: pd.Series, test_fraction: float = TIME_SERIES_SPLIT_TEST_FRACTION
+        X: pd.DataFrame,
+        y: pd.Series,
+        test_fraction: float = TIME_SERIES_SPLIT_TEST_FRACTION,
+        purge_window: int = 0,
     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
         """
-        Strictly chronological split: the earliest (1 - test_fraction) of rows
-        become the training set, the most recent test_fraction become the
-        test set. No shuffling, ever — X and y are assumed to already be
-        sorted by time (which they are, since they come from a DatetimeIndex).
+        Strictly chronological split with boundary purging (P0-003):
+        The most recent test_fraction rows become the test set (from split_idx to end).
+        To eliminate forward-label leakage where training labels peek into test-interval prices,
+        the training set ends at (split_idx - purge_window), discarding the purge window rows.
         """
         n = len(X)
         split_idx = int(n * (1 - test_fraction))
-        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-        y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+        train_end_idx = max(0, split_idx - purge_window) if purge_window > 0 else split_idx
+        X_train, X_test = X.iloc[:train_end_idx], X.iloc[split_idx:]
+        y_train, y_test = y.iloc[:train_end_idx], y.iloc[split_idx:]
         return X_train, X_test, y_train, y_test
+
+    @staticmethod
+    def walk_forward_split(
+        X: pd.DataFrame,
+        y: pd.Series,
+        n_splits: int = 3,
+        min_train_samples: int = 200,
+        purge_window: int = 0,
+        embargo_window: int = 0,
+        mode: str = "expanding",
+        rolling_window_size: Optional[int] = None,
+    ):
+        """
+        Generates expanding or rolling chronological train/validation/test folds for walk-forward validation (QNT-001).
+        Applies a purge window (test_start - purge_window) to prevent forward-looking label leakage
+        across each fold boundary (P0-003).
+        Applies an embargo window immediately following the test chunk to prevent autocorrelation
+        leakage into any subsequent evaluations.
+        """
+        n = len(X)
+        if n < min_train_samples + n_splits * 20:
+            # Fall back to single split if dataset is small
+            X_tr, X_te, y_tr, y_te = ModelTrainer.time_based_split(X, y, purge_window=purge_window)
+            yield 0, X_tr, X_te, y_tr, y_te
+            return
+
+        test_size = int((n - min_train_samples) / n_splits)
+        for i in range(n_splits):
+            test_start = min_train_samples + i * test_size
+            test_end = min(n, test_start + test_size)
+            train_end = max(0, test_start - purge_window) if purge_window > 0 else test_start
+
+            if mode == "rolling" and rolling_window_size is not None and rolling_window_size > 0:
+                train_start = max(0, train_end - rolling_window_size)
+            else:
+                train_start = 0
+
+            X_train = X.iloc[train_start:train_end]
+            y_train = y.iloc[train_start:train_end]
+
+            eff_test_end = max(test_start, test_end - embargo_window) if embargo_window > 0 else test_end
+            X_test = X.iloc[test_start:eff_test_end]
+            y_test = y.iloc[test_start:eff_test_end]
+
+            yield i, X_train, X_test, y_train, y_test
 
     # -----------------------------------------------------------------
     # Train / evaluate / persist
@@ -282,11 +341,184 @@ class ModelTrainer:
 
     @staticmethod
     def evaluate(model: GradientBoostingClassifier, X_test: pd.DataFrame, y_test: pd.Series, label_classes: List[str] = LABEL_CLASSES) -> Dict:
+        """
+        Computes comprehensive ML evaluation metrics (QNT-004):
+        Accuracy, Balanced Accuracy, Macro/Weighted F1, Macro Precision & Recall,
+        Matthews Correlation Coefficient (MCC), Per-Class Recall, Brier Score,
+        Log Loss, and Expected Calibration Error (ECE).
+        """
+        if len(X_test) == 0:
+            return {
+                "accuracy": 0.0,
+                "balanced_accuracy": 0.0,
+                "f1_macro": 0.0,
+                "f1_weighted": 0.0,
+                "precision_macro": 0.0,
+                "recall_macro": 0.0,
+                "matthews_corrcoef": 0.0,
+                "brier_score": 0.0,
+                "log_loss": 0.0,
+                "expected_calibration_error": 0.0,
+                "per_class_recall": {c: 0.0 for c in label_classes},
+                "classification_report": {},
+                "confusion_matrix": [],
+            }
+
         preds = model.predict(X_test)
-        accuracy = accuracy_score(y_test, preds)
+        accuracy = float(accuracy_score(y_test, preds))
+        bal_acc = float(balanced_accuracy_score(y_test, preds))
+        f1_mac = float(f1_score(y_test, preds, average="macro", zero_division=0))
+        f1_wt = float(f1_score(y_test, preds, average="weighted", zero_division=0))
+        prec_mac = float(precision_score(y_test, preds, average="macro", zero_division=0))
+        rec_mac = float(recall_score(y_test, preds, average="macro", zero_division=0))
+        mcc = float(matthews_corrcoef(y_test, preds))
+
         report = classification_report(y_test, preds, labels=label_classes, output_dict=True, zero_division=0)
         cm = confusion_matrix(y_test, preds, labels=label_classes).tolist()
-        return {"accuracy": accuracy, "classification_report": report, "confusion_matrix": cm}
+
+        per_class_recall = {}
+        for cls in label_classes:
+            if cls in report and isinstance(report[cls], dict):
+                per_class_recall[cls] = float(report[cls].get("recall", 0.0))
+            else:
+                per_class_recall[cls] = 0.0
+
+        brier = 0.0
+        ll = 0.0
+        ece = 0.0
+        try:
+            if hasattr(model, "predict_proba"):
+                probs = model.predict_proba(X_test)
+                classes = list(model.classes_)
+                y_onehot = np.zeros((len(y_test), len(classes)))
+                for idx, val in enumerate(y_test):
+                    if val in classes:
+                        c_idx = classes.index(val)
+                        y_onehot[idx, c_idx] = 1.0
+                brier = float(np.mean(np.sum((probs - y_onehot) ** 2, axis=1)))
+
+                try:
+                    ll = float(log_loss(y_test, probs, labels=classes))
+                except Exception:
+                    ll = 0.0
+
+                max_conf = np.max(probs, axis=1)
+                pred_indices = np.argmax(probs, axis=1)
+                predicted_labels = np.array([classes[pi] for pi in pred_indices])
+                correct = (predicted_labels == y_test.values).astype(float)
+
+                bins = np.linspace(0.0, 1.0, 11)
+                bin_assignments = np.clip(np.digitize(max_conf, bins) - 1, 0, 9)
+                total_samples = len(y_test)
+                ece_sum = 0.0
+                for b in range(10):
+                    in_bin = bin_assignments == b
+                    b_count = int(np.sum(in_bin))
+                    if b_count > 0:
+                        b_acc = float(np.mean(correct[in_bin]))
+                        b_conf = float(np.mean(max_conf[in_bin]))
+                        ece_sum += (b_count / total_samples) * abs(b_acc - b_conf)
+                ece = float(ece_sum)
+        except Exception as e:
+            logger.warning(f"Could not compute probabilistic metrics: {e}")
+
+        return {
+            "accuracy": accuracy,
+            "balanced_accuracy": bal_acc,
+            "f1_macro": f1_mac,
+            "f1_weighted": f1_wt,
+            "precision_macro": prec_mac,
+            "recall_macro": rec_mac,
+            "matthews_corrcoef": mcc,
+            "brier_score": brier,
+            "log_loss": ll,
+            "expected_calibration_error": ece,
+            "per_class_recall": per_class_recall,
+            "classification_report": report,
+            "confusion_matrix": cm,
+        }
+
+    def evaluate_walk_forward(
+        self,
+        X: pd.DataFrame,
+        y: pd.Series,
+        n_splits: int = 3,
+        min_train_samples: int = 200,
+        purge_window: int = 0,
+        embargo_window: int = 0,
+        mode: str = "expanding",
+        rolling_window_size: Optional[int] = None,
+        label_classes: List[str] = LABEL_CLASSES,
+    ) -> Dict:
+        """
+        Executes purged walk-forward validation across expanding/rolling folds (QNT-001).
+        Computes comprehensive metrics per fold and aggregate statistics:
+        mean, median, standard deviation, worst-fold performance, and 95% confidence intervals.
+        """
+        fold_results = []
+        accuracies = []
+        balanced_accs = []
+        f1_macros = []
+        mccs = []
+        briers = []
+        eces = []
+
+        for fold_idx, X_tr, X_te, y_tr, y_te in self.walk_forward_split(
+            X, y,
+            n_splits=n_splits,
+            min_train_samples=min_train_samples,
+            purge_window=purge_window,
+            embargo_window=embargo_window,
+            mode=mode,
+            rolling_window_size=rolling_window_size,
+        ):
+            if len(X_te) == 0 or len(X_tr) == 0:
+                continue
+
+            model = self.train(X_tr, y_tr)
+            metrics = self.evaluate(model, X_te, y_te, label_classes=label_classes)
+            metrics["fold"] = fold_idx
+            metrics["train_samples"] = len(X_tr)
+            metrics["test_samples"] = len(X_te)
+            fold_results.append(metrics)
+
+            accuracies.append(metrics["accuracy"])
+            balanced_accs.append(metrics["balanced_accuracy"])
+            f1_macros.append(metrics["f1_macro"])
+            mccs.append(metrics["matthews_corrcoef"])
+            briers.append(metrics["brier_score"])
+            eces.append(metrics["expected_calibration_error"])
+
+        if not fold_results:
+            return {"folds": [], "summary": {}}
+
+        n_f = len(fold_results)
+        mean_acc = float(np.mean(accuracies))
+        std_acc = float(np.std(accuracies))
+        se_acc = std_acc / np.sqrt(n_f) if n_f > 1 else 0.0
+        ci_lower = max(0.0, mean_acc - 1.96 * se_acc)
+        ci_upper = min(1.0, mean_acc + 1.96 * se_acc)
+
+        worst_idx = int(np.argmin(accuracies))
+
+        summary = {
+            "n_folds": n_f,
+            "mean_accuracy": round(mean_acc, 4),
+            "median_accuracy": round(float(np.median(accuracies)), 4),
+            "std_accuracy": round(std_acc, 4),
+            "worst_fold_idx": worst_idx,
+            "worst_fold_accuracy": round(accuracies[worst_idx], 4),
+            "worst_fold_f1_macro": round(f1_macros[worst_idx], 4),
+            "worst_fold_mcc": round(mccs[worst_idx], 4),
+            "ci_95_accuracy": (round(ci_lower, 4), round(ci_upper, 4)),
+            "mean_balanced_accuracy": round(float(np.mean(balanced_accs)), 4),
+            "mean_f1_macro": round(float(np.mean(f1_macros)), 4),
+            "mean_mcc": round(float(np.mean(mccs)), 4),
+            "mean_brier_score": round(float(np.mean(briers)), 4),
+            "mean_ece": round(float(np.mean(eces)), 4),
+        }
+
+        return {"folds": fold_results, "summary": summary}
 
     def _model_path(self, symbol: str, horizon: str, is_level: bool = False) -> Path:
         suffix = LEVEL_MODEL_FILE_SUFFIX if is_level else MODEL_FILE_SUFFIX
@@ -314,6 +546,7 @@ class ModelTrainer:
                 "prediction_horizon_bars": HORIZON_CONFIG[horizon]["horizon_bars"],
                 "deadband_pct": HORIZON_CONFIG[horizon]["deadband_pct_default"],
                 "test_accuracy": metrics["accuracy"],
+                "price_adjustment_mode": "adjusted",  # DATA-004: Corporate action adjusted strategy
             }
             f = None
             try:
@@ -377,13 +610,14 @@ class ModelTrainer:
                     class_report={}, success=False, error=msg,
                 )
 
-            X_train, X_test, y_train, y_test = self.time_based_split(X, y)
+            horizon_bars = HORIZON_CONFIG.get(horizon, {}).get("horizon_bars", 0)
+            X_train, X_test, y_train, y_test = self.time_based_split(X, y, purge_window=horizon_bars)
 
-            # Hard runtime guarantee that the split is genuinely chronological —
+            # Hard runtime guarantee that the split is genuinely chronological and purged —
             # every training timestamp must precede every test timestamp.
             if len(X_train) > 0 and len(X_test) > 0:
-                assert X_train.index.max() <= X_test.index.min(), (
-                    "Time-based split violated: a training row is timestamped after a test row!"
+                assert X_train.index.max() < X_test.index.min(), (
+                    "Time-based split violated: a training row is timestamped at or after a test row!"
                 )
 
             model = self.train(X_train, y_train)

@@ -124,6 +124,7 @@ if __name__ == "__main__":
                 symbol=symbol, timestamp=pd.Timestamp.now(), horizon=HORIZON_INTRADAY,
                 action=ACTION_BUY if symbol == "RELIANCE" else ACTION_SELL, 
                 model_predicted_class="UP",
+                model_version="v1.0", feature_version="v1.0",
                 raw_confidence=0.8, risk_adjusted_confidence=0.8, calibrated_confidence=None,
                 agreement_fraction=0.8, downside_summary="", upside_summary="", reasoning=[],
                 is_safe_to_trade_live=True

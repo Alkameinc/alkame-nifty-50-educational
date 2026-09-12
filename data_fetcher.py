@@ -3,7 +3,9 @@ import logging
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Union, Any
+from enum import Enum
+from dataclasses import dataclass
 
 # 2. Third-party imports
 import pandas as pd
@@ -27,31 +29,40 @@ from config import (
     MARKET_TIMEZONE,
 )
 from health_monitor import registry as health_registry
+from market_data_provider import (
+    DataStatus,
+    PriceAdjustmentMode,
+    MarketDataResult,
+    MarketDataProvider,
+    YFinanceMarketDataProvider,
+    LocalCacheMarketDataProvider,
+    TestFixtureMarketDataProvider,
+    DataQualityReport,
+)
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# 5. Constants
+# 5. Constants & Models
 # ---------------------------------------------------------------------------
 MAX_RETRIES = 3
 RETRY_BACKOFF_SECONDS = 2
 REQUIRED_COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
-
 
 # ---------------------------------------------------------------------------
 # 6. Classes and functions
 # ---------------------------------------------------------------------------
 class DataFetcher:
     """
-    Single interface to yfinance for OHLCV bars. Every fetch goes through
-    retry logic; on total failure it falls back to the last good cached CSV
-    for that ticker (if one exists) so the pipeline degrades gracefully
-    instead of crashing.
+    Interface for OHLCV bars and fundamentals, wrapping an underlying
+    MarketDataProvider (DATA-005) with caching, quality verification,
+    and staleness detection.
     """
 
-    def __init__(self, cache_dir: Path = CACHE_DIR):
+    def __init__(self, cache_dir: Path = CACHE_DIR, provider: Optional[MarketDataProvider] = None):
         self.cache_dir = cache_dir
+        self.provider = provider or YFinanceMarketDataProvider(cache_dir=cache_dir)
         ensure_directories()
 
     def _cache_path(self, ticker: str, interval: str = BAR_INTERVAL) -> Path:
@@ -86,7 +97,8 @@ class DataFetcher:
         ticker: str,
         interval: str = BAR_INTERVAL,
         period: str = BAR_HISTORY_PERIOD,
-    ) -> Optional[pd.DataFrame]:
+        return_metadata: bool = False,
+    ) -> Union[Optional[pd.DataFrame], MarketDataResult]:
         """
         Fetch OHLCV bars for a single ticker with retry logic. Returns None
         only if both live fetch and cache fallback fail — callers must handle
@@ -96,6 +108,8 @@ class DataFetcher:
         cached = self._load_cache(ticker, interval=interval)
         if cached is not None and not self.check_staleness(cached, ticker):
             logger.info(f"Using fresh cache for {ticker}")
+            if return_metadata:
+                return MarketDataResult(data=cached, status=DataStatus.CACHED_FRESH, source="cache")
             return cached
 
         last_error = None
@@ -112,6 +126,8 @@ class DataFetcher:
                 df = df[REQUIRED_COLUMNS].copy()
                 self._save_cache(ticker, df, interval=interval)
                 health_registry.report("data_fetcher", ok=True, detail=f"Fetched live data for {ticker}")
+                if return_metadata:
+                    return MarketDataResult(data=df, status=DataStatus.LIVE, source="yahoo")
                 return df
 
             except Exception as e:
@@ -126,10 +142,14 @@ class DataFetcher:
         logger.error(f"All {MAX_RETRIES} live fetch attempts failed for {ticker}: {last_error}")
         cached = self._load_cache(ticker, interval=interval)
         if cached is not None:
+            if return_metadata:
+                return MarketDataResult(data=cached, status=DataStatus.CACHED_STALE, source="cache")
             return cached
 
         logger.error(f"No cache available for {ticker} ({interval}) either — returning None.")
         health_registry.report("data_fetcher", ok=False, detail=f"No live or cached data for {ticker}", error=str(last_error))
+        if return_metadata:
+            return MarketDataResult(data=None, status=DataStatus.UNAVAILABLE, source="none")
         return None
 
     def fetch_daily_ohlcv(self, ticker: str, period: str = "5y") -> Optional[pd.DataFrame]:
@@ -213,14 +233,119 @@ class DataFetcher:
         """Fetch the NIFTY 50 index itself — used as the baseline for edge/outperformance checks."""
         return self.fetch_ohlcv(NIFTY_INDEX_TICKER, interval=interval, period=period)
 
-    def is_market_open(self) -> bool:
+    def fetch_stock_fundamentals(self, ticker: str) -> Dict[str, object]:
+        """Fetch fundamental metrics (P/E, P/B, Market Cap, EPS, Div Yield, 52W High/Low) with safe fallbacks."""
         try:
-            now = pd.Timestamp.now(tz=MARKET_TIMEZONE)
-            if now.weekday() >= 5: # Sat, Sun
-                return False
-            return MARKET_OPEN_TIME <= now.time() <= MARKET_CLOSE_TIME
-        except Exception:
-            return True # Safe default
+            t = yf.Ticker(ticker)
+            info = t.info or {}
+            
+            # Format Market Cap to INR Crores
+            mcap = info.get("marketCap")
+            mcap_cr = f"₹{mcap / 1e7:,.2f} Cr" if mcap else "N/A"
+            
+            pe = info.get("trailingPE") or info.get("forwardPE")
+            pe_str = f"{pe:.2f}" if pe else "N/A"
+            
+            pb = info.get("priceToBook")
+            pb_str = f"{pb:.2f}" if pb else "N/A"
+            
+            eps = info.get("trailingEps")
+            eps_str = f"₹{eps:.2f}" if eps else "N/A"
+            
+            div = info.get("dividendYield")
+            div_str = f"{div * 100:.2f}%" if div is not None else "N/A"
+            
+            high52 = info.get("fiftyTwoWeekHigh")
+            low52 = info.get("fiftyTwoWeekLow")
+            cmp_raw = info.get("currentPrice") or info.get("regularMarketPrice")
+
+            # Calculate valuation assessment
+            # Scoring factors:
+            # 1. P/E vs typical baseline (under 18 attractive, 18-32 fair, >32 premium/growth)
+            # 2. P/B vs baseline (under 2.5 attractive, 2.5-5.0 fair, >5.0 premium)
+            # 3. 52-week range percentile (position between 52W low and 52W high)
+            valuation_status = "FAIR PRICED"
+            valuation_badge = "🟡 FAIR PRICED"
+            valuation_details = []
+
+            pe_val = float(pe) if pe and pe > 0 else None
+            pb_val = float(pb) if pb and pb > 0 else None
+            range_pct = None
+            if cmp_raw and high52 and low52 and (high52 > low52):
+                range_pct = max(0.0, min(1.0, (cmp_raw - low52) / (high52 - low52)))
+
+            score = 0  # <0 towards underpriced, >0 towards overpriced
+            if pe_val is not None:
+                if pe_val < 18.0:
+                    score -= 1
+                    valuation_details.append(f"P/E ({pe_val:.1f}x) is below typical market average (<18x)")
+                elif pe_val > 35.0:
+                    score += 1
+                    valuation_details.append(f"P/E ({pe_val:.1f}x) trades at a premium (>35x)")
+                else:
+                    valuation_details.append(f"P/E ({pe_val:.1f}x) is within reasonable range (18-35x)")
+
+            if pb_val is not None:
+                if pb_val < 2.0:
+                    score -= 1
+                    valuation_details.append(f"P/B ({pb_val:.1f}x) offers tangible asset cushion (<2.0x)")
+                elif pb_val > 6.0:
+                    score += 1
+                    valuation_details.append(f"P/B ({pb_val:.1f}x) reflects high asset premium (>6.0x)")
+
+            if range_pct is not None:
+                if range_pct < 0.25:
+                    score -= 1
+                    valuation_details.append(f"Price is in lower quartile of 52W range ({range_pct*100:.0f}%)")
+                elif range_pct > 0.85:
+                    score += 1
+                    valuation_details.append(f"Price is near 52W high ({range_pct*100:.0f}% of range)")
+
+            if score <= -1:
+                valuation_status = "UNDERPRICED"
+                valuation_badge = "🟢 UNDERPRICED (Attractive Valuation)"
+                valuation_rationale = "Valuation metrics suggest stock is trading at an attractive discount relative to earnings, assets, or historical range. " + " • ".join(valuation_details)
+            elif score >= 2:
+                valuation_status = "OVERPRICED"
+                valuation_badge = "🔴 OVERPRICED (Premium Valuation)"
+                valuation_rationale = "Valuation metrics reflect premium pricing or high growth expectations baked into price. " + " • ".join(valuation_details)
+            else:
+                valuation_status = "FAIR PRICED"
+                valuation_badge = "🟡 FAIR PRICED (Fair Value)"
+                valuation_rationale = "Valuation metrics align closely with historical and market baseline norms. " + " • ".join(valuation_details)
+
+            return {
+                "pe_ratio": pe_str,
+                "price_to_book": pb_str,
+                "market_cap": mcap_cr,
+                "eps": eps_str,
+                "dividend_yield": div_str,
+                "fifty_two_week_high": f"₹{high52:,.2f}" if high52 else "N/A",
+                "fifty_two_week_low": f"₹{low52:,.2f}" if low52 else "N/A",
+                "sector": info.get("sector", "N/A"),
+                "industry": info.get("industry", "N/A"),
+                "valuation_status": valuation_status,
+                "valuation_badge": valuation_badge,
+                "valuation_rationale": valuation_rationale,
+                "raw_pe": pe_val,
+                "raw_pb": pb_val,
+                "raw_range_pct": range_pct,
+            }
+        except Exception as e:
+            logger.warning(f"Could not fetch fundamentals for {ticker}: {e}")
+            return {
+                "pe_ratio": "N/A", "price_to_book": "N/A", "market_cap": "N/A",
+                "eps": "N/A", "dividend_yield": "N/A", "fifty_two_week_high": "N/A",
+                "fifty_two_week_low": "N/A", "sector": "N/A", "industry": "N/A",
+                "valuation_status": "FAIR PRICED",
+                "valuation_badge": "🟡 FAIR PRICED (Neutral Data)",
+                "valuation_rationale": "Insufficient fundamental data to establish over/under-pricing. Evaluated as Neutral/Fair.",
+                "raw_pe": None, "raw_pb": None, "raw_range_pct": None,
+            }
+
+    def is_market_open(self) -> bool:
+        from market_calendar import is_market_open as _is_open
+        return _is_open()
 
     def check_staleness(self, df: pd.DataFrame, ticker: str) -> bool:
         """
@@ -310,6 +435,12 @@ if __name__ == "__main__":
         print(f"Single ticker fetch ({test_symbol}): {'OK' if single_ok else 'FAILED'}"
               f" — rows={0 if df is None else len(df)}")
 
+        # Test 1.5: fetch with metadata
+        res = fetcher.fetch_ohlcv(test_symbol, return_metadata=True)
+        meta_ok = isinstance(res, MarketDataResult) and res.status in DataStatus
+        print(f"Fetch with metadata ({test_symbol}): {'OK' if meta_ok else 'FAILED'}"
+              f" — status={getattr(res, 'status', 'UNKNOWN')}")
+
         # Test 2: staleness check runs without error
         if df is not None:
             stale = fetcher.check_staleness(df, test_symbol)
@@ -350,7 +481,7 @@ if __name__ == "__main__":
         collision_ok = cache_5m and cache_1d
         print(f"Cache collision test (distinct files exist): {'OK' if collision_ok else 'FAILED'}")
         
-        overall_pass = single_ok and index_ok and gold_ok and cache_ok and daily_ok and inc_ok and collision_ok
+        overall_pass = single_ok and meta_ok and index_ok and gold_ok and cache_ok and daily_ok and inc_ok and collision_ok
         print("STATUS: PASS" if overall_pass else "STATUS: FAIL — see details above")
 
         if not overall_pass:
