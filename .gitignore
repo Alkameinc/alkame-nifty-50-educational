@@ -34,3 +34,18 @@ logs/
 venv/
 ENV/
 
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/
+
+# mypy
+.mypy_cache/
+
+# Type stubs
+*.pyi
+
+# pip-audit cache
+.pip-audit/
+
