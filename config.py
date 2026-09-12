@@ -64,9 +64,7 @@ def configure_logging(log_filename: str = "app.log", level: int = logging.INFO) 
             try:
                 from pythonjsonlogger.json import JsonFormatter
 
-                formatter = JsonFormatter(
-                    "%(asctime)s %(levelname)s %(name)s %(message)s %(filename)s %(lineno)d"
-                )
+                formatter = JsonFormatter("%(asctime)s %(levelname)s %(name)s %(message)s %(filename)s %(lineno)d")
             except ImportError:
                 try:
                     from pythonjsonlogger.jsonlogger import JsonFormatter as OldJsonFormatter

@@ -75,12 +75,12 @@ class HealthRegistry:
                     status = "OK"
 
                 if row:
-                    setattr(row, "consecutive_failures", consecutive_failures)
-                    setattr(row, "last_success_at", last_success_at)
-                    setattr(row, "last_error", last_error)
-                    setattr(row, "last_error_at", last_error_at)
-                    setattr(row, "status", status)
-                    setattr(row, "detail", detail)
+                    row.consecutive_failures = consecutive_failures  # type: ignore[assignment]
+                    row.last_success_at = last_success_at  # type: ignore[assignment]
+                    row.last_error = last_error  # type: ignore[assignment]
+                    row.last_error_at = last_error_at  # type: ignore[assignment]
+                    row.status = status  # type: ignore[assignment]
+                    row.detail = detail  # type: ignore[assignment]
                 else:
                     row = DBHealthStatus(
                         component=component,
@@ -134,9 +134,7 @@ class HealthRegistry:
                                 datetime.fromisoformat(str(row.last_success_at)) if row.last_success_at else None
                             ),
                             last_error=str(row.last_error) if row.last_error else None,
-                            last_error_at=datetime.fromisoformat(str(row.last_error_at))
-                            if row.last_error_at
-                            else None,
+                            last_error_at=datetime.fromisoformat(str(row.last_error_at)) if row.last_error_at else None,
                             consecutive_failures=int(row.consecutive_failures),
                             detail=str(row.detail),
                         )

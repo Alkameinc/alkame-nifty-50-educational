@@ -133,10 +133,10 @@ class HistoryManager:
             with self.SessionLocal() as db:
                 prediction = db.query(DBPrediction).filter(DBPrediction.id == prediction_id).first()
                 if prediction:
-                    setattr(prediction, "outcome_resolved", True)
-                    setattr(prediction, "outcome_correct", prediction.model_predicted_class == actual_class)
-                    setattr(prediction, "outcome_actual_class", actual_class)
-                    setattr(prediction, "resolved_at", datetime.now().isoformat())
+                    prediction.outcome_resolved = True  # type: ignore[assignment]
+                    prediction.outcome_correct = prediction.model_predicted_class == actual_class  # type: ignore[assignment]
+                    prediction.outcome_actual_class = actual_class  # type: ignore[assignment]
+                    prediction.resolved_at = datetime.now().isoformat()  # type: ignore[assignment]
                     db.commit()
             health_registry.report("history_manager", ok=True)
             return True
@@ -189,9 +189,9 @@ class HistoryManager:
                             model_predicted_class=str(row.model_predicted_class),
                             raw_confidence=float(row.raw_confidence),
                             risk_adjusted_confidence=float(row.risk_adjusted_confidence),
-                            calibrated_confidence=float(row.calibrated_confidence)
-                            if row.calibrated_confidence is not None
-                            else None,
+                            calibrated_confidence=(
+                                float(row.calibrated_confidence) if row.calibrated_confidence is not None else None
+                            ),
                             agreement_fraction=float(row.agreement_fraction),
                             outcome_resolved=bool(row.outcome_resolved),
                             outcome_correct=bool(row.outcome_correct) if row.outcome_correct is not None else None,
@@ -329,14 +329,14 @@ class HistoryManager:
             with self.SessionLocal() as db:
                 row = db.query(DBBacktestMetric).filter_by(symbol=symbol, horizon=horizon).first()
                 if row:
-                    setattr(row, "strategy_cumulative_return_pct", strategy_ret)
-                    setattr(row, "baseline_cumulative_return_pct", base_ret)
-                    setattr(row, "alpha_pct", alpha)
-                    setattr(row, "edge_check_status", edge)
-                    setattr(row, "calibration_status", calib)
-                    setattr(row, "calibration_ece", ece)
-                    setattr(row, "is_live_worthy", live_worthy)
-                    setattr(row, "updated_at", datetime.now().isoformat())
+                    row.strategy_cumulative_return_pct = strategy_ret  # type: ignore[assignment]
+                    row.baseline_cumulative_return_pct = base_ret  # type: ignore[assignment]
+                    row.alpha_pct = alpha  # type: ignore[assignment]
+                    row.edge_check_status = edge  # type: ignore[assignment]
+                    row.calibration_status = calib  # type: ignore[assignment]
+                    row.calibration_ece = ece  # type: ignore[assignment]
+                    row.is_live_worthy = live_worthy  # type: ignore[assignment]
+                    row.updated_at = datetime.now().isoformat()  # type: ignore[assignment]
                 else:
                     metric = DBBacktestMetric(
                         symbol=symbol,

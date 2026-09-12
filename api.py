@@ -394,7 +394,12 @@ def refresh_backtest(symbol: str, response: Response = Response(), client: Clien
         raw_index = scheduler.data_fetcher.fetch_nifty_index()
         stock_df = getattr(raw_stock, "df", raw_stock)
         index_df = getattr(raw_index, "df", raw_index)
-        if isinstance(stock_df, pd.DataFrame) and isinstance(index_df, pd.DataFrame) and not stock_df.empty and not index_df.empty:
+        if (
+            isinstance(stock_df, pd.DataFrame)
+            and isinstance(index_df, pd.DataFrame)
+            and not stock_df.empty
+            and not index_df.empty
+        ):
             scheduler.refresh_live_worthiness(symbol, stock_df, index_df)
             _refresh_last_time[symbol] = time.time()
             return {"status": "success"}

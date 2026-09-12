@@ -142,7 +142,12 @@ def render_dashboard() -> None:
     stock_df = getattr(raw_stock, "df", raw_stock)
     index_df = getattr(raw_index, "df", raw_index)
 
-    if stock_df is None or index_df is None or not isinstance(stock_df, pd.DataFrame) or not isinstance(index_df, pd.DataFrame):
+    if (
+        stock_df is None
+        or index_df is None
+        or not isinstance(stock_df, pd.DataFrame)
+        or not isinstance(index_df, pd.DataFrame)
+    ):
         st.error(
             "Could not fetch live market data right now (network issue or data provider unavailable). "
             "No signal can be safely shown without real data."
