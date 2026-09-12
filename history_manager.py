@@ -5,16 +5,15 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Optional
 
 # 2. Third-party imports
 import pandas as pd
 
 # 3. Local imports
-from config import DB_PATH, ensure_directories, configure_logging
-from predictor import PredictionSignal
+from config import DB_PATH, configure_logging, ensure_directories
 from event_classifier import Event
 from health_monitor import registry as health_registry
+from predictor import PredictionSignal
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -23,7 +22,9 @@ logger = logging.getLogger(__name__)
 # 5. Constants
 # ---------------------------------------------------------------------------
 SQLITE_TIMEOUT_SECONDS = 10
-TICKER_DELIMITER = ","  # affected_tickers stored as ',TICKER1,TICKER2,' so LIKE matching can't false-positive on substrings
+TICKER_DELIMITER = (
+    ","  # affected_tickers stored as ',TICKER1,TICKER2,' so LIKE matching can't false-positive on substrings
+)
 
 
 @dataclass
@@ -40,12 +41,12 @@ class PredictionRecord:
     model_predicted_class: str
     raw_confidence: float
     risk_adjusted_confidence: float
-    calibrated_confidence: Optional[float]
+    calibrated_confidence: float | None
     agreement_fraction: float
     outcome_resolved: bool
-    outcome_correct: Optional[bool]
-    outcome_actual_class: Optional[str]
-    resolved_at: Optional[str]
+    outcome_correct: bool | None
+    outcome_actual_class: str | None
+    resolved_at: str | None
     is_out_of_sample: bool = False
 
 
@@ -57,11 +58,11 @@ class EventRecord:
     event_type: str
     timestamp: str
     scope: str
-    affected_tickers: List[str]
-    sector: Optional[str]
+    affected_tickers: list[str]
+    sector: str | None
     confidence_in_scope: float
     headline_or_label: str
-    sentiment_score: Optional[float]
+    sentiment_score: float | None
     magnitude_estimate: str
 
 
@@ -125,22 +126,28 @@ class HistoryManager:
             # Try adding new columns if table already exists without them
             try:
                 cursor.execute("ALTER TABLE predictions ADD COLUMN horizon TEXT DEFAULT 'INTRADAY'")
-            except: pass
+            except:
+                pass
             try:
                 cursor.execute("ALTER TABLE predictions ADD COLUMN narrative TEXT")
-            except: pass
+            except:
+                pass
             try:
                 cursor.execute("ALTER TABLE predictions ADD COLUMN dca_ladder TEXT")
-            except: pass
+            except:
+                pass
             try:
                 cursor.execute("ALTER TABLE predictions ADD COLUMN model_version TEXT DEFAULT 'UNKNOWN'")
-            except: pass
+            except:
+                pass
             try:
                 cursor.execute("ALTER TABLE predictions ADD COLUMN feature_version TEXT DEFAULT 'UNKNOWN'")
-            except: pass
+            except:
+                pass
             try:
                 cursor.execute("ALTER TABLE predictions ADD COLUMN is_out_of_sample INTEGER DEFAULT 0")
-            except: pass
+            except:
+                pass
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS events (
@@ -189,17 +196,18 @@ class HistoryManager:
     def save_prediction(
         self,
         signal: PredictionSignal,
-        narrative: Optional[str] = None,
-        dca_ladder: Optional[dict] = None,
+        narrative: str | None = None,
+        dca_ladder: dict | None = None,
         is_out_of_sample: bool = False,
-    ) -> Optional[int]:
+    ) -> int | None:
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
 
             dca_ladder_str = json.dumps(dca_ladder) if dca_ladder else None
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO predictions (
                     symbol, timestamp, action, model_predicted_class, raw_confidence,
                     risk_adjusted_confidence, calibrated_confidence, agreement_fraction,
@@ -207,15 +215,33 @@ class HistoryManager:
                     risk_toggle_enabled, is_safe_to_trade_live, data_stale, suppressed, suppression_reasons,
                     horizon, narrative, dca_ladder, model_version, feature_version, is_out_of_sample
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                signal.symbol, signal.timestamp.isoformat(), signal.action, signal.model_predicted_class,
-                signal.raw_confidence, signal.risk_adjusted_confidence, signal.calibrated_confidence,
-                signal.agreement_fraction, signal.downside_summary, signal.upside_summary,
-                json.dumps(signal.reasoning), signal.global_risk_level, int(signal.risk_toggle_enabled),
-                int(signal.is_safe_to_trade_live), int(signal.data_stale), int(signal.suppressed),
-                json.dumps(signal.suppression_reasons), signal.horizon, narrative, dca_ladder_str,
-                signal.model_version, signal.feature_version, int(is_out_of_sample)
-            ))
+            """,
+                (
+                    signal.symbol,
+                    signal.timestamp.isoformat(),
+                    signal.action,
+                    signal.model_predicted_class,
+                    signal.raw_confidence,
+                    signal.risk_adjusted_confidence,
+                    signal.calibrated_confidence,
+                    signal.agreement_fraction,
+                    signal.downside_summary,
+                    signal.upside_summary,
+                    json.dumps(signal.reasoning),
+                    signal.global_risk_level,
+                    int(signal.risk_toggle_enabled),
+                    int(signal.is_safe_to_trade_live),
+                    int(signal.data_stale),
+                    int(signal.suppressed),
+                    json.dumps(signal.suppression_reasons),
+                    signal.horizon,
+                    narrative,
+                    dca_ladder_str,
+                    signal.model_version,
+                    signal.feature_version,
+                    int(is_out_of_sample),
+                ),
+            )
 
             conn.commit()
             prediction_id = cursor.lastrowid
@@ -243,13 +269,18 @@ class HistoryManager:
                 return False
             predicted_class = row[0]
             correct = int(predicted_class == actual_class)
-            cursor.execute("""
+            cursor.execute(
+                """
                 UPDATE predictions
                 SET outcome_resolved = 1, outcome_correct = ?, outcome_actual_class = ?, resolved_at = ?
                 WHERE id = ?
-            """, (correct, actual_class, datetime.now().isoformat(), prediction_id))
+            """,
+                (correct, actual_class, datetime.now().isoformat(), prediction_id),
+            )
             conn.commit()
-            logger.info(f"Resolved prediction #{prediction_id}: predicted={predicted_class}, actual={actual_class}, correct={bool(correct)}")
+            logger.info(
+                f"Resolved prediction #{prediction_id}: predicted={predicted_class}, actual={actual_class}, correct={bool(correct)}"
+            )
             health_registry.report("history_manager", ok=True, detail=f"Resolved prediction {prediction_id}")
             return True
         except Exception as e:
@@ -262,22 +293,24 @@ class HistoryManager:
 
     def get_predictions(
         self,
-        symbol: Optional[str] = None,
-        horizon: Optional[str] = None,
+        symbol: str | None = None,
+        horizon: str | None = None,
         limit: int = 200,
         only_unresolved: bool = False,
-        model_version: Optional[str] = None,
-        feature_version: Optional[str] = None,
+        model_version: str | None = None,
+        feature_version: str | None = None,
         only_out_of_sample: bool = False,
-    ) -> List[PredictionRecord]:
+    ) -> list[PredictionRecord]:
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            query = ("SELECT id, symbol, timestamp, action, model_predicted_class, raw_confidence, "
-                      "risk_adjusted_confidence, calibrated_confidence, agreement_fraction, outcome_resolved, "
-                      "outcome_correct, outcome_actual_class, resolved_at, horizon, narrative, dca_ladder, "
-                      "model_version, feature_version, is_out_of_sample FROM predictions WHERE 1=1")
+            query = (
+                "SELECT id, symbol, timestamp, action, model_predicted_class, raw_confidence, "
+                "risk_adjusted_confidence, calibrated_confidence, agreement_fraction, outcome_resolved, "
+                "outcome_correct, outcome_actual_class, resolved_at, horizon, narrative, dca_ladder, "
+                "model_version, feature_version, is_out_of_sample FROM predictions WHERE 1=1"
+            )
             params = []
             if symbol:
                 query += " AND symbol = ?"
@@ -301,19 +334,29 @@ class HistoryManager:
             rows = cursor.fetchall()
             records = []
             for row in rows:
-                records.append(PredictionRecord(
-                    id=row[0], symbol=row[1], timestamp=row[2], action=row[3], model_predicted_class=row[4],
-                    raw_confidence=row[5], risk_adjusted_confidence=row[6], calibrated_confidence=row[7],
-                    agreement_fraction=row[8], outcome_resolved=bool(row[9]),
-                    outcome_correct=None if row[10] is None else bool(row[10]),
-                    outcome_actual_class=row[11], resolved_at=row[12],
-                    horizon=row[13] if len(row) > 13 and row[13] else 'INTRADAY',
-                    narrative=row[14] if len(row) > 14 else None,
-                    dca_ladder=row[15] if len(row) > 15 else None,
-                    model_version=row[16] if len(row) > 16 and row[16] else 'LEGACY/UNKNOWN',
-                    feature_version=row[17] if len(row) > 17 and row[17] else 'LEGACY/UNKNOWN',
-                    is_out_of_sample=bool(row[18]) if len(row) > 18 and row[18] is not None else False
-                ))
+                records.append(
+                    PredictionRecord(
+                        id=row[0],
+                        symbol=row[1],
+                        timestamp=row[2],
+                        action=row[3],
+                        model_predicted_class=row[4],
+                        raw_confidence=row[5],
+                        risk_adjusted_confidence=row[6],
+                        calibrated_confidence=row[7],
+                        agreement_fraction=row[8],
+                        outcome_resolved=bool(row[9]),
+                        outcome_correct=None if row[10] is None else bool(row[10]),
+                        outcome_actual_class=row[11],
+                        resolved_at=row[12],
+                        horizon=row[13] if len(row) > 13 and row[13] else "INTRADAY",
+                        narrative=row[14] if len(row) > 14 else None,
+                        dca_ladder=row[15] if len(row) > 15 else None,
+                        model_version=row[16] if len(row) > 16 and row[16] else "LEGACY/UNKNOWN",
+                        feature_version=row[17] if len(row) > 17 and row[17] else "LEGACY/UNKNOWN",
+                        is_out_of_sample=bool(row[18]) if len(row) > 18 and row[18] is not None else False,
+                    )
+                )
 
             health_registry.report("history_manager", ok=True)
             return records
@@ -327,12 +370,12 @@ class HistoryManager:
 
     def build_calibration_dataset(
         self,
-        symbol: Optional[str] = None,
-        horizon: Optional[str] = None,
-        model_version: Optional[str] = None,
-        feature_version: Optional[str] = None,
+        symbol: str | None = None,
+        horizon: str | None = None,
+        model_version: str | None = None,
+        feature_version: str | None = None,
         only_out_of_sample: bool = False,
-        max_age_days: Optional[int] = None,
+        max_age_days: int | None = None,
     ) -> pd.DataFrame:
         """
         Builds the (confidence, correct) DataFrame that runtime_validator.py's
@@ -357,46 +400,64 @@ class HistoryManager:
                 cutoff_ts = (datetime.now() - timedelta(days=max_age_days)).isoformat()
 
             resolved = [
-                r for r in records
-                if r.outcome_resolved and r.outcome_correct is not None
-                and r.model_version not in ('LEGACY/UNKNOWN', 'UNKNOWN', 'LEGACY')
-                and r.feature_version not in ('LEGACY/UNKNOWN', 'UNKNOWN', 'LEGACY')
+                r
+                for r in records
+                if r.outcome_resolved
+                and r.outcome_correct is not None
+                and r.model_version not in ("LEGACY/UNKNOWN", "UNKNOWN", "LEGACY")
+                and r.feature_version not in ("LEGACY/UNKNOWN", "UNKNOWN", "LEGACY")
                 and (cutoff_ts is None or r.timestamp >= cutoff_ts)
             ]
             if not resolved:
                 health_registry.report("history_manager", ok=True)
                 return pd.DataFrame(columns=["confidence", "correct"])
-            df = pd.DataFrame({
-                "confidence": [r.risk_adjusted_confidence for r in resolved],
-                "correct": [r.outcome_correct for r in resolved],
-            })
+            df = pd.DataFrame(
+                {
+                    "confidence": [r.risk_adjusted_confidence for r in resolved],
+                    "correct": [r.outcome_correct for r in resolved],
+                }
+            )
             health_registry.report("history_manager", ok=True)
             return df
         except Exception as e:
             logger.error(f"Failed building calibration dataset for symbol={symbol}: {e}")
-            health_registry.report("history_manager", ok=False, detail="Failed building calibration dataset", error=str(e))
+            health_registry.report(
+                "history_manager", ok=False, detail="Failed building calibration dataset", error=str(e)
+            )
             return pd.DataFrame(columns=["confidence", "correct"])
 
     # -----------------------------------------------------------------
     # Events
     # -----------------------------------------------------------------
-    def save_event(self, event: Event) -> Optional[int]:
+    def save_event(self, event: Event) -> int | None:
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             # Wrapped in delimiters so a later LIKE '%,SYMBOL,%' match can't false-positive on substrings.
             tickers_str = TICKER_DELIMITER + TICKER_DELIMITER.join(event.affected_tickers) + TICKER_DELIMITER
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO events (
                     event_id, source, event_type, timestamp, scope, affected_tickers, sector,
                     confidence_in_scope, headline_or_label, sentiment_score, magnitude_estimate, recorded_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                event.event_id, event.source, event.event_type, event.timestamp.isoformat(), event.scope,
-                tickers_str, event.sector, event.confidence_in_scope, event.headline_or_label,
-                event.sentiment_score, event.magnitude_estimate, datetime.now().isoformat(),
-            ))
+            """,
+                (
+                    event.event_id,
+                    event.source,
+                    event.event_type,
+                    event.timestamp.isoformat(),
+                    event.scope,
+                    tickers_str,
+                    event.sector,
+                    event.confidence_in_scope,
+                    event.headline_or_label,
+                    event.sentiment_score,
+                    event.magnitude_estimate,
+                    datetime.now().isoformat(),
+                ),
+            )
             conn.commit()
             row_id = cursor.lastrowid
             logger.info(f"Saved event #{row_id} ({event.event_type}, scope={event.scope}).")
@@ -410,7 +471,7 @@ class HistoryManager:
             if conn is not None:
                 conn.close()
 
-    def get_events_for_symbol(self, symbol: str, limit: int = 100) -> List[EventRecord]:
+    def get_events_for_symbol(self, symbol: str, limit: int = 100) -> list[EventRecord]:
         conn = None
         try:
             conn = self._get_connection()
@@ -418,20 +479,34 @@ class HistoryManager:
             # Delimiter-wrapped LIKE match: ',SYMBOL,' must appear exactly, so 'TCS' can never
             # accidentally match a row whose tickers include something like 'CTCS' or 'TCSX'.
             pattern = f"%{TICKER_DELIMITER}{symbol}{TICKER_DELIMITER}%"
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT id, event_id, source, event_type, timestamp, scope, affected_tickers, sector,
                        confidence_in_scope, headline_or_label, sentiment_score, magnitude_estimate
                 FROM events WHERE affected_tickers LIKE ? ORDER BY id DESC LIMIT ?
-            """, (pattern, limit))
+            """,
+                (pattern, limit),
+            )
             rows = cursor.fetchall()
             records = []
             for row in rows:
                 tickers = [t for t in row[6].strip(TICKER_DELIMITER).split(TICKER_DELIMITER) if t]
-                records.append(EventRecord(
-                    id=row[0], event_id=row[1], source=row[2], event_type=row[3], timestamp=row[4],
-                    scope=row[5], affected_tickers=tickers, sector=row[7], confidence_in_scope=row[8],
-                    headline_or_label=row[9], sentiment_score=row[10], magnitude_estimate=row[11],
-                ))
+                records.append(
+                    EventRecord(
+                        id=row[0],
+                        event_id=row[1],
+                        source=row[2],
+                        event_type=row[3],
+                        timestamp=row[4],
+                        scope=row[5],
+                        affected_tickers=tickers,
+                        sector=row[7],
+                        confidence_in_scope=row[8],
+                        headline_or_label=row[9],
+                        sentiment_score=row[10],
+                        magnitude_estimate=row[11],
+                    )
+                )
             health_registry.report("history_manager", ok=True)
             return records
         except Exception as e:
@@ -445,12 +520,24 @@ class HistoryManager:
     # -----------------------------------------------------------------
     # Backtest Metrics
     # -----------------------------------------------------------------
-    def save_backtest_result(self, symbol: str, horizon: str, strategy_ret: float, base_ret: float, alpha: float, edge: str, calib: str, ece: Optional[float], live_worthy: bool) -> bool:
+    def save_backtest_result(
+        self,
+        symbol: str,
+        horizon: str,
+        strategy_ret: float,
+        base_ret: float,
+        alpha: float,
+        edge: str,
+        calib: str,
+        ece: float | None,
+        live_worthy: bool,
+    ) -> bool:
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO backtest_metrics (
                     symbol, horizon, strategy_cumulative_return_pct, baseline_cumulative_return_pct,
                     alpha_pct, edge_check_status, calibration_status, calibration_ece, is_live_worthy, updated_at
@@ -464,9 +551,20 @@ class HistoryManager:
                     calibration_ece=excluded.calibration_ece,
                     is_live_worthy=excluded.is_live_worthy,
                     updated_at=excluded.updated_at
-            """, (
-                symbol, horizon, strategy_ret, base_ret, alpha, edge, calib, ece, int(live_worthy), datetime.now().isoformat()
-            ))
+            """,
+                (
+                    symbol,
+                    horizon,
+                    strategy_ret,
+                    base_ret,
+                    alpha,
+                    edge,
+                    calib,
+                    ece,
+                    int(live_worthy),
+                    datetime.now().isoformat(),
+                ),
+            )
             conn.commit()
             health_registry.report("history_manager", ok=True, detail=f"Saved backtest metrics for {symbol} {horizon}")
             return True
@@ -484,6 +582,7 @@ class HistoryManager:
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import os
+
     from config import DB_DIR
 
     configure_logging(log_filename="history_manager_selftest.log")
@@ -494,7 +593,7 @@ if __name__ == "__main__":
         os.remove(test_db_path)
 
     test_symbol = "M&M"  # deliberately chosen: shares no risky substrings with other NIFTY50 tickers,
-                          # a good stress test for the delimiter-wrapped LIKE matching below
+    # a good stress test for the delimiter-wrapped LIKE matching below
 
     try:
         print("\n=== HISTORY MANAGER SELF-TEST RESULT ===")
@@ -502,10 +601,20 @@ if __name__ == "__main__":
 
         # --- Predictions + outcome resolution ---
         signal = PredictionSignal(
-            symbol=test_symbol, timestamp=datetime.now(), horizon="INTRADAY", action="BUY", model_predicted_class="UP",
-            model_version="v1.0", feature_version="v1.0",
-            raw_confidence=0.72, risk_adjusted_confidence=0.70, calibrated_confidence=None, agreement_fraction=0.66,
-            downside_summary="Some downside.", upside_summary="Some upside.", reasoning=["Model said UP."],
+            symbol=test_symbol,
+            timestamp=datetime.now(),
+            horizon="INTRADAY",
+            action="BUY",
+            model_predicted_class="UP",
+            model_version="v1.0",
+            feature_version="v1.0",
+            raw_confidence=0.72,
+            risk_adjusted_confidence=0.70,
+            calibrated_confidence=None,
+            agreement_fraction=0.66,
+            downside_summary="Some downside.",
+            upside_summary="Some upside.",
+            reasoning=["Model said UP."],
         )
         pred_id = manager.save_prediction(signal)
         print(f"Prediction saved: id={pred_id}")
@@ -520,10 +629,20 @@ if __name__ == "__main__":
         pattern = [(0.9, "UP", "UP"), (0.9, "UP", "DOWN"), (0.3, "DOWN", "UP"), (0.6, "FLAT", "FLAT")]
         for conf, predicted, actual in pattern:
             s = PredictionSignal(
-                symbol=test_symbol, timestamp=datetime.now(), horizon="INTRADAY", action="BUY", model_predicted_class=predicted,
-                model_version="v1.0", feature_version="v1.0",
-                raw_confidence=conf, risk_adjusted_confidence=conf, calibrated_confidence=None, agreement_fraction=0.5,
-                downside_summary="d", upside_summary="u", reasoning=[],
+                symbol=test_symbol,
+                timestamp=datetime.now(),
+                horizon="INTRADAY",
+                action="BUY",
+                model_predicted_class=predicted,
+                model_version="v1.0",
+                feature_version="v1.0",
+                raw_confidence=conf,
+                risk_adjusted_confidence=conf,
+                calibrated_confidence=None,
+                agreement_fraction=0.5,
+                downside_summary="d",
+                upside_summary="u",
+                reasoning=[],
             )
             pid = manager.save_prediction(s)
             manager.resolve_outcome(pid, actual_class=actual)
@@ -536,23 +655,39 @@ if __name__ == "__main__":
 
         # --- Events + delimiter-safe symbol matching ---
         event_for_symbol = Event(
-            event_id="EVT_TEST_1", source="CORPORATE", event_type="CORPORATE_ANNOUNCEMENT",
-            timestamp=datetime.now(), scope="STOCK", affected_tickers=[test_symbol, "HDFCBANK"],
-            sector="Auto", confidence_in_scope=1.0, headline_or_label="Board meeting for M&M",
-            sentiment_score=0.1, magnitude_estimate="MEDIUM",
+            event_id="EVT_TEST_1",
+            source="CORPORATE",
+            event_type="CORPORATE_ANNOUNCEMENT",
+            timestamp=datetime.now(),
+            scope="STOCK",
+            affected_tickers=[test_symbol, "HDFCBANK"],
+            sector="Auto",
+            confidence_in_scope=1.0,
+            headline_or_label="Board meeting for M&M",
+            sentiment_score=0.1,
+            magnitude_estimate="MEDIUM",
         )
         event_not_for_symbol = Event(
-            event_id="EVT_TEST_2", source="CORPORATE", event_type="CORPORATE_ANNOUNCEMENT",
-            timestamp=datetime.now(), scope="STOCK", affected_tickers=["MARUTI", "TMPV"],
-            sector="Auto", confidence_in_scope=1.0, headline_or_label="Board meeting for Maruti",
-            sentiment_score=0.1, magnitude_estimate="MEDIUM",
+            event_id="EVT_TEST_2",
+            source="CORPORATE",
+            event_type="CORPORATE_ANNOUNCEMENT",
+            timestamp=datetime.now(),
+            scope="STOCK",
+            affected_tickers=["MARUTI", "TMPV"],
+            sector="Auto",
+            confidence_in_scope=1.0,
+            headline_or_label="Board meeting for Maruti",
+            sentiment_score=0.1,
+            magnitude_estimate="MEDIUM",
         )
         manager.save_event(event_for_symbol)
         manager.save_event(event_not_for_symbol)
 
         events_for_symbol = manager.get_events_for_symbol(test_symbol)
-        print(f"Events correctly matched for {test_symbol}: {len(events_for_symbol)} "
-              f"(expected 1, must NOT include the Maruti-only event)")
+        print(
+            f"Events correctly matched for {test_symbol}: {len(events_for_symbol)} "
+            f"(expected 1, must NOT include the Maruti-only event)"
+        )
         assert len(events_for_symbol) == 1
         assert events_for_symbol[0].event_id == "EVT_TEST_1"
 

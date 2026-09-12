@@ -2,18 +2,17 @@
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
 
 # 2. Third-party imports
 from nse import NSE
 
 # 3. Local imports
 from config import (
+    DATA_DIR,
     NIFTY50_SYMBOLS,
     NSE_RATE_LIMIT_DELAY_SECONDS,
-    DATA_DIR,
-    ensure_directories,
     configure_logging,
+    ensure_directories,
 )
 from health_monitor import registry as health_registry
 
@@ -50,7 +49,7 @@ class CorporateEventsFetcher:
     def __init__(self, download_folder: str = str(DATA_DIR)):
         ensure_directories()
         self.download_folder = download_folder
-        self._nse: Optional[NSE] = None
+        self._nse: NSE | None = None
 
     def __enter__(self):
         self._nse = NSE(download_folder=self.download_folder, server=False)
@@ -87,49 +86,66 @@ class CorporateEventsFetcher:
                 if attempt < MAX_RETRIES:
                     time.sleep(RETRY_BACKOFF_SECONDS * attempt)
         logger.error(f"All {MAX_RETRIES} attempts failed for {fn_name}: {last_error}")
-        health_registry.report("corporate_events_fetcher", ok=False, detail=f"All {MAX_RETRIES} attempts failed for {fn_name}", error=str(last_error))
+        health_registry.report(
+            "corporate_events_fetcher",
+            ok=False,
+            detail=f"All {MAX_RETRIES} attempts failed for {fn_name}",
+            error=str(last_error),
+        )
         return []
 
     def fetch_announcements(
-        self, symbol: str, from_date: Optional[datetime] = None, to_date: Optional[datetime] = None
-    ) -> List[Dict]:
+        self, symbol: str, from_date: datetime | None = None, to_date: datetime | None = None
+    ) -> list[dict]:
         """Fetch corporate announcements for a single symbol."""
         to_date = to_date or datetime.now()
         from_date = from_date or (to_date - timedelta(days=DEFAULT_LOOKBACK_DAYS))
         client = self._get_client()
         raw = self._call_with_retry(
-            "announcements", client.announcements,
-            index="equities", symbol=symbol, from_date=from_date, to_date=to_date,
+            "announcements",
+            client.announcements,
+            index="equities",
+            symbol=symbol,
+            from_date=from_date,
+            to_date=to_date,
         )
         return self._normalize(raw, symbol, EVENT_CATEGORY_ANNOUNCEMENT)
 
     def fetch_board_meetings(
-        self, symbol: str, from_date: Optional[datetime] = None, to_date: Optional[datetime] = None
-    ) -> List[Dict]:
+        self, symbol: str, from_date: datetime | None = None, to_date: datetime | None = None
+    ) -> list[dict]:
         """Fetch upcoming/past board meetings for a single symbol."""
         to_date = to_date or datetime.now()
         from_date = from_date or (to_date - timedelta(days=DEFAULT_LOOKBACK_DAYS))
         client = self._get_client()
         raw = self._call_with_retry(
-            "boardMeetings", client.boardMeetings,
-            index="equities", symbol=symbol, from_date=from_date, to_date=to_date,
+            "boardMeetings",
+            client.boardMeetings,
+            index="equities",
+            symbol=symbol,
+            from_date=from_date,
+            to_date=to_date,
         )
         return self._normalize(raw, symbol, EVENT_CATEGORY_BOARD_MEETING)
 
     def fetch_corporate_actions(
-        self, symbol: str, from_date: Optional[datetime] = None, to_date: Optional[datetime] = None
-    ) -> List[Dict]:
+        self, symbol: str, from_date: datetime | None = None, to_date: datetime | None = None
+    ) -> list[dict]:
         """Fetch corporate actions (dividends, splits, bonuses, rights) for a single symbol."""
         to_date = to_date or datetime.now()
         from_date = from_date or (to_date - timedelta(days=DEFAULT_LOOKBACK_DAYS))
         client = self._get_client()
         raw = self._call_with_retry(
-            "actions", client.actions,
-            segment="equities", symbol=symbol, from_date=from_date, to_date=to_date,
+            "actions",
+            client.actions,
+            segment="equities",
+            symbol=symbol,
+            from_date=from_date,
+            to_date=to_date,
         )
         return self._normalize(raw, symbol, EVENT_CATEGORY_CORPORATE_ACTION)
 
-    def fetch_block_deals(self) -> List[Dict]:
+    def fetch_block_deals(self) -> list[dict]:
         """Fetch today's market-wide block deals (not filterable by symbol upstream)."""
         client = self._get_client()
         raw = self._call_with_retry("blockDeals", client.blockDeals)
@@ -137,45 +153,48 @@ class CorporateEventsFetcher:
             raw = raw.get("data", []) if raw else []
         return self._normalize(raw, symbol=None, category=EVENT_CATEGORY_BLOCK_DEAL)
 
-    def fetch_bulk_deals(
-        self, from_date: Optional[datetime] = None, to_date: Optional[datetime] = None
-    ) -> List[Dict]:
+    def fetch_bulk_deals(self, from_date: datetime | None = None, to_date: datetime | None = None) -> list[dict]:
         """Fetch bulk deals across the market for a date range."""
         to_date = to_date or datetime.now()
         from_date = from_date or (to_date - timedelta(days=DEFAULT_LOOKBACK_DAYS))
         client = self._get_client()
         raw = self._call_with_retry(
-            "bulkdeals", client.bulkdeals,
-            option_type="bulk_deals", fromdate=from_date, todate=to_date,
+            "bulkdeals",
+            client.bulkdeals,
+            option_type="bulk_deals",
+            fromdate=from_date,
+            todate=to_date,
         )
         return self._normalize(raw, symbol=None, category=EVENT_CATEGORY_BULK_DEAL)
 
-    def fetch_all_for_symbol(self, symbol: str) -> List[Dict]:
+    def fetch_all_for_symbol(self, symbol: str) -> list[dict]:
         """Fetch every corporate-event category for one symbol, combined into one list."""
-        events: List[Dict] = []
+        events: list[dict] = []
         events.extend(self.fetch_announcements(symbol))
         events.extend(self.fetch_board_meetings(symbol))
         events.extend(self.fetch_corporate_actions(symbol))
         return events
 
-    def fetch_all_nifty50(self) -> Dict[str, List[Dict]]:
+    def fetch_all_nifty50(self) -> dict[str, list[dict]]:
         """Fetch corporate events for every NIFTY50 symbol. Slow by design —
         respects NSE rate limits — intended to run on a scheduled cadence,
         not on every prediction cycle."""
-        results: Dict[str, List[Dict]] = {}
+        results: dict[str, list[dict]] = {}
         for symbol in NIFTY50_SYMBOLS:
             try:
                 results[symbol] = self.fetch_all_for_symbol(symbol)
             except Exception as e:
                 logger.error(f"Failed fetching corporate events for {symbol}: {e}")
-                health_registry.report("corporate_events_fetcher", ok=False, detail=f"Failed fetching for {symbol}", error=str(e))
+                health_registry.report(
+                    "corporate_events_fetcher", ok=False, detail=f"Failed fetching for {symbol}", error=str(e)
+                )
                 results[symbol] = []
         total_events = sum(len(v) for v in results.values())
         logger.info(f"Fetched {total_events} corporate event(s) across {len(NIFTY50_SYMBOLS)} symbols.")
         return results
 
     @staticmethod
-    def _normalize(raw_items: List[Dict], symbol: Optional[str], category: str) -> List[Dict]:
+    def _normalize(raw_items: list[dict], symbol: str | None, category: str) -> list[dict]:
         """Normalize raw nse-package dicts into a consistent shape:
         {symbol, category, raw, fetched_at}. Downstream event_classifier.py
         is responsible for further scope/sector tagging."""
@@ -184,15 +203,19 @@ class CorporateEventsFetcher:
             return normalized
         try:
             for item in raw_items:
-                normalized.append({
-                    "symbol": symbol or item.get("symbol") or item.get("Symbol"),
-                    "category": category,
-                    "raw": item,
-                    "fetched_at": datetime.now().isoformat(),
-                })
+                normalized.append(
+                    {
+                        "symbol": symbol or item.get("symbol") or item.get("Symbol"),
+                        "category": category,
+                        "raw": item,
+                        "fetched_at": datetime.now().isoformat(),
+                    }
+                )
         except Exception as e:
             logger.error(f"Failed normalizing {category} events for {symbol}: {e}")
-            health_registry.report("corporate_events_fetcher", ok=False, detail=f"Failed normalizing {category} for {symbol}", error=str(e))
+            health_registry.report(
+                "corporate_events_fetcher", ok=False, detail=f"Failed normalizing {category} for {symbol}", error=str(e)
+            )
         return normalized
 
 

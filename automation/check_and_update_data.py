@@ -1,22 +1,23 @@
-﻿import sys
-import logging
-from pathlib import Path
+﻿import logging
+import sys
 from datetime import datetime
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from config import (
-    to_yfinance_ticker,
-    NIFTY_INDEX_TICKER,
-    BAR_INTERVAL,
     BAR_HISTORY_PERIOD,
+    BAR_INTERVAL,
+    NIFTY_INDEX_TICKER,
+    to_yfinance_ticker,
 )
 from data_fetcher import DataFetcher
 from market_calendar import is_market_open, is_trading_day
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("DataSync")
+
 
 def main():
     print("=" * 65)
@@ -26,7 +27,11 @@ def main():
     now = datetime.now()
     market_open = is_market_open()
     trading_day = is_trading_day(now.date())
-    status_str = "OPEN (Live Session)" if market_open else ("CLOSED (Trading Day, Off-hours)" if trading_day else "CLOSED (Weekend / Holiday)")
+    status_str = (
+        "OPEN (Live Session)"
+        if market_open
+        else ("CLOSED (Trading Day, Off-hours)" if trading_day else "CLOSED (Weekend / Holiday)")
+    )
 
     print(f"[*] NSE Market Status : {status_str}")
     print(f"[*] Current Timestamp : {now.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -39,7 +44,9 @@ def main():
 
     # 1. Update Index
     print(f"  -> Benchmark Index ({NIFTY_INDEX_TICKER}):", end=" ", flush=True)
-    idx_res = fetcher.fetch_ohlcv(NIFTY_INDEX_TICKER, interval=BAR_INTERVAL, period=BAR_HISTORY_PERIOD, return_metadata=True)
+    idx_res = fetcher.fetch_ohlcv(
+        NIFTY_INDEX_TICKER, interval=BAR_INTERVAL, period=BAR_HISTORY_PERIOD, return_metadata=True
+    )
     if idx_res and idx_res.data is not None and not idx_res.data.empty:
         print(f"[{idx_res.status.value}] ({len(idx_res.data)} bars)")
     else:
@@ -77,6 +84,7 @@ def main():
     print(f"[*] Sync Complete: {fresh_count} Fresh, {stale_count} Updated/Synchronized.")
     print("=" * 65)
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())

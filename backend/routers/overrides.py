@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 
-from human_insight_manager import HumanInsightManager
 from backend.dependencies import get_insight_manager
 from backend.schemas import OverrideRequest, OverrideResponse
+from human_insight_manager import HumanInsightManager
 
 router = APIRouter(prefix="/override", tags=["overrides"])
 

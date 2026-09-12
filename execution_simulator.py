@@ -1,8 +1,7 @@
 # 1. Standard library imports
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
-import logging
-from typing import Dict, List, Optional, Tuple
 
 # 2. Third-party imports
 import numpy as np
@@ -33,10 +32,10 @@ class CostScenario:
     name: str
     slippage_bps: float
     brokerage_bps: float
-    stt_bps: float               # Securities Transaction Tax round-trip
+    stt_bps: float  # Securities Transaction Tax round-trip
     exchange_charges_bps: float  # NSE turnover fee
-    gst_pct: float               # 18% on brokerage + exchange
-    stamp_duty_bps: float        # Stamp duty on buy leg
+    gst_pct: float  # 18% on brokerage + exchange
+    stamp_duty_bps: float  # Stamp duty on buy leg
     sebi_turnover_bps: float = 0.01
 
     @property
@@ -44,7 +43,9 @@ class CostScenario:
         """Total round-trip friction expressed as a percentage."""
         brok_and_exch = self.brokerage_bps + self.exchange_charges_bps
         gst_bps = brok_and_exch * (self.gst_pct / 100.0)
-        statutory_bps = self.stt_bps + self.exchange_charges_bps + gst_bps + self.stamp_duty_bps + self.sebi_turnover_bps
+        statutory_bps = (
+            self.stt_bps + self.exchange_charges_bps + gst_bps + self.stamp_duty_bps + self.sebi_turnover_bps
+        )
         total_bps = self.slippage_bps * 2.0 + self.brokerage_bps + statutory_bps
         return total_bps / 100.0  # bps -> %
 
@@ -63,7 +64,7 @@ STANDARD_COST_SCENARIOS = {
         name="BASE",
         slippage_bps=5.0,
         brokerage_bps=3.0,
-        stt_bps=1.25,             # Intraday equity STT (0.025% on sell side)
+        stt_bps=1.25,  # Intraday equity STT (0.025% on sell side)
         exchange_charges_bps=0.345,
         gst_pct=18.0,
         stamp_duty_bps=0.3,
@@ -93,7 +94,7 @@ STANDARD_COST_SCENARIOS = {
 class SimulatedTrade:
     symbol: str
     horizon: str
-    direction: int                  # 1 for LONG, -1 for SHORT
+    direction: int  # 1 for LONG, -1 for SHORT
     signal_time: pd.Timestamp
     entry_time: pd.Timestamp
     exit_time: pd.Timestamp
@@ -123,7 +124,7 @@ class SimulationReport:
     max_drawdown_pct: float
     sharpe_ratio: float
     sortino_ratio: float
-    trades: List[SimulatedTrade] = field(default_factory=list)
+    trades: list[SimulatedTrade] = field(default_factory=list)
 
 
 class ExecutionSimulator:
@@ -146,9 +147,9 @@ class ExecutionSimulator:
         df: pd.DataFrame,
         signals: pd.Series,
         horizon: str = HORIZON_INTRADAY,
-        stop_loss_pct: Optional[float] = None,
-        profit_target_pct: Optional[float] = None,
-        cost_scenario: Optional[CostScenario] = None,
+        stop_loss_pct: float | None = None,
+        profit_target_pct: float | None = None,
+        cost_scenario: CostScenario | None = None,
     ) -> SimulationReport:
         """
         Runs simulation across df bars using signals series (indexed by timestamp, values: 1=UP, -1=DOWN, 0=FLAT).
@@ -161,9 +162,9 @@ class ExecutionSimulator:
         sl_pct = stop_loss_pct if stop_loss_pct is not None else deadband * 1.5
         tp_pct = profit_target_pct if profit_target_pct is not None else deadband * 2.5
 
-        trades: List[SimulatedTrade] = []
+        trades: list[SimulatedTrade] = []
         n_signals = int((signals != 0).sum())
-        slippage_frac = (scenario.slippage_bps / 10000.0)
+        slippage_frac = scenario.slippage_bps / 10000.0
         round_trip_cost_pct = scenario.total_cost_pct
 
         timestamps = df.index
@@ -325,7 +326,9 @@ class ExecutionSimulator:
 
         gross_win_sum = float(np.sum(gross_returns[gross_returns > 0])) if np.any(gross_returns > 0) else 0.0
         gross_loss_sum = abs(float(np.sum(gross_returns[gross_returns < 0]))) if np.any(gross_returns < 0) else 0.0
-        profit_factor = round(gross_win_sum / gross_loss_sum, 3) if gross_loss_sum > 0 else (99.0 if gross_win_sum > 0 else 0.0)
+        profit_factor = (
+            round(gross_win_sum / gross_loss_sum, 3) if gross_loss_sum > 0 else (99.0 if gross_win_sum > 0 else 0.0)
+        )
 
         cum_net = float(np.sum(net_returns))
         cum_gross = float(np.sum(gross_returns))
@@ -368,7 +371,7 @@ class ExecutionSimulator:
         df: pd.DataFrame,
         signals: pd.Series,
         horizon: str = HORIZON_INTRADAY,
-    ) -> Dict[str, SimulationReport]:
+    ) -> dict[str, SimulationReport]:
         """
         Runs the simulation across all standard cost scenarios (OPTIMISTIC, BASE, PESSIMISTIC, STRESS)
         to evaluate strategy robustness and cost-decay profiles (QNT-003).
@@ -392,21 +395,19 @@ if __name__ == "__main__":
     # Build simple synthetic bars
     dates = pd.date_range("2026-01-01 09:15", periods=100, freq="5min")
     prices = 100.0 + np.cumsum(np.random.normal(0.05, 0.5, size=100))
-    df = pd.DataFrame({
-        "Open": prices,
-        "High": prices + 0.3,
-        "Low": prices - 0.3,
-        "Close": prices + 0.1,
-        "Volume": 10000
-    }, index=dates)
+    df = pd.DataFrame(
+        {"Open": prices, "High": prices + 0.3, "Low": prices - 0.3, "Close": prices + 0.1, "Volume": 10000}, index=dates
+    )
 
     signals = pd.Series(0, index=dates)
-    signals.iloc[5] = 1   # Long
-    signals.iloc[25] = -1 # Short
+    signals.iloc[5] = 1  # Long
+    signals.iloc[25] = -1  # Short
     signals.iloc[50] = 1  # Long
 
     sim = ExecutionSimulator()
     sensitivity = sim.run_sensitivity_analysis("TEST", df, signals)
     for name, report in sensitivity.items():
-        print(f"Scenario: {name} | Trades: {report.n_trades} | Net: {report.cumulative_net_return_pct:.2f}% | DD: {report.max_drawdown_pct:.2f}%")
+        print(
+            f"Scenario: {name} | Trades: {report.n_trades} | Net: {report.cumulative_net_return_pct:.2f}% | DD: {report.max_drawdown_pct:.2f}%"
+        )
     print("ExecutionSimulator self-test PASSED")

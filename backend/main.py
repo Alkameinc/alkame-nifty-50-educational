@@ -3,8 +3,8 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.routers import history, overrides, signals
 from config import configure_logging
-from backend.routers import signals, history, overrides
 
 configure_logging(log_filename="backend_api.log")
 logger = logging.getLogger(__name__)

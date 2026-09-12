@@ -1,7 +1,6 @@
 import subprocess
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -26,6 +25,8 @@ MODULES = [
     "scheduler.py",
     "scanner.py",
 ]
+
+
 def run_module(module_name: str):
     """Run a module and return whether it passed."""
     import os
@@ -56,9 +57,12 @@ def run_module(module_name: str):
     if result.stderr:
         print(result.stderr)
 
-    passed = ("STATUS: PASS" in result.stdout) or (module_name == "config.py" and "STATUS: CHECK WARNINGS ABOVE" in result.stdout)
+    passed = ("STATUS: PASS" in result.stdout) or (
+        module_name == "config.py" and "STATUS: CHECK WARNINGS ABOVE" in result.stdout
+    )
 
     return passed, elapsed
+
 
 def main():
     total = len(MODULES)
@@ -89,6 +93,7 @@ def main():
             print(f" - {module}")
     else:
         print("\n[ALL PASSED] All modules passed successfully!")
+
 
 if __name__ == "__main__":
     main()

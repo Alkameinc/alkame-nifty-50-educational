@@ -2,17 +2,16 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from config import NIFTY50_YFINANCE_TICKERS, to_yfinance_ticker
-from data_fetcher import DataFetcher
-from predictor import Predictor
-from history_manager import HistoryManager
-
 from backend.dependencies import (
     get_data_fetcher,
-    get_predictor,
     get_history_manager,
+    get_predictor,
 )
-from backend.schemas import SignalResponse, EventOut
+from backend.schemas import EventOut, SignalResponse
+from config import NIFTY50_YFINANCE_TICKERS, to_yfinance_ticker
+from data_fetcher import DataFetcher
+from history_manager import HistoryManager
+from predictor import Predictor
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/signal", tags=["signals"])
@@ -55,9 +54,7 @@ def get_signal(
     if len(calibration_df) >= 30:
         from runtime_validator import RuntimeValidator
 
-        calibration_result = RuntimeValidator().compute_calibration(
-            calibration_df
-        )
+        calibration_result = RuntimeValidator().compute_calibration(calibration_df)
 
     # Step 4 — generate signal
     signal = predictor.generate_signal(

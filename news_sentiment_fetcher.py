@@ -1,23 +1,23 @@
 # 1. Standard library imports
 import logging
 import time
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from datetime import UTC, datetime
 from urllib.parse import quote
+
+import feedparser
 
 # 2. Third-party imports
 import requests
-import feedparser
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 # 3. Local imports
 from config import (
+    GOOGLE_NEWS_RSS_BASE,
     MARKETAUX_API_KEY,
     MARKETAUX_BASE_URL,
     MARKETAUX_COUNTRY,
     NEWS_FETCH_LIMIT,
     NEWS_STALENESS_HOURS,
-    GOOGLE_NEWS_RSS_BASE,
     NIFTY50_SYMBOLS,
     configure_logging,
 )
@@ -66,20 +66,20 @@ class NewsSentimentFetcher:
         return "NEUTRAL"
 
     @staticmethod
-    def _is_stale(published_at: Optional[datetime]) -> bool:
+    def _is_stale(published_at: datetime | None) -> bool:
         if published_at is None:
             return True
         try:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             if published_at.tzinfo is None:
-                published_at = published_at.replace(tzinfo=timezone.utc)
+                published_at = published_at.replace(tzinfo=UTC)
             age_hours = (now - published_at).total_seconds() / 3600.0
             return age_hours > NEWS_STALENESS_HOURS
         except Exception as e:
             logger.error(f"Failed staleness check on published_at={published_at}: {e}")
             return True
 
-    def _fetch_marketaux(self, symbol: str, company_name: Optional[str] = None) -> List[Dict]:
+    def _fetch_marketaux(self, symbol: str, company_name: str | None = None) -> list[dict]:
         """Fetch news + sentiment from marketaux for a given symbol."""
         if not MARKETAUX_API_KEY:
             logger.warning("MARKETAUX_API_KEY not set — skipping marketaux, will use RSS fallback.")
@@ -116,23 +116,29 @@ class NewsSentimentFetcher:
                     sentiment_score = 0.0
                     entities = a.get("entities", [])
                     matched_entity = next(
-                        (e for e in entities if search_term.lower() in str(e.get("name", "")).lower()
-                         or search_term.lower() in str(e.get("symbol", "")).lower()),
+                        (
+                            e
+                            for e in entities
+                            if search_term.lower() in str(e.get("name", "")).lower()
+                            or search_term.lower() in str(e.get("symbol", "")).lower()
+                        ),
                         None,
                     )
                     if matched_entity and matched_entity.get("sentiment_score") is not None:
                         sentiment_score = float(matched_entity["sentiment_score"])
 
-                    normalized.append({
-                        "symbol": symbol,
-                        "title": a.get("title", ""),
-                        "url": a.get("url", ""),
-                        "published_at": published_at,
-                        "source": SOURCE_MARKETAUX,
-                        "sentiment_score": sentiment_score,
-                        "sentiment_label": self._sentiment_label(sentiment_score),
-                        "is_stale": self._is_stale(published_at),
-                    })
+                    normalized.append(
+                        {
+                            "symbol": symbol,
+                            "title": a.get("title", ""),
+                            "url": a.get("url", ""),
+                            "published_at": published_at,
+                            "source": SOURCE_MARKETAUX,
+                            "sentiment_score": sentiment_score,
+                            "sentiment_label": self._sentiment_label(sentiment_score),
+                            "is_stale": self._is_stale(published_at),
+                        }
+                    )
                 return normalized
 
             except Exception as e:
@@ -144,7 +150,7 @@ class NewsSentimentFetcher:
         logger.error(f"marketaux fetch failed for {symbol} after {MAX_RETRIES} attempts: {last_error}")
         return []
 
-    def _fetch_google_rss(self, symbol: str, company_name: Optional[str] = None) -> List[Dict]:
+    def _fetch_google_rss(self, symbol: str, company_name: str | None = None) -> list[dict]:
         """Fallback: fetch headlines from free Google News RSS and score sentiment ourselves."""
         search_term = company_name or symbol
         query = quote(f"{search_term} NSE stock")
@@ -162,30 +168,32 @@ class NewsSentimentFetcher:
                 published_at = None
                 if entry.get("published_parsed"):
                     try:
-                        published_at = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+                        published_at = datetime(*entry.published_parsed[:6], tzinfo=UTC)
                     except Exception:
                         published_at = None
 
                 vs = self._vader.polarity_scores(title)
                 sentiment_score = vs.get("compound", 0.0)
 
-                normalized.append({
-                    "symbol": symbol,
-                    "title": title,
-                    "url": link,
-                    "published_at": published_at,
-                    "source": SOURCE_GOOGLE_RSS,
-                    "sentiment_score": sentiment_score,
-                    "sentiment_label": self._sentiment_label(sentiment_score),
-                    "is_stale": self._is_stale(published_at),
-                })
+                normalized.append(
+                    {
+                        "symbol": symbol,
+                        "title": title,
+                        "url": link,
+                        "published_at": published_at,
+                        "source": SOURCE_GOOGLE_RSS,
+                        "sentiment_score": sentiment_score,
+                        "sentiment_label": self._sentiment_label(sentiment_score),
+                        "is_stale": self._is_stale(published_at),
+                    }
+                )
             return normalized
 
         except Exception as e:
             logger.error(f"Failed fetching Google News RSS for {symbol}: {e}")
             return []
 
-    def get_news_for_symbol(self, symbol: str, company_name: Optional[str] = None) -> List[Dict]:
+    def get_news_for_symbol(self, symbol: str, company_name: str | None = None) -> list[dict]:
         """
         Get news for one symbol: try marketaux first, fall back to RSS if
         marketaux is unconfigured, errors, or returns zero articles.
@@ -200,19 +208,23 @@ class NewsSentimentFetcher:
         if rss_articles:
             health_registry.report("news_sentiment_fetcher", ok=True, detail="served via google_news_rss fallback")
         else:
-            health_registry.report("news_sentiment_fetcher", ok=False, detail="both marketaux and google_news_rss failed")
+            health_registry.report(
+                "news_sentiment_fetcher", ok=False, detail="both marketaux and google_news_rss failed"
+            )
         return rss_articles
 
-    def get_news_for_all_nifty50(self) -> Dict[str, List[Dict]]:
+    def get_news_for_all_nifty50(self) -> dict[str, list[dict]]:
         """Fetch news for every NIFTY50 symbol. Intended for a scheduled cadence,
         not every prediction cycle, to respect API rate limits."""
-        results: Dict[str, List[Dict]] = {}
+        results: dict[str, list[dict]] = {}
         for symbol in NIFTY50_SYMBOLS:
             try:
                 results[symbol] = self.get_news_for_symbol(symbol)
             except Exception as e:
                 logger.error(f"Failed fetching news for {symbol}: {e}")
-                health_registry.report("news_sentiment_fetcher", ok=False, detail=f"Failed fetching news for {symbol}", error=str(e))
+                health_registry.report(
+                    "news_sentiment_fetcher", ok=False, detail=f"Failed fetching news for {symbol}", error=str(e)
+                )
                 results[symbol] = []
         total = sum(len(v) for v in results.values())
         logger.info(f"Fetched {total} news article(s) across {len(NIFTY50_SYMBOLS)} symbols.")
@@ -240,8 +252,16 @@ if __name__ == "__main__":
         print(f"Articles found for {test_symbol}: {len(articles)}")
 
         schema_ok = True
-        required_keys = {"symbol", "title", "url", "published_at", "source", "sentiment_score",
-                          "sentiment_label", "is_stale"}
+        required_keys = {
+            "symbol",
+            "title",
+            "url",
+            "published_at",
+            "source",
+            "sentiment_score",
+            "sentiment_label",
+            "is_stale",
+        }
         for a in articles[:5]:
             missing = required_keys - set(a.keys())
             if missing:

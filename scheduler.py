@@ -2,33 +2,32 @@
 import logging
 import time as time_module
 from dataclasses import dataclass
-from datetime import datetime, time as dt_time
-from typing import Dict, List, Optional, Union
+from datetime import datetime
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 # 2. Third-party imports
 import pandas as pd
 
+from backtester import Backtester
+
 # 3. Local imports
 from config import (
-    MARKET_OPEN_TIME,
-    MARKET_CLOSE_TIME,
-    MARKET_TIMEZONE,
-    SCHEDULER_INTERVAL_MINUTES,
-    PREDICTION_HORIZON_BARS,
-    PREDICTION_DEADBAND_PCT,
     BAR_INTERVAL,
+    MARKET_TIMEZONE,
+    PREDICTION_DEADBAND_PCT,
+    SCHEDULER_INTERVAL_MINUTES,
     configure_logging,
 )
 from data_fetcher import DataFetcher
-from predictor import Predictor, PredictionSignal, MultiHorizonSignal
 from event_classifier import EventClassifier
 from history_manager import HistoryManager
-from backtester import Backtester
-from runtime_validator import EdgeCheckResult, CalibrationResult
+from predictor import MultiHorizonSignal, PredictionSignal, Predictor
+from runtime_validator import CalibrationResult, EdgeCheckResult
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # 5. Constants
@@ -38,6 +37,7 @@ def _interval_to_minutes(interval: str) -> int:
     duplicated rather than imported to avoid a circular/unnecessary dependency
     on a private helper for such a tiny piece of parsing."""
     import re
+
     match = re.match(r"^(\d+)([mh])$", interval.strip().lower())
     if not match:
         return 5
@@ -60,8 +60,8 @@ class CycleResult:
     success: bool
     status: str  # "SUCCESS", "DATA_UNAVAILABLE", "PREDICTION_FAILED", "ERROR"
     symbol: str
-    signal: Optional['MultiHorizonSignal'] = None
-    error: Optional[str] = None
+    signal: Optional["MultiHorizonSignal"] = None
+    error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -79,89 +79,118 @@ class Scheduler:
 
     def __init__(
         self,
-        data_fetcher: Optional[DataFetcher] = None,
-        predictor: Optional[Predictor] = None,
-        event_classifier: Optional[EventClassifier] = None,
-        history_manager: Optional[HistoryManager] = None,
-        backtester: Optional[Backtester] = None,
+        data_fetcher: DataFetcher | None = None,
+        predictor: Predictor | None = None,
+        event_classifier: EventClassifier | None = None,
+        history_manager: HistoryManager | None = None,
+        backtester: Backtester | None = None,
     ):
         self.data_fetcher = data_fetcher or DataFetcher()
         self.predictor = predictor or Predictor(data_fetcher=self.data_fetcher)
         self.event_classifier = event_classifier or EventClassifier()
         self.history_manager = history_manager or HistoryManager()
         self.backtester = backtester or Backtester()
-        self._live_worthiness_cache: Dict[str, LiveWorthinessSnapshot] = {}
+        self._live_worthiness_cache: dict[str, LiveWorthinessSnapshot] = {}
 
     # -----------------------------------------------------------------
     # Market hours
     # -----------------------------------------------------------------
     @staticmethod
-    def is_market_open(now: Optional[datetime] = None) -> bool:
+    def is_market_open(now: datetime | None = None) -> bool:
         """Check if NSE equity market is open, delegating to the unified market_calendar."""
         from market_calendar import is_market_open as _is_open
+
         return _is_open(now)
 
     # -----------------------------------------------------------------
     # Live-worthiness caching (backed by backtester, refreshed periodically)
     # -----------------------------------------------------------------
-    def refresh_live_worthiness(self, symbol: str, stock_df: pd.DataFrame, index_df: pd.DataFrame, horizon: str = "INTRADAY") -> LiveWorthinessSnapshot:
+    def refresh_live_worthiness(
+        self, symbol: str, stock_df: pd.DataFrame, index_df: pd.DataFrame, horizon: str = "INTRADAY"
+    ) -> LiveWorthinessSnapshot:
         backtest_result = self.backtester.run_backtest_for_symbol(symbol, stock_df, index_df, horizon=horizon)
         edge_result = EdgeCheckResult(
-            status=backtest_result.edge_check_status, n_periods=backtest_result.n_test_predictions,
+            status=backtest_result.edge_check_status,
+            n_periods=backtest_result.n_test_predictions,
             strategy_cumulative_return_pct=backtest_result.strategy_cumulative_return_pct,
             baseline_cumulative_return_pct=backtest_result.baseline_cumulative_return_pct,
             alpha_pct=backtest_result.alpha_pct,
         )
-        
+
         # Get the current model version and feature version from the predictor's ensemble manager
         from ensemble_manager import EnsemblePrediction
-        dummy_pred = EnsemblePrediction(predicted_class="FLAT", confidence=0.0, agreement_fraction=0.0, per_model_votes={})
+
+        dummy_pred = EnsemblePrediction(
+            predicted_class="FLAT", confidence=0.0, agreement_fraction=0.0, per_model_votes={}
+        )
         current_model_ver = dummy_pred.model_version
 
         # Prefer REAL resolved history for calibration if enough exists; otherwise
         # fall back to the backtest's own calibration snapshot.
-        real_calibration_df = self.history_manager.build_calibration_dataset(symbol, horizon=horizon, model_version=current_model_ver)
+        real_calibration_df = self.history_manager.build_calibration_dataset(
+            symbol, horizon=horizon, model_version=current_model_ver
+        )
         if len(real_calibration_df) >= self.predictor.runtime_validator.min_calibration_samples:
             calibration_result = self.predictor.runtime_validator.compute_calibration(real_calibration_df)
-            logger.info(f"Using REAL resolved history for {symbol} ({horizon}) calibration ({len(real_calibration_df)} samples).")
+            logger.info(
+                f"Using REAL resolved history for {symbol} ({horizon}) calibration ({len(real_calibration_df)} samples)."
+            )
         else:
             calibration_result = CalibrationResult(
-                status=backtest_result.calibration_status, n_samples=backtest_result.n_test_predictions,
+                status=backtest_result.calibration_status,
+                n_samples=backtest_result.n_test_predictions,
                 expected_calibration_error=backtest_result.calibration_ece,
-                is_well_calibrated=(backtest_result.calibration_ece is not None
-                                     and backtest_result.calibration_ece <= self.predictor.runtime_validator.ece_threshold),
+                is_well_calibrated=(
+                    backtest_result.calibration_ece is not None
+                    and backtest_result.calibration_ece <= self.predictor.runtime_validator.ece_threshold
+                ),
                 bins=[],
             )
-            logger.info(f"Not enough real resolved history for {symbol} ({horizon}) yet — using backtest-derived calibration snapshot.")
+            logger.info(
+                f"Not enough real resolved history for {symbol} ({horizon}) yet — using backtest-derived calibration snapshot."
+            )
 
         snapshot = LiveWorthinessSnapshot(
-            edge_check_result=edge_result, calibration_result=calibration_result, refreshed_at=datetime.now(),
+            edge_check_result=edge_result,
+            calibration_result=calibration_result,
+            refreshed_at=datetime.now(),
         )
         self._live_worthiness_cache[(symbol, horizon)] = snapshot
         return snapshot
 
-    def get_cached_live_worthiness(self, symbol: str, horizon: str = "INTRADAY") -> Optional[LiveWorthinessSnapshot]:
+    def get_cached_live_worthiness(self, symbol: str, horizon: str = "INTRADAY") -> LiveWorthinessSnapshot | None:
         return self._live_worthiness_cache.get((symbol, horizon))
 
     # -----------------------------------------------------------------
     # One cycle for one symbol
     # -----------------------------------------------------------------
     def run_one_cycle_for_symbol(
-        self, symbol: str, stock_df: pd.DataFrame, index_df: pd.DataFrame,
-        macro_events: Optional[List] = None, corporate_events: Optional[List[dict]] = None,
-        news_articles: Optional[List[dict]] = None,
+        self,
+        symbol: str,
+        stock_df: pd.DataFrame,
+        index_df: pd.DataFrame,
+        macro_events: list | None = None,
+        corporate_events: list[dict] | None = None,
+        news_articles: list[dict] | None = None,
         return_structured: bool = False,
-    ) -> Union[Optional['MultiHorizonSignal'], CycleResult]:
+    ) -> Optional["MultiHorizonSignal"] | CycleResult:
         if stock_df is None or stock_df.empty or index_df is None or index_df.empty:
             logger.warning(f"Data unavailable for {symbol} in cycle run.")
             if return_structured:
-                return CycleResult(success=False, status="DATA_UNAVAILABLE", symbol=symbol, signal=None, error="Empty stock or index data")
+                return CycleResult(
+                    success=False,
+                    status="DATA_UNAVAILABLE",
+                    symbol=symbol,
+                    signal=None,
+                    error="Empty stock or index data",
+                )
             return None
 
         try:
             from config import HORIZON_CONFIG
+
             horizons = list(HORIZON_CONFIG.keys())
-            
+
             calib_results = {}
             edge_results = {}
             for h in horizons:
@@ -171,8 +200,15 @@ class Scheduler:
                     edge_results[h] = snapshot.edge_check_result
 
             multi_signal = self.predictor.generate_multi_horizon_signal(
-                symbol, horizons, stock_df, index_df, macro_events=macro_events, corporate_events=corporate_events,
-                news_articles=news_articles, calibration_results=calib_results, edge_check_results=edge_results,
+                symbol,
+                horizons,
+                stock_df,
+                index_df,
+                macro_events=macro_events,
+                corporate_events=corporate_events,
+                news_articles=news_articles,
+                calibration_results=calib_results,
+                edge_check_results=edge_results,
             )
 
             for h, sig in multi_signal.signals.items():
@@ -191,14 +227,19 @@ class Scheduler:
             return None
 
     def run_cycle_stream_for_symbol(
-        self, symbol: str, stock_df: pd.DataFrame, index_df: pd.DataFrame,
-        macro_events: Optional[List] = None, corporate_events: Optional[List[dict]] = None,
-        news_articles: Optional[List[dict]] = None,
+        self,
+        symbol: str,
+        stock_df: pd.DataFrame,
+        index_df: pd.DataFrame,
+        macro_events: list | None = None,
+        corporate_events: list[dict] | None = None,
+        news_articles: list[dict] | None = None,
     ):
         try:
             from config import HORIZON_CONFIG
+
             horizons = list(HORIZON_CONFIG.keys())
-            
+
             calib_results = {}
             edge_results = {}
             for h in horizons:
@@ -208,8 +249,15 @@ class Scheduler:
                     edge_results[h] = snapshot.edge_check_result
 
             stream = self.predictor.generate_multi_horizon_stream(
-                symbol, horizons, stock_df, index_df, macro_events=macro_events, corporate_events=corporate_events,
-                news_articles=news_articles, calibration_results=calib_results, edge_check_results=edge_results,
+                symbol,
+                horizons,
+                stock_df,
+                index_df,
+                macro_events=macro_events,
+                corporate_events=corporate_events,
+                news_articles=news_articles,
+                calibration_results=calib_results,
+                edge_check_results=edge_results,
             )
 
             for sig in stream:
@@ -239,12 +287,12 @@ class Scheduler:
                 return 0
 
             from config import HORIZON_CONFIG
-            
+
             for record in pending:
                 h_config = HORIZON_CONFIG.get(record.horizon)
                 if not h_config:
                     continue
-                
+
                 # Determine how much time to add based on horizon
                 if h_config["bar_interval"] == "1d":
                     horizon_delta = pd.Timedelta(days=h_config["horizon_bars"])
@@ -292,7 +340,7 @@ class Scheduler:
     # -----------------------------------------------------------------
     # Continuous loop (real deployment entry point)
     # -----------------------------------------------------------------
-    def run_forever(self, symbol_data_provider, max_iterations: Optional[int] = None) -> None:
+    def run_forever(self, symbol_data_provider, max_iterations: int | None = None) -> None:
         """
         symbol_data_provider: a callable returning Dict[symbol -> (stock_df, index_df)]
         each time it's called, i.e. the actual live data refresh logic lives
@@ -326,7 +374,9 @@ class Scheduler:
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import os
+
     import numpy as np
+
     from config import DB_DIR
 
     configure_logging(log_filename="scheduler_selftest.log")
@@ -358,7 +408,9 @@ if __name__ == "__main__":
                 timestamps.append(ts)
                 price = close_p
                 recent_closes.append(close_p)
-        return pd.DataFrame(rows, columns=["Open", "High", "Low", "Close", "Volume"], index=pd.DatetimeIndex(timestamps))
+        return pd.DataFrame(
+            rows, columns=["Open", "High", "Low", "Close", "Volume"], index=pd.DatetimeIndex(timestamps)
+        )
 
     test_symbol = "SCHED_TEST"  # single test symbol allowed in the __main__ block only
     test_db_path = DB_DIR / "test_scheduler_selftest.sqlite3"
@@ -370,9 +422,9 @@ if __name__ == "__main__":
 
         # --- Test 1: is_market_open pure logic, no dependencies ---
         tz = ZoneInfo(MARKET_TIMEZONE)
-        tuesday_10am = datetime(2026, 7, 14, 10, 0, tzinfo=tz)   # a Tuesday, well within market hours
+        tuesday_10am = datetime(2026, 7, 14, 10, 0, tzinfo=tz)  # a Tuesday, well within market hours
         saturday_10am = datetime(2026, 7, 18, 10, 0, tzinfo=tz)  # a Saturday
-        tuesday_8am = datetime(2026, 7, 14, 8, 0, tzinfo=tz)     # a Tuesday, before market open
+        tuesday_8am = datetime(2026, 7, 14, 8, 0, tzinfo=tz)  # a Tuesday, before market open
         print(f"Tuesday 10am -> market open: {Scheduler.is_market_open(tuesday_10am)} (expect True)")
         print(f"Saturday 10am -> market open: {Scheduler.is_market_open(saturday_10am)} (expect False)")
         print(f"Tuesday 8am -> market open: {Scheduler.is_market_open(tuesday_8am)} (expect False)")
@@ -400,7 +452,9 @@ if __name__ == "__main__":
 
         # --- Test 3: run_one_cycle_for_symbol produces AND persists a signal ---
         before_count = len(history_manager.get_predictions(test_symbol))
-        signal = scheduler.run_one_cycle_for_symbol(test_symbol, stock_df, index_df, macro_events=[], corporate_events=[], news_articles=[])
+        signal = scheduler.run_one_cycle_for_symbol(
+            test_symbol, stock_df, index_df, macro_events=[], corporate_events=[], news_articles=[]
+        )
         after_count = len(history_manager.get_predictions(test_symbol))
         print(f"Signal generated: action={signal.primary_action if signal else None}")
         print(f"Predictions persisted: before={before_count}, after={after_count}")
@@ -409,15 +463,27 @@ if __name__ == "__main__":
 
         # --- Test 4: resolve_pending_outcomes resolves a prediction whose horizon has elapsed ---
         old_signal = PredictionSignal(
-            symbol=test_symbol, timestamp=stock_df.index[100], horizon="INTRADAY", action="BUY", model_predicted_class="UP",
-            model_version="UNKNOWN", feature_version="UNKNOWN",
-            raw_confidence=0.7, risk_adjusted_confidence=0.7, calibrated_confidence=None, agreement_fraction=0.6,
-            downside_summary="d", upside_summary="u", reasoning=[],
+            symbol=test_symbol,
+            timestamp=stock_df.index[100],
+            horizon="INTRADAY",
+            action="BUY",
+            model_predicted_class="UP",
+            model_version="UNKNOWN",
+            feature_version="UNKNOWN",
+            raw_confidence=0.7,
+            risk_adjusted_confidence=0.7,
+            calibrated_confidence=None,
+            agreement_fraction=0.6,
+            downside_summary="d",
+            upside_summary="u",
+            reasoning=[],
         )
         old_pred_id = history_manager.save_prediction(old_signal)
         resolved_count = scheduler.resolve_pending_outcomes(test_symbol, stock_df)
         resolved_record = [r for r in history_manager.get_predictions(test_symbol) if r.id == old_pred_id][0]
-        print(f"Old prediction resolved: {resolved_record.outcome_resolved}, actual_class={resolved_record.outcome_actual_class}")
+        print(
+            f"Old prediction resolved: {resolved_record.outcome_resolved}, actual_class={resolved_record.outcome_actual_class}"
+        )
         assert resolved_count >= 1
         assert resolved_record.outcome_resolved is True
         assert resolved_record.outcome_actual_class in ("UP", "DOWN", "FLAT")

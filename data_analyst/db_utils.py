@@ -3,6 +3,7 @@ Shared helper so every notebook connects to a SQLite database the exact same
 way, and so switching from sample data to the real live database is a
 one-line change in each notebook, not a copy-pasted block re-written three times.
 """
+
 import sqlite3
 import sys
 from pathlib import Path
@@ -11,7 +12,6 @@ import pandas as pd
 
 # Make the repo root importable (this file lives one folder below it)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from config import DB_PATH  # noqa: E402 — the REAL live database path, from config.py
 
 SAMPLE_DB_PATH = Path(__file__).resolve().parent / "sample_history.sqlite3"
 

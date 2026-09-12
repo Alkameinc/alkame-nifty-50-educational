@@ -1,26 +1,29 @@
 # 1. Standard library imports
+import hashlib
 import json
 import logging
-import uuid
-import hashlib
 import platform
 import subprocess
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+
 
 def _get_git_commit_sha() -> str:
     try:
-        sha = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, timeout=2).decode().strip()
+        sha = (
+            subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, timeout=2).decode().strip()
+        )
         return sha
     except Exception:
         return "UNKNOWN"
 
+
 # 2. Third-party imports
+import joblib
 import numpy as np
 import pandas as pd
-import joblib
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
@@ -29,24 +32,23 @@ from sklearn.preprocessing import StandardScaler
 
 # 3. Local imports
 from config import (
-    MODELS_DIR,
+    ENSEMBLE_LR_MAX_ITER,
+    ENSEMBLE_MODEL_TYPES,
+    ENSEMBLE_RF_MAX_DEPTH,
+    ENSEMBLE_RF_N_ESTIMATORS,
     HORIZON_CONFIG,
     HORIZON_INTRADAY,
     LABEL_CLASSES,
-    MODEL_RANDOM_SEED,
-    MODEL_N_ESTIMATORS,
-    MODEL_MAX_DEPTH,
     MODEL_LEARNING_RATE,
-    ENSEMBLE_MODEL_TYPES,
-    ENSEMBLE_RF_N_ESTIMATORS,
-    ENSEMBLE_RF_MAX_DEPTH,
-    ENSEMBLE_LR_MAX_ITER,
-    ensure_directories,
+    MODEL_MAX_DEPTH,
+    MODEL_N_ESTIMATORS,
+    MODEL_RANDOM_SEED,
+    MODELS_DIR,
     configure_logging,
+    ensure_directories,
 )
-from model_trainer import ModelTrainer
-from feature_engineer import ML_SAFE_SUFFIX
 from health_monitor import registry as health_registry
+from model_trainer import ModelTrainer
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -64,12 +66,12 @@ class EnsembleTrainingResult:
     trained_at: str
     n_train_samples: int
     n_test_samples: int
-    feature_columns: List[str]
-    per_model_accuracy: Dict[str, float]
+    feature_columns: list[str]
+    per_model_accuracy: dict[str, float]
     ensemble_accuracy: float
     mean_agreement: float
     success: bool
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -77,7 +79,7 @@ class EnsemblePrediction:
     predicted_class: str
     confidence: float
     agreement_fraction: float
-    per_model_votes: Dict[str, str]
+    per_model_votes: dict[str, str]
     model_version: str = "UNKNOWN"
     feature_version: str = "UNKNOWN"
 
@@ -96,27 +98,32 @@ class EnsembleManager:
     relies on.
     """
 
-    def __init__(self, model_trainer: Optional[ModelTrainer] = None):
+    def __init__(self, model_trainer: ModelTrainer | None = None):
         self.model_trainer = model_trainer or ModelTrainer()
         ensure_directories()
 
     @staticmethod
-    def _build_base_estimators() -> Dict[str, object]:
+    def _build_base_estimators() -> dict[str, object]:
         """Constructs fresh, unfitted estimator instances for every model
         type listed in config.ENSEMBLE_MODEL_TYPES."""
         available = {
             "gradient_boosting": GradientBoostingClassifier(
-                n_estimators=MODEL_N_ESTIMATORS, max_depth=MODEL_MAX_DEPTH,
-                learning_rate=MODEL_LEARNING_RATE, random_state=MODEL_RANDOM_SEED,
-            ),
-            "random_forest": RandomForestClassifier(
-                n_estimators=ENSEMBLE_RF_N_ESTIMATORS, max_depth=ENSEMBLE_RF_MAX_DEPTH,
+                n_estimators=MODEL_N_ESTIMATORS,
+                max_depth=MODEL_MAX_DEPTH,
+                learning_rate=MODEL_LEARNING_RATE,
                 random_state=MODEL_RANDOM_SEED,
             ),
-            "logistic_regression": Pipeline([
-                ("scaler", StandardScaler()),
-                ("clf", LogisticRegression(max_iter=ENSEMBLE_LR_MAX_ITER, random_state=MODEL_RANDOM_SEED)),
-            ]),
+            "random_forest": RandomForestClassifier(
+                n_estimators=ENSEMBLE_RF_N_ESTIMATORS,
+                max_depth=ENSEMBLE_RF_MAX_DEPTH,
+                random_state=MODEL_RANDOM_SEED,
+            ),
+            "logistic_regression": Pipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    ("clf", LogisticRegression(max_iter=ENSEMBLE_LR_MAX_ITER, random_state=MODEL_RANDOM_SEED)),
+                ]
+            ),
         }
         selected = {}
         for name in ENSEMBLE_MODEL_TYPES:
@@ -143,16 +150,25 @@ class EnsembleManager:
         return reindexed
 
     def train_ensemble_for_symbol(
-        self, symbol: str, stock_df: pd.DataFrame, index_df: Optional[pd.DataFrame] = None,
-        horizon: str = HORIZON_INTRADAY
+        self,
+        symbol: str,
+        stock_df: pd.DataFrame,
+        index_df: pd.DataFrame | None = None,
+        horizon: str = HORIZON_INTRADAY,
     ) -> EnsembleTrainingResult:
         try:
             prepared = self.model_trainer.prepare_dataset(stock_df, index_df, horizon=horizon)
             if prepared is None:
                 return EnsembleTrainingResult(
-                    symbol=symbol, trained_at=datetime.now().isoformat(), n_train_samples=0,
-                    n_test_samples=0, feature_columns=[], per_model_accuracy={}, ensemble_accuracy=0.0,
-                    mean_agreement=0.0, success=False,
+                    symbol=symbol,
+                    trained_at=datetime.now().isoformat(),
+                    n_train_samples=0,
+                    n_test_samples=0,
+                    feature_columns=[],
+                    per_model_accuracy={},
+                    ensemble_accuracy=0.0,
+                    mean_agreement=0.0,
+                    success=False,
                     error="Dataset preparation failed or returned no usable rows.",
                 )
             X, y, feature_columns = prepared
@@ -162,25 +178,32 @@ class EnsembleManager:
                 msg = f"Only {len(X)} usable samples for {symbol} ({horizon}), need >= {min_training_samples}."
                 logger.error(msg)
                 return EnsembleTrainingResult(
-                    symbol=symbol, trained_at=datetime.now().isoformat(), n_train_samples=len(X),
-                    n_test_samples=0, feature_columns=feature_columns, per_model_accuracy={},
-                    ensemble_accuracy=0.0, mean_agreement=0.0, success=False, error=msg,
+                    symbol=symbol,
+                    trained_at=datetime.now().isoformat(),
+                    n_train_samples=len(X),
+                    n_test_samples=0,
+                    feature_columns=feature_columns,
+                    per_model_accuracy={},
+                    ensemble_accuracy=0.0,
+                    mean_agreement=0.0,
+                    success=False,
+                    error=msg,
                 )
 
             horizon_bars = HORIZON_CONFIG.get(horizon, {}).get("horizon_bars", 0)
             X_train, X_test, y_train, y_test = self.model_trainer.time_based_split(X, y, purge_window=horizon_bars)
             if len(X_train) > 0 and len(X_test) > 0:
-                assert X_train.index.max() < X_test.index.min(), (
-                    "Time-based split violated: a training row is timestamped at or after a test row!"
-                )
+                assert (
+                    X_train.index.max() < X_test.index.min()
+                ), "Time-based split violated: a training row is timestamped at or after a test row!"
 
             estimators = self._build_base_estimators()
             if not estimators:
                 raise ValueError("No valid ensemble model types configured.")
 
-            fitted_models: Dict[str, object] = {}
-            per_model_accuracy: Dict[str, float] = {}
-            proba_matrices: Dict[str, np.ndarray] = {}
+            fitted_models: dict[str, object] = {}
+            per_model_accuracy: dict[str, float] = {}
+            proba_matrices: dict[str, np.ndarray] = {}
 
             for name, estimator in estimators.items():
                 estimator.fit(X_train, y_train)
@@ -199,9 +222,7 @@ class EnsembleManager:
 
             # Agreement: fraction of individual models whose own vote matches the ensemble's vote
             model_names = list(proba_matrices.keys())
-            individual_pred_arrays = {
-                name: proba_matrices[name].argmax(axis=1) for name in model_names
-            }
+            individual_pred_arrays = {name: proba_matrices[name].argmax(axis=1) for name in model_names}
             agreement_counts = np.zeros(len(ensemble_pred_idx))
             for name in model_names:
                 agreement_counts += (individual_pred_arrays[name] == ensemble_pred_idx).astype(int)
@@ -212,9 +233,13 @@ class EnsembleManager:
             data_end = str(X_train.index.max()) if len(X_train) > 0 else None
 
             self._save_ensemble(
-                symbol=symbol, fitted_models=fitted_models, feature_columns=feature_columns,
-                per_model_accuracy=per_model_accuracy, ensemble_accuracy=ensemble_accuracy,
-                mean_agreement=mean_agreement, horizon=horizon,
+                symbol=symbol,
+                fitted_models=fitted_models,
+                feature_columns=feature_columns,
+                per_model_accuracy=per_model_accuracy,
+                ensemble_accuracy=ensemble_accuracy,
+                mean_agreement=mean_agreement,
+                horizon=horizon,
                 training_sample_count=len(X_train),
                 training_data_start=data_start,
                 training_data_end=data_end,
@@ -222,19 +247,31 @@ class EnsembleManager:
 
             health_registry.report("ensemble_manager", ok=True, detail=f"Trained ensemble for {symbol}")
             return EnsembleTrainingResult(
-                symbol=symbol, trained_at=datetime.now().isoformat(), n_train_samples=len(X_train),
-                n_test_samples=len(X_test), feature_columns=feature_columns,
-                per_model_accuracy=per_model_accuracy, ensemble_accuracy=ensemble_accuracy,
-                mean_agreement=mean_agreement, success=True,
+                symbol=symbol,
+                trained_at=datetime.now().isoformat(),
+                n_train_samples=len(X_train),
+                n_test_samples=len(X_test),
+                feature_columns=feature_columns,
+                per_model_accuracy=per_model_accuracy,
+                ensemble_accuracy=ensemble_accuracy,
+                mean_agreement=mean_agreement,
+                success=True,
             )
 
         except Exception as e:
             logger.error(f"Ensemble training pipeline failed for {symbol}: {e}")
             health_registry.report("ensemble_manager", ok=False, detail=f"Training failed for {symbol}", error=str(e))
             return EnsembleTrainingResult(
-                symbol=symbol, trained_at=datetime.now().isoformat(), n_train_samples=0,
-                n_test_samples=0, feature_columns=[], per_model_accuracy={}, ensemble_accuracy=0.0,
-                mean_agreement=0.0, success=False, error=str(e),
+                symbol=symbol,
+                trained_at=datetime.now().isoformat(),
+                n_train_samples=0,
+                n_test_samples=0,
+                feature_columns=[],
+                per_model_accuracy={},
+                ensemble_accuracy=0.0,
+                mean_agreement=0.0,
+                success=False,
+                error=str(e),
             )
 
     def _versioned_dir(self, symbol: str, horizon: str, run_id: str) -> Path:
@@ -252,15 +289,15 @@ class EnsembleManager:
     def _save_ensemble(
         self,
         symbol: str,
-        fitted_models: Dict[str, object],
-        feature_columns: List[str],
-        per_model_accuracy: Dict[str, float],
+        fitted_models: dict[str, object],
+        feature_columns: list[str],
+        per_model_accuracy: dict[str, float],
         ensemble_accuracy: float,
         mean_agreement: float,
         horizon: str = HORIZON_INTRADAY,
         training_sample_count: int = 0,
-        training_data_start: Optional[str] = None,
-        training_data_end: Optional[str] = None,
+        training_data_start: str | None = None,
+        training_data_end: str | None = None,
     ) -> str:
         try:
             ensure_directories()
@@ -280,6 +317,7 @@ class EnsembleManager:
             joblib.dump(bundle, run_dir / "ensemble.joblib")
 
             import sklearn
+
             metadata = {
                 "model_id": model_id,
                 "run_id": run_id,
@@ -354,12 +392,14 @@ class EnsembleManager:
             logger.error(f"Failed saving ensemble for {symbol}: {e}")
             raise
 
-    def load_ensemble(self, symbol: str, horizon: str = HORIZON_INTRADAY) -> Optional[Tuple[Dict[str, object], List[str], Dict]]:
+    def load_ensemble(
+        self, symbol: str, horizon: str = HORIZON_INTRADAY
+    ) -> tuple[dict[str, object], list[str], dict] | None:
         try:
             # Check versioned current pointer first (QNT-008)
             pointer_path = self._current_pointer_path(symbol, horizon)
             if pointer_path.exists():
-                with open(pointer_path, "r", encoding="utf-8") as pf:
+                with open(pointer_path, encoding="utf-8") as pf:
                     pointer_data = json.load(pf)
                 curr_run_id = pointer_data.get("current_run_id")
                 run_dir = self._versioned_dir(symbol, horizon, curr_run_id)
@@ -367,7 +407,7 @@ class EnsembleManager:
                 meta_file = run_dir / "metadata.json"
                 if ensemble_file.exists() and meta_file.exists():
                     bundle = joblib.load(ensemble_file)
-                    with open(meta_file, "r", encoding="utf-8") as mf:
+                    with open(meta_file, encoding="utf-8") as mf:
                         metadata = json.load(mf)
                     return bundle["models"], bundle["classes"], metadata
 
@@ -378,7 +418,7 @@ class EnsembleManager:
                 logger.error(f"No saved ensemble found for {symbol} ({horizon}) at {ensemble_path}. Train it first.")
                 return None
             bundle = joblib.load(ensemble_path)
-            with open(metadata_path, "r", encoding="utf-8") as f:
+            with open(metadata_path, encoding="utf-8") as f:
                 metadata = json.load(f)
             return bundle["models"], bundle["classes"], metadata
         except Exception as e:
@@ -397,7 +437,7 @@ class EnsembleManager:
                 logger.error(f"Cannot rollback to non-existent version {target_run_id} for {symbol} ({horizon})")
                 return False
 
-            with open(meta_file, "r", encoding="utf-8") as mf:
+            with open(meta_file, encoding="utf-8") as mf:
                 metadata = json.load(mf)
 
             pointer_path = self._current_pointer_path(symbol, horizon)
@@ -425,7 +465,7 @@ class EnsembleManager:
             logger.error(f"Rollback failed for {symbol} ({horizon}) to {target_run_id}: {e}")
             return False
 
-    def list_model_versions(self, symbol: str, horizon: str) -> List[Dict]:
+    def list_model_versions(self, symbol: str, horizon: str) -> list[dict]:
         """
         Lists all available immutable model versions for (symbol, horizon) (QNT-008).
         """
@@ -437,7 +477,7 @@ class EnsembleManager:
         pointer_path = self._current_pointer_path(symbol, horizon)
         if pointer_path.exists():
             try:
-                with open(pointer_path, "r", encoding="utf-8") as pf:
+                with open(pointer_path, encoding="utf-8") as pf:
                     curr_run_id = json.load(pf).get("current_run_id")
             except Exception:
                 pass
@@ -448,9 +488,9 @@ class EnsembleManager:
                 meta_file = d / "metadata.json"
                 if meta_file.exists():
                     try:
-                        with open(meta_file, "r", encoding="utf-8") as f:
+                        with open(meta_file, encoding="utf-8") as f:
                             meta = json.load(f)
-                        meta["is_current"] = (d.name == curr_run_id)
+                        meta["is_current"] = d.name == curr_run_id
                         versions.append(meta)
                     except Exception:
                         pass
@@ -458,7 +498,9 @@ class EnsembleManager:
         versions.sort(key=lambda x: x.get("trained_at", ""), reverse=True)
         return versions
 
-    def predict(self, symbol: str, X: pd.DataFrame, horizon: str = HORIZON_INTRADAY) -> Optional[List[EnsemblePrediction]]:
+    def predict(
+        self, symbol: str, X: pd.DataFrame, horizon: str = HORIZON_INTRADAY
+    ) -> list[EnsemblePrediction] | None:
         """Runs the saved ensemble on new feature rows (must already be the
         '_feat'-lagged columns matching what the ensemble was trained on)."""
         loaded = self.load_ensemble(symbol, horizon=horizon)
@@ -489,11 +531,16 @@ class EnsembleManager:
                 confidence = float(avg_proba[row_i, pred_idx[row_i]])
                 votes = {name: LABEL_CLASSES[individual_pred_arrays[name][row_i]] for name in models}
                 agreement = sum(1 for v in votes.values() if v == predicted_class) / len(votes)
-                results.append(EnsemblePrediction(
-                    predicted_class=predicted_class, confidence=confidence,
-                    agreement_fraction=agreement, per_model_votes=votes,
-                    model_version=m_ver, feature_version=f_ver,
-                ))
+                results.append(
+                    EnsemblePrediction(
+                        predicted_class=predicted_class,
+                        confidence=confidence,
+                        agreement_fraction=agreement,
+                        per_model_votes=votes,
+                        model_version=m_ver,
+                        feature_version=f_ver,
+                    )
+                )
             health_registry.report("ensemble_manager", ok=True, detail=f"Predicted for {symbol}")
             return results
 
@@ -540,8 +587,9 @@ if __name__ == "__main__":
                 price = close_p
                 recent_closes.append(close_p)
 
-        return pd.DataFrame(rows, columns=["Open", "High", "Low", "Close", "Volume"],
-                             index=pd.DatetimeIndex(timestamps))
+        return pd.DataFrame(
+            rows, columns=["Open", "High", "Low", "Close", "Volume"], index=pd.DatetimeIndex(timestamps)
+        )
 
     test_symbol = "SYNTHTEST_ENSEMBLE"  # single test symbol allowed in the __main__ block only
 

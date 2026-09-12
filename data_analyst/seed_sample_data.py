@@ -7,6 +7,7 @@ real db/predictor.sqlite3 that the live engine uses.
 
 Run once with: python data_analyst/seed_sample_data.py
 """
+
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -17,9 +18,9 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config import NIFTY50_SYMBOLS, SECTOR_MAP, configure_logging  # noqa: E402
+from event_classifier import Event  # noqa: E402
 from history_manager import HistoryManager  # noqa: E402
 from predictor import PredictionSignal  # noqa: E402
-from event_classifier import Event  # noqa: E402
 
 SAMPLE_DB_PATH = Path(__file__).resolve().parent / "sample_history.sqlite3"
 
@@ -27,8 +28,14 @@ SAMPLE_DB_PATH = Path(__file__).resolve().parent / "sample_history.sqlite3"
 # this is what makes Task 2 (sector comparison) meaningful to practice on,
 # instead of every sector looking identical.
 SECTOR_SKILL_LEVEL = {
-    "IT": 0.72, "Pharma": 0.68, "Banking": 0.55, "FMCG": 0.50,
-    "Auto": 0.48, "Energy": 0.45, "Metals": 0.44, "NBFC": 0.52,
+    "IT": 0.72,
+    "Pharma": 0.68,
+    "Banking": 0.55,
+    "FMCG": 0.50,
+    "Auto": 0.48,
+    "Energy": 0.45,
+    "Metals": 0.44,
+    "NBFC": 0.52,
 }
 DEFAULT_SKILL = 0.50  # no real edge — coin flip
 
@@ -55,18 +62,22 @@ def _simulate_symbol_history(symbol: str, n_predictions: int, rng: np.random.Gen
         # which is exactly what makes miscalibration visible in the reliability diagram
         # for low-skill sectors (confidence and real accuracy diverge).
         is_correct = rng.uniform(0, 1) < skill
-        actual_class = predicted_class if is_correct else rng.choice(
-            [c for c in CLASSES if c != predicted_class]
-        )
+        actual_class = predicted_class if is_correct else rng.choice([c for c in CLASSES if c != predicted_class])
 
         action = {"UP": "BUY", "DOWN": "SELL", "FLAT": "HOLD"}[predicted_class]
 
         signal = PredictionSignal(
-            symbol=symbol, timestamp=timestamp, horizon="INTRADAY", action=action,
+            symbol=symbol,
+            timestamp=timestamp,
+            horizon="INTRADAY",
+            action=action,
             model_predicted_class=predicted_class,
-            model_version="v1.0", feature_version="v1.0",
-            raw_confidence=raw_confidence, risk_adjusted_confidence=raw_confidence,
-            calibrated_confidence=None, agreement_fraction=float(rng.uniform(0.4, 1.0)),
+            model_version="v1.0",
+            feature_version="v1.0",
+            raw_confidence=raw_confidence,
+            risk_adjusted_confidence=raw_confidence,
+            calibrated_confidence=None,
+            agreement_fraction=float(rng.uniform(0.4, 1.0)),
             downside_summary="Synthetic sample data — see data_analyst/seed_sample_data.py.",
             upside_summary="Synthetic sample data — see data_analyst/seed_sample_data.py.",
             reasoning=["Synthetic sample prediction for notebook development."],
@@ -91,11 +102,16 @@ def _simulate_symbol_events(symbol: str, n_events: int, rng: np.random.Generator
         sentiment = float(rng.uniform(-1.0, 1.0))
         event = Event(
             event_id=f"SAMPLE_EVT_{symbol}_{i}",
-            source="NEWS", event_type="NEWS_SENTIMENT", timestamp=timestamp,
-            scope="STOCK", affected_tickers=[symbol], sector=SECTOR_MAP.get(symbol),
+            source="NEWS",
+            event_type="NEWS_SENTIMENT",
+            timestamp=timestamp,
+            scope="STOCK",
+            affected_tickers=[symbol],
+            sector=SECTOR_MAP.get(symbol),
             confidence_in_scope=1.0,
             headline_or_label=f"Sample headline #{i} for {symbol} (sentiment={sentiment:.2f})",
-            sentiment_score=sentiment, magnitude_estimate="MEDIUM",
+            sentiment_score=sentiment,
+            magnitude_estimate="MEDIUM",
         )
         manager.save_event(event)
 
