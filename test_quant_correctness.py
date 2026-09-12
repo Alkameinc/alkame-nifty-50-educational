@@ -1,5 +1,6 @@
 import json
 import shutil
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -9,26 +10,22 @@ from config import (
     HORIZON_CONFIG,
     HORIZON_INTRADAY,
     MODELS_DIR,
-    DB_PATH,
 )
-from feature_engineer import FeatureEngineer, ML_SAFE_SUFFIX
-from model_trainer import ModelTrainer
+from ensemble_manager import EnsembleManager
 from execution_simulator import (
     ExecutionSimulator,
-    STANDARD_COST_SCENARIOS,
-    CostScenario,
     ExitReason,
 )
+from feature_engineer import ML_SAFE_SUFFIX, FeatureEngineer
+from history_manager import HistoryManager
+from model_trainer import ModelTrainer
+from predictor import PredictionSignal
 from runtime_validator import (
-    RuntimeValidator,
-    STATUS_STABLE,
+    STATUS_CALIBRATION_STALE,
     STATUS_DRIFT_DETECTED,
     STATUS_FRESH,
-    STATUS_CALIBRATION_STALE,
+    RuntimeValidator,
 )
-from history_manager import HistoryManager, PredictionRecord
-from predictor import PredictionSignal
-from ensemble_manager import EnsembleManager
 
 
 def _build_synthetic_ohlcv(n_days: int = 15, bars_per_day: int = 75, seed: int = 42) -> pd.DataFrame:
@@ -104,7 +101,8 @@ def test_universal_future_mutation_invariance_across_all_features():
         orig_slice = features_original[col].iloc[:cutoff_idx]
         mut_slice = features_mutated[col].iloc[:cutoff_idx]
         pd.testing.assert_series_equal(
-            orig_slice, mut_slice,
+            orig_slice,
+            mut_slice,
             check_names=False,
             obj=f"Feature {col} showed future-leakage leakage at t < cutoff!",
         )
@@ -134,9 +132,7 @@ def test_horizon_specific_causality_and_purge_window(horizon):
     X, y, feature_cols = prepared
 
     # Boundary purging verification
-    X_train, X_test, y_train, y_test = trainer.time_based_split(
-        X, y, test_fraction=0.2, purge_window=horizon_bars
-    )
+    X_train, X_test, y_train, y_test = trainer.time_based_split(X, y, test_fraction=0.2, purge_window=horizon_bars)
 
     train_end_idx = len(X_train)
     test_start_idx = len(X) - len(X_test)
@@ -169,9 +165,17 @@ def test_walk_forward_split_with_purge_and_embargo():
     embargo_win = 2
     n_splits = 3
 
-    folds = list(trainer.walk_forward_split(
-        X, y, n_splits=n_splits, min_train_samples=100, purge_window=purge_win, embargo_window=embargo_win, mode="expanding"
-    ))
+    folds = list(
+        trainer.walk_forward_split(
+            X,
+            y,
+            n_splits=n_splits,
+            min_train_samples=100,
+            purge_window=purge_win,
+            embargo_window=embargo_win,
+            mode="expanding",
+        )
+    )
     assert len(folds) == n_splits
 
     for i, X_tr, X_te, y_tr, y_te in folds:
@@ -206,13 +210,16 @@ def test_execution_simulator_path_traversal_and_cost_tiers():
     sim = ExecutionSimulator()
 
     dates = pd.date_range("2026-01-01 09:15", periods=30, freq="5min")
-    df = pd.DataFrame({
-        "Open": [100.0] * 30,
-        "High": [101.0] * 30,
-        "Low": [99.0] * 30,
-        "Close": [100.0] * 30,
-        "Volume": [1000] * 30,
-    }, index=dates)
+    df = pd.DataFrame(
+        {
+            "Open": [100.0] * 30,
+            "High": [101.0] * 30,
+            "Low": [99.0] * 30,
+            "Close": [100.0] * 30,
+            "Volume": [1000] * 30,
+        },
+        index=dates,
+    )
 
     # Simultaneous hit bar at index 5: both high and low hit target/stop
     df.iloc[5, df.columns.get_loc("High")] = 110.0
@@ -290,20 +297,48 @@ def test_out_of_sample_calibration_and_drift_detection(tmp_path):
     hm = HistoryManager(db_path=db_file)
 
     sig_in_sample = PredictionSignal(
-        symbol="TCS", timestamp=pd.Timestamp.now(), action="BUY",
-        model_predicted_class="UP", raw_confidence=0.8, risk_adjusted_confidence=0.75,
-        calibrated_confidence=0.75, agreement_fraction=0.8, downside_summary="", upside_summary="",
-        reasoning={}, global_risk_level="LOW", risk_toggle_enabled=True,
-        is_safe_to_trade_live=True, data_stale=False, suppressed=False,
-        suppression_reasons=[], horizon="INTRADAY", model_version="v1.1", feature_version="v1.0"
+        symbol="TCS",
+        timestamp=pd.Timestamp.now(),
+        action="BUY",
+        model_predicted_class="UP",
+        raw_confidence=0.8,
+        risk_adjusted_confidence=0.75,
+        calibrated_confidence=0.75,
+        agreement_fraction=0.8,
+        downside_summary="",
+        upside_summary="",
+        reasoning={},
+        global_risk_level="LOW",
+        risk_toggle_enabled=True,
+        is_safe_to_trade_live=True,
+        data_stale=False,
+        suppressed=False,
+        suppression_reasons=[],
+        horizon="INTRADAY",
+        model_version="v1.1",
+        feature_version="v1.0",
     )
     sig_out_sample = PredictionSignal(
-        symbol="TCS", timestamp=pd.Timestamp.now(), action="BUY",
-        model_predicted_class="UP", raw_confidence=0.85, risk_adjusted_confidence=0.80,
-        calibrated_confidence=0.80, agreement_fraction=0.9, downside_summary="", upside_summary="",
-        reasoning={}, global_risk_level="LOW", risk_toggle_enabled=True,
-        is_safe_to_trade_live=True, data_stale=False, suppressed=False,
-        suppression_reasons=[], horizon="INTRADAY", model_version="v1.1", feature_version="v1.0"
+        symbol="TCS",
+        timestamp=pd.Timestamp.now(),
+        action="BUY",
+        model_predicted_class="UP",
+        raw_confidence=0.85,
+        risk_adjusted_confidence=0.80,
+        calibrated_confidence=0.80,
+        agreement_fraction=0.9,
+        downside_summary="",
+        upside_summary="",
+        reasoning={},
+        global_risk_level="LOW",
+        risk_toggle_enabled=True,
+        is_safe_to_trade_live=True,
+        data_stale=False,
+        suppressed=False,
+        suppression_reasons=[],
+        horizon="INTRADAY",
+        model_version="v1.1",
+        feature_version="v1.0",
     )
 
     id_in = hm.save_prediction(sig_in_sample, is_out_of_sample=False)
@@ -322,14 +357,18 @@ def test_out_of_sample_calibration_and_drift_detection(tmp_path):
 
     # Drift Detection test
     rv = RuntimeValidator()
-    ref_df = pd.DataFrame({
-        "confidence": np.random.uniform(0.4, 0.6, size=50),
-        "predicted_class": ["UP"] * 25 + ["DOWN"] * 25,
-    })
-    drifted_df = pd.DataFrame({
-        "confidence": np.random.uniform(0.85, 0.99, size=50),
-        "predicted_class": ["UP"] * 50,
-    })
+    ref_df = pd.DataFrame(
+        {
+            "confidence": np.random.uniform(0.4, 0.6, size=50),
+            "predicted_class": ["UP"] * 25 + ["DOWN"] * 25,
+        }
+    )
+    drifted_df = pd.DataFrame(
+        {
+            "confidence": np.random.uniform(0.85, 0.99, size=50),
+            "predicted_class": ["UP"] * 50,
+        }
+    )
 
     drift_res = rv.check_distribution_drift(drifted_df, ref_df)
     assert drift_res.drift_detected is True
@@ -371,7 +410,7 @@ def test_immutable_model_artifacts_and_rollback(tmp_path):
 
     pointer_path = em._current_pointer_path(symbol, horizon)
     assert pointer_path.exists()
-    with open(pointer_path, "r") as f:
+    with open(pointer_path) as f:
         ptr1 = json.load(f)
     run_id_1 = ptr1["current_run_id"]
 
@@ -385,7 +424,7 @@ def test_immutable_model_artifacts_and_rollback(tmp_path):
     res2 = em.train_ensemble_for_symbol(symbol, df_stock, df_index, horizon=horizon)
     assert res2.success is True
 
-    with open(pointer_path, "r") as f:
+    with open(pointer_path) as f:
         ptr2 = json.load(f)
     run_id_2 = ptr2["current_run_id"]
     assert run_id_1 != run_id_2, "Retraining must generate a distinct immutable run_id!"
@@ -406,7 +445,7 @@ def test_immutable_model_artifacts_and_rollback(tmp_path):
     rollback_ok = em.rollback_ensemble(symbol, horizon, run_id_1)
     assert rollback_ok is True
 
-    with open(pointer_path, "r") as f:
+    with open(pointer_path) as f:
         ptr_after = json.load(f)
     assert ptr_after["current_run_id"] == run_id_1
 

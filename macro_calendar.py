@@ -1,21 +1,18 @@
 # 1. Standard library imports
 import csv
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import List, Optional
 
 # 2. Third-party imports
 # (none required)
-
 # 3. Local imports
 from config import (
     MACRO_CALENDAR_PATH,
     MONSOON_SENSITIVE_SECTORS,
-    RATE_SENSITIVE_SECTORS,
-    ensure_directories,
     configure_logging,
+    ensure_directories,
 )
 
 # 4. Logger setup
@@ -26,45 +23,105 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 CSV_FIELDNAMES = [
-    "event_date", "event_type", "label", "scope", "sector_hint",
-    "impact_window_days_before", "impact_window_days_after", "notes",
+    "event_date",
+    "event_type",
+    "label",
+    "scope",
+    "sector_hint",
+    "impact_window_days_before",
+    "impact_window_days_after",
+    "notes",
 ]
 
 # Event types this module understands. Anything else is treated as a generic
 # "MACRO_OTHER" event so the system never silently drops an entry a human added.
 KNOWN_EVENT_TYPES = {
-    "RBI_POLICY", "GDP_RELEASE", "UNION_BUDGET", "ELECTION", "FESTIVE_WINDOW",
-    "MONSOON_STATUS", "FDI_FLOW_RELEASE", "MACRO_OTHER",
+    "RBI_POLICY",
+    "GDP_RELEASE",
+    "UNION_BUDGET",
+    "ELECTION",
+    "FESTIVE_WINDOW",
+    "MONSOON_STATUS",
+    "FDI_FLOW_RELEASE",
+    "MACRO_OTHER",
 }
 
 # Seed data — known, publicly published dates. Traders should review/update this
 # each time a new RBI calendar or election schedule is announced.
 SEED_EVENTS = [
     # RBI MPC FY2026-27 calendar (published by RBI, confirmed April-Dec 2026 dates)
-    {"event_date": "2026-04-08", "event_type": "RBI_POLICY", "label": "RBI MPC Policy Decision",
-     "scope": "MARKET", "sector_hint": "Banking,NBFC,Insurance,ConsumerDurables,Auto",
-     "impact_window_days_before": 1, "impact_window_days_after": 1, "notes": "Bi-monthly MPC decision"},
-    {"event_date": "2026-06-05", "event_type": "RBI_POLICY", "label": "RBI MPC Policy Decision",
-     "scope": "MARKET", "sector_hint": "Banking,NBFC,Insurance,ConsumerDurables,Auto",
-     "impact_window_days_before": 1, "impact_window_days_after": 1, "notes": "Bi-monthly MPC decision"},
-    {"event_date": "2026-08-05", "event_type": "RBI_POLICY", "label": "RBI MPC Policy Decision",
-     "scope": "MARKET", "sector_hint": "Banking,NBFC,Insurance,ConsumerDurables,Auto",
-     "impact_window_days_before": 1, "impact_window_days_after": 1, "notes": "Bi-monthly MPC decision"},
-    {"event_date": "2026-10-07", "event_type": "RBI_POLICY", "label": "RBI MPC Policy Decision",
-     "scope": "MARKET", "sector_hint": "Banking,NBFC,Insurance,ConsumerDurables,Auto",
-     "impact_window_days_before": 1, "impact_window_days_after": 1, "notes": "Pre-festive policy review"},
-    {"event_date": "2026-12-04", "event_type": "RBI_POLICY", "label": "RBI MPC Policy Decision",
-     "scope": "MARKET", "sector_hint": "Banking,NBFC,Insurance,ConsumerDurables,Auto",
-     "impact_window_days_before": 1, "impact_window_days_after": 1, "notes": "Final MPC meeting of calendar year"},
+    {
+        "event_date": "2026-04-08",
+        "event_type": "RBI_POLICY",
+        "label": "RBI MPC Policy Decision",
+        "scope": "MARKET",
+        "sector_hint": "Banking,NBFC,Insurance,ConsumerDurables,Auto",
+        "impact_window_days_before": 1,
+        "impact_window_days_after": 1,
+        "notes": "Bi-monthly MPC decision",
+    },
+    {
+        "event_date": "2026-06-05",
+        "event_type": "RBI_POLICY",
+        "label": "RBI MPC Policy Decision",
+        "scope": "MARKET",
+        "sector_hint": "Banking,NBFC,Insurance,ConsumerDurables,Auto",
+        "impact_window_days_before": 1,
+        "impact_window_days_after": 1,
+        "notes": "Bi-monthly MPC decision",
+    },
+    {
+        "event_date": "2026-08-05",
+        "event_type": "RBI_POLICY",
+        "label": "RBI MPC Policy Decision",
+        "scope": "MARKET",
+        "sector_hint": "Banking,NBFC,Insurance,ConsumerDurables,Auto",
+        "impact_window_days_before": 1,
+        "impact_window_days_after": 1,
+        "notes": "Bi-monthly MPC decision",
+    },
+    {
+        "event_date": "2026-10-07",
+        "event_type": "RBI_POLICY",
+        "label": "RBI MPC Policy Decision",
+        "scope": "MARKET",
+        "sector_hint": "Banking,NBFC,Insurance,ConsumerDurables,Auto",
+        "impact_window_days_before": 1,
+        "impact_window_days_after": 1,
+        "notes": "Pre-festive policy review",
+    },
+    {
+        "event_date": "2026-12-04",
+        "event_type": "RBI_POLICY",
+        "label": "RBI MPC Policy Decision",
+        "scope": "MARKET",
+        "sector_hint": "Banking,NBFC,Insurance,ConsumerDurables,Auto",
+        "impact_window_days_before": 1,
+        "impact_window_days_after": 1,
+        "notes": "Final MPC meeting of calendar year",
+    },
     # Union Budget — fixed annual date
-    {"event_date": "2027-02-01", "event_type": "UNION_BUDGET", "label": "Union Budget Presentation",
-     "scope": "MARKET", "sector_hint": "ALL",
-     "impact_window_days_before": 2, "impact_window_days_after": 2, "notes": "Fixed annual date"},
+    {
+        "event_date": "2027-02-01",
+        "event_type": "UNION_BUDGET",
+        "label": "Union Budget Presentation",
+        "scope": "MARKET",
+        "sector_hint": "ALL",
+        "impact_window_days_before": 2,
+        "impact_window_days_after": 2,
+        "notes": "Fixed annual date",
+    },
     # Festive windows — approximate, verify exact dates yearly (lunar calendar shifts)
-    {"event_date": "2026-10-20", "event_type": "FESTIVE_WINDOW", "label": "Diwali demand window",
-     "scope": "SECTOR", "sector_hint": "Auto,FMCG,ConsumerDurables",
-     "impact_window_days_before": 14, "impact_window_days_after": 3,
-     "notes": "High retail/auto/consumer-durable demand period, verify exact date yearly"},
+    {
+        "event_date": "2026-10-20",
+        "event_type": "FESTIVE_WINDOW",
+        "label": "Diwali demand window",
+        "scope": "SECTOR",
+        "sector_hint": "Auto,FMCG,ConsumerDurables",
+        "impact_window_days_before": 14,
+        "impact_window_days_after": 3,
+        "notes": "High retail/auto/consumer-durable demand period, verify exact date yearly",
+    },
 ]
 
 
@@ -73,8 +130,8 @@ class MacroEvent:
     event_date: date
     event_type: str
     label: str
-    scope: str                 # "MARKET" | "SECTOR" | "STOCK"
-    sector_hint: str            # comma-separated sector names, or "ALL"
+    scope: str  # "MARKET" | "SECTOR" | "STOCK"
+    sector_hint: str  # comma-separated sector names, or "ALL"
     impact_window_days_before: int
     impact_window_days_after: int
     notes: str = ""
@@ -85,7 +142,7 @@ class MacroEvent:
         window_end = self.event_date + timedelta(days=self.impact_window_days_after)
         return window_start <= check_date <= window_end
 
-    def sector_list(self) -> List[str]:
+    def sector_list(self) -> list[str]:
         if self.sector_hint.strip().upper() == "ALL":
             return ["ALL"]
         return [s.strip() for s in self.sector_hint.split(",") if s.strip()]
@@ -99,7 +156,7 @@ class MacroCalendar:
 
     def __init__(self, csv_path: Path = MACRO_CALENDAR_PATH):
         self.csv_path = csv_path
-        self._events: List[MacroEvent] = []
+        self._events: list[MacroEvent] = []
         self._load_or_seed()
 
     def _load_or_seed(self) -> None:
@@ -114,7 +171,7 @@ class MacroCalendar:
             logger.error(f"Failed to load or seed macro calendar: {e}")
             self._events = []
 
-    def _write_rows(self, rows: List[dict]) -> None:
+    def _write_rows(self, rows: list[dict]) -> None:
         f = None
         try:
             f = open(self.csv_path, mode="w", newline="", encoding="utf-8")
@@ -129,19 +186,18 @@ class MacroCalendar:
             if f is not None:
                 f.close()
 
-    def _read_rows(self) -> List[MacroEvent]:
-        events: List[MacroEvent] = []
+    def _read_rows(self) -> list[MacroEvent]:
+        events: list[MacroEvent] = []
         f = None
         try:
-            f = open(self.csv_path, mode="r", newline="", encoding="utf-8")
+            f = open(self.csv_path, newline="", encoding="utf-8")
             reader = csv.DictReader(f)
             for row in reader:
                 try:
                     event_type = row["event_type"].strip() if row.get("event_type") else "MACRO_OTHER"
                     if event_type not in KNOWN_EVENT_TYPES:
                         logger.warning(
-                            f"Unrecognized event_type '{event_type}' in macro calendar, "
-                            "treating as MACRO_OTHER."
+                            f"Unrecognized event_type '{event_type}' in macro calendar, " "treating as MACRO_OTHER."
                         )
                         event_type = "MACRO_OTHER"
 
@@ -184,7 +240,7 @@ class MacroCalendar:
             logger.error(f"Failed to add macro event {macro_event}: {e}")
             raise
 
-    def get_active_macro_events(self, check_date: Optional[date] = None) -> List[MacroEvent]:
+    def get_active_macro_events(self, check_date: date | None = None) -> list[MacroEvent]:
         """Return all macro events whose impact window covers check_date (default: today)."""
         check_date = check_date or date.today()
         try:
@@ -193,7 +249,7 @@ class MacroCalendar:
             logger.error(f"Failed computing active macro events for {check_date}: {e}")
             return []
 
-    def get_all_events(self) -> List[MacroEvent]:
+    def get_all_events(self) -> list[MacroEvent]:
         return list(self._events)
 
 

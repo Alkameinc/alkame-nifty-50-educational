@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 # 2. Third-party imports
 import numpy as np
@@ -14,17 +14,17 @@ import yfinance as yf
 
 # 3. Local imports
 from config import (
-    BAR_INTERVAL,
     BAR_HISTORY_PERIOD,
+    BAR_INTERVAL,
     CACHE_DIR,
-    MARKET_TIMEZONE,
-    ensure_directories,
     configure_logging,
+    ensure_directories,
 )
 from health_monitor import registry as health_registry
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Enums & Dataclasses
@@ -38,18 +38,19 @@ class DataStatus(Enum):
 
 class PriceAdjustmentMode(Enum):
     """Explicit corporate action adjustment strategy (DATA-004)."""
-    ADJUSTED = "adjusted"          # Splits, dividends, and bonuses adjusted (default for ML returns & labels)
-    RAW = "raw"                    # Unadjusted exchange execution prints
+
+    ADJUSTED = "adjusted"  # Splits, dividends, and bonuses adjusted (default for ML returns & labels)
+    RAW = "raw"  # Unadjusted exchange execution prints
     TOTAL_RETURN = "total_return"  # Reinvested dividends + splits
 
 
 @dataclass
 class MarketDataResult:
-    data: Optional[pd.DataFrame]
+    data: pd.DataFrame | None
     status: DataStatus
     source: str
     adjustment_mode: PriceAdjustmentMode = PriceAdjustmentMode.ADJUSTED
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -59,7 +60,7 @@ class DataQualityReport:
     duplicate_index_count: int
     outlier_count: int
     timezone_aligned: bool
-    issues: List[str]
+    issues: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -85,13 +86,13 @@ class MarketDataProvider(ABC):
         pass
 
     @abstractmethod
-    def fetch_fundamentals(self, ticker: str) -> Dict[str, Any]:
+    def fetch_fundamentals(self, ticker: str) -> dict[str, Any]:
         """Fetch fundamental data (P/E, P/B, Market Cap, etc.)."""
         pass
 
     def validate_data_quality(
         self,
-        df: Optional[pd.DataFrame],
+        df: pd.DataFrame | None,
         ticker: str,
         max_single_bar_return_pct: float = 50.0,
     ) -> DataQualityReport:
@@ -102,7 +103,7 @@ class MarketDataProvider(ABC):
         3. Extreme price outlier / jump rejection (>50% single-bar return)
         4. Timezone verification (Asia/Kolkata)
         """
-        issues: List[str] = []
+        issues: list[str] = []
         if df is None or df.empty:
             return DataQualityReport(
                 is_valid=False,
@@ -203,7 +204,7 @@ class YFinanceMarketDataProvider(MarketDataProvider):
         except Exception as e:
             logger.error(f"Failed to write cache for {ticker}: {e}")
 
-    def _load_cache(self, ticker: str, interval: str, adjustment: PriceAdjustmentMode) -> Optional[pd.DataFrame]:
+    def _load_cache(self, ticker: str, interval: str, adjustment: PriceAdjustmentMode) -> pd.DataFrame | None:
         p = self._cache_path(ticker, interval, adjustment)
         if not p.exists():
             # Check legacy cache path
@@ -232,7 +233,7 @@ class YFinanceMarketDataProvider(MarketDataProvider):
         cached = self._load_cache(ticker, interval, adjustment)
 
         last_error = None
-        auto_adjust = (adjustment == PriceAdjustmentMode.ADJUSTED)
+        auto_adjust = adjustment == PriceAdjustmentMode.ADJUSTED
 
         for attempt in range(1, self.max_retries + 1):
             try:
@@ -285,7 +286,7 @@ class YFinanceMarketDataProvider(MarketDataProvider):
             error=str(last_error),
         )
 
-    def fetch_fundamentals(self, ticker: str) -> Dict[str, Any]:
+    def fetch_fundamentals(self, ticker: str) -> dict[str, Any]:
         try:
             t = yf.Ticker(ticker)
             return t.info or {}
@@ -339,15 +340,15 @@ class LocalCacheMarketDataProvider(MarketDataProvider):
             error="Cache file not found",
         )
 
-    def fetch_fundamentals(self, ticker: str) -> Dict[str, Any]:
+    def fetch_fundamentals(self, ticker: str) -> dict[str, Any]:
         return {}
 
 
 class TestFixtureMarketDataProvider(MarketDataProvider):
     """Deterministic, in-memory provider for hermetic automated tests (TEST-001)."""
 
-    def __init__(self, fixtures: Optional[Dict[str, pd.DataFrame]] = None):
-        self.fixtures: Dict[str, pd.DataFrame] = fixtures or {}
+    def __init__(self, fixtures: dict[str, pd.DataFrame] | None = None):
+        self.fixtures: dict[str, pd.DataFrame] = fixtures or {}
 
     def set_fixture(self, ticker: str, df: pd.DataFrame) -> None:
         self.fixtures[ticker] = df
@@ -376,7 +377,7 @@ class TestFixtureMarketDataProvider(MarketDataProvider):
             error=f"No fixture configured for {ticker}",
         )
 
-    def fetch_fundamentals(self, ticker: str) -> Dict[str, Any]:
+    def fetch_fundamentals(self, ticker: str) -> dict[str, Any]:
         return {
             "trailingPE": 22.5,
             "priceToBook": 3.2,
@@ -396,13 +397,16 @@ if __name__ == "__main__":
     print("\n=== MARKET DATA PROVIDER SELF-TEST ===")
     # 1. Test Fixture Provider
     dates = pd.date_range("2026-07-01 09:15", periods=50, freq="5min", tz="Asia/Kolkata")
-    fixture_df = pd.DataFrame({
-        "Open": np.linspace(100, 110, 50),
-        "High": np.linspace(101, 111, 50),
-        "Low": np.linspace(99, 109, 50),
-        "Close": np.linspace(100.5, 110.5, 50),
-        "Volume": np.full(50, 5000),
-    }, index=dates)
+    fixture_df = pd.DataFrame(
+        {
+            "Open": np.linspace(100, 110, 50),
+            "High": np.linspace(101, 111, 50),
+            "Low": np.linspace(99, 109, 50),
+            "Close": np.linspace(100.5, 110.5, 50),
+            "Volume": np.full(50, 5000),
+        },
+        index=dates,
+    )
 
     fixture_prov = TestFixtureMarketDataProvider({"RELIANCE.NS": fixture_df})
     res = fixture_prov.fetch_ohlcv("RELIANCE.NS", adjustment=PriceAdjustmentMode.ADJUSTED)
@@ -415,7 +419,9 @@ if __name__ == "__main__":
     assert report.is_valid is True
     assert report.is_monotonic is True
     assert report.duplicate_index_count == 0
-    print(f"Data Quality Report: valid={report.is_valid}, monotonic={report.is_monotonic}, duplicates={report.duplicate_index_count}")
+    print(
+        f"Data Quality Report: valid={report.is_valid}, monotonic={report.is_monotonic}, duplicates={report.duplicate_index_count}"
+    )
 
     # 3. Fundamentals
     funds = fixture_prov.fetch_fundamentals("RELIANCE.NS")

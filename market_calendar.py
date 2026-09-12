@@ -1,9 +1,8 @@
 # 1. Standard library imports
 import csv
 import logging
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Union
 from zoneinfo import ZoneInfo
 
 # 2. Local imports
@@ -11,7 +10,6 @@ from config import (
     MARKET_CLOSE_TIME,
     MARKET_OPEN_TIME,
     MARKET_TIMEZONE,
-    DATA_DIR,
     configure_logging,
 )
 
@@ -23,7 +21,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Official NSE Equity Holidays for 2026 (and common annual fixed holidays)
 # Reference: https://www.nseindia.com/resources/exchange-communication-holidays
-OFFICIAL_NSE_2026_HOLIDAYS: Set[str] = {
+OFFICIAL_NSE_2026_HOLIDAYS: set[str] = {
     "2026-01-15",  # Municipal Corporation Election - Maharashtra
     "2026-01-26",  # Republic Day
     "2026-02-19",  # Chhatrapati Shivaji Maharaj Jayanti
@@ -48,33 +46,46 @@ OFFICIAL_NSE_2026_HOLIDAYS: Set[str] = {
     "2026-12-25",  # Christmas
 }
 
-NSE_HOLIDAYS_SET: Set[str] = {
+NSE_HOLIDAYS_SET: set[str] = {
     # 2025 (Reference / fallback)
-    "2025-01-26", "2025-08-15", "2025-10-02", "2025-12-25",
+    "2025-01-26",
+    "2025-08-15",
+    "2025-10-02",
+    "2025-12-25",
     # 2026 Official NSE Equity Holidays (Full official list)
     *OFFICIAL_NSE_2026_HOLIDAYS,
     # 2027 Key fixed holidays
-    "2027-01-26", "2027-03-22", "2027-03-26", "2027-04-14", "2027-04-19",
-    "2027-05-01", "2027-08-15", "2027-10-02", "2027-10-11", "2027-10-29",
-    "2027-11-01", "2027-11-14", "2027-12-25",
+    "2027-01-26",
+    "2027-03-22",
+    "2027-03-26",
+    "2027-04-14",
+    "2027-04-19",
+    "2027-05-01",
+    "2027-08-15",
+    "2027-10-02",
+    "2027-10-11",
+    "2027-10-29",
+    "2027-11-01",
+    "2027-11-14",
+    "2027-12-25",
 }
 
 
 class MarketCalendarProvider:
     """Abstract interface for market holiday and schedule providers."""
 
-    def load_holidays(self) -> Set[str]:
+    def load_holidays(self) -> set[str]:
         raise NotImplementedError
 
 
 class CSVMarketCalendarProvider(MarketCalendarProvider):
     """Loads versioned market holiday CSV files from data/market_calendar/ directory."""
 
-    def __init__(self, calendar_dir: Optional[Path] = None):
+    def __init__(self, calendar_dir: Path | None = None):
         self.calendar_dir = calendar_dir or (Path(__file__).parent / "data" / "market_calendar")
 
-    def load_holidays(self) -> Set[str]:
-        holidays: Set[str] = set()
+    def load_holidays(self) -> set[str]:
+        holidays: set[str] = set()
         if not self.calendar_dir.exists():
             logger.warning(f"Calendar directory {self.calendar_dir} not found. Falling back to built-in holidays.")
             return set(NSE_HOLIDAYS_SET)
@@ -86,7 +97,7 @@ class CSVMarketCalendarProvider(MarketCalendarProvider):
 
         for csv_path in sorted(csv_files):
             try:
-                with open(csv_path, "r", encoding="utf-8-sig") as f:
+                with open(csv_path, encoding="utf-8-sig") as f:
                     reader = csv.DictReader(f)
                     file_holiday_count = 0
                     for row in reader:
@@ -106,15 +117,15 @@ class CSVMarketCalendarProvider(MarketCalendarProvider):
 
 class MarketCalendar:
     """Authoritative exchange calendar for NSE Equity market operations.
-    
+
     Provides unified market-open, trading-day, holiday, and session transition
     logic across data fetching, scheduling, and validation.
     """
 
     def __init__(
         self,
-        holidays: Optional[Set[str]] = None,
-        provider: Optional[MarketCalendarProvider] = None,
+        holidays: set[str] | None = None,
+        provider: MarketCalendarProvider | None = None,
         timezone_str: str = MARKET_TIMEZONE,
     ):
         if holidays is not None:
@@ -129,7 +140,7 @@ class MarketCalendar:
 
         self.tz = ZoneInfo(timezone_str)
 
-    def is_holiday(self, d: Union[date, datetime, str]) -> bool:
+    def is_holiday(self, d: date | datetime | str) -> bool:
         """Return True if the date is a recognized exchange holiday."""
         if isinstance(d, datetime):
             d_str = d.strftime("%Y-%m-%d")
@@ -139,7 +150,7 @@ class MarketCalendar:
             d_str = str(d)
         return d_str in self.holidays
 
-    def is_trading_day(self, d: Union[date, datetime, str]) -> bool:
+    def is_trading_day(self, d: date | datetime | str) -> bool:
         """Return True if `d` is a valid NSE trading day (weekday and non-holiday)."""
         if isinstance(d, datetime):
             check_date = d.date()
@@ -154,9 +165,9 @@ class MarketCalendar:
 
         return not self.is_holiday(check_date)
 
-    def is_market_open(self, now: Optional[datetime] = None) -> bool:
+    def is_market_open(self, now: datetime | None = None) -> bool:
         """Check if NSE equity market is open right now (or at specified datetime).
-        
+
         Rules:
         - Must be a trading day (weekday and non-holiday)
         - Must be between MARKET_OPEN_TIME and MARKET_CLOSE_TIME in IST
@@ -176,7 +187,7 @@ class MarketCalendar:
             logger.error(f"Error checking is_market_open: {e}")
             return False
 
-    def next_market_open(self, dt: Optional[datetime] = None) -> datetime:
+    def next_market_open(self, dt: datetime | None = None) -> datetime:
         """Return the next NSE market open timestamp (timezone-aware in IST)."""
         if dt is None:
             current_dt = datetime.now(self.tz)
@@ -197,7 +208,7 @@ class MarketCalendar:
 
         raise RuntimeError("No trading day found in next 30 days.")
 
-    def next_market_close(self, dt: Optional[datetime] = None) -> datetime:
+    def next_market_close(self, dt: datetime | None = None) -> datetime:
         """Return the market close timestamp for the current or next open trading session."""
         if dt is None:
             current_dt = datetime.now(self.tz)
@@ -218,20 +229,25 @@ class MarketCalendar:
 # Global default instance
 market_calendar = MarketCalendar()
 
+
 # Standalone helper functions
-def is_holiday(d: Union[date, datetime, str]) -> bool:
+def is_holiday(d: date | datetime | str) -> bool:
     return market_calendar.is_holiday(d)
 
-def is_trading_day(d: Union[date, datetime, str]) -> bool:
+
+def is_trading_day(d: date | datetime | str) -> bool:
     return market_calendar.is_trading_day(d)
 
-def is_market_open(now: Optional[datetime] = None) -> bool:
+
+def is_market_open(now: datetime | None = None) -> bool:
     return market_calendar.is_market_open(now)
 
-def next_market_open(dt: Optional[datetime] = None) -> datetime:
+
+def next_market_open(dt: datetime | None = None) -> datetime:
     return market_calendar.next_market_open(dt)
 
-def next_market_close(dt: Optional[datetime] = None) -> datetime:
+
+def next_market_close(dt: datetime | None = None) -> datetime:
     return market_calendar.next_market_close(dt)
 
 

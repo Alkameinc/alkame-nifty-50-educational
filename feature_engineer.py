@@ -1,7 +1,6 @@
 # 1. Standard library imports
 import logging
 import re
-from typing import Optional, Tuple
 
 # 2. Third-party imports
 import numpy as np
@@ -9,28 +8,28 @@ import pandas as pd
 
 # 3. Local imports
 from config import (
+    ATR_EXPANSION_MULTIPLIER,
+    ATR_PERIOD,
     BAR_INTERVAL,
-    HORIZON_INTRADAY,
-    ORB_MINUTES,
-    GAP_THRESHOLD_PCT,
-    VOLUME_SPIKE_MULTIPLIER,
-    VOLUME_SPIKE_LOOKBACK_BARS,
-    RSI_PERIOD,
-    RSI_OVERBOUGHT,
-    RSI_OVERSOLD,
-    MACD_FAST,
-    MACD_SLOW,
-    MACD_SIGNAL,
     BOLLINGER_PERIOD,
     BOLLINGER_STD_DEV,
-    ATR_PERIOD,
-    ATR_EXPANSION_MULTIPLIER,
+    CORRELATION_BREAKDOWN_THRESHOLD,
+    CORRELATION_LOOKBACK_BARS,
+    GAP_THRESHOLD_PCT,
+    HORIZON_INTRADAY,
+    LOW_LIQUIDITY_VOLUME_FLOOR,
     MA_FAST_PERIOD,
     MA_SLOW_PERIOD,
-    LOW_LIQUIDITY_VOLUME_FLOOR,
+    MACD_FAST,
+    MACD_SIGNAL,
+    MACD_SLOW,
+    ORB_MINUTES,
     OUTPERFORMANCE_THRESHOLD_PCT,
-    CORRELATION_LOOKBACK_BARS,
-    CORRELATION_BREAKDOWN_THRESHOLD,
+    RSI_OVERBOUGHT,
+    RSI_OVERSOLD,
+    RSI_PERIOD,
+    VOLUME_SPIKE_LOOKBACK_BARS,
+    VOLUME_SPIKE_MULTIPLIER,
     configure_logging,
 )
 from reference_level_engine import ReferenceLevelDeltas
@@ -111,7 +110,7 @@ class FeatureEngineer:
     @staticmethod
     def compute_macd(
         close: pd.Series, fast: int = MACD_FAST, slow: int = MACD_SLOW, signal: int = MACD_SIGNAL
-    ) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    ) -> tuple[pd.Series, pd.Series, pd.Series]:
         try:
             ema_fast = close.ewm(span=fast, adjust=False).mean()
             ema_slow = close.ewm(span=slow, adjust=False).mean()
@@ -127,7 +126,7 @@ class FeatureEngineer:
     @staticmethod
     def compute_bollinger_bands(
         close: pd.Series, period: int = BOLLINGER_PERIOD, std_dev: float = BOLLINGER_STD_DEV
-    ) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    ) -> tuple[pd.Series, pd.Series, pd.Series]:
         try:
             middle = close.rolling(window=period, min_periods=period).mean()
             std = close.rolling(window=period, min_periods=period).std()
@@ -171,7 +170,7 @@ class FeatureEngineer:
     @staticmethod
     def compute_moving_averages(
         close: pd.Series, fast: int = MA_FAST_PERIOD, slow: int = MA_SLOW_PERIOD
-    ) -> Tuple[pd.Series, pd.Series]:
+    ) -> tuple[pd.Series, pd.Series]:
         try:
             ema_fast = close.ewm(span=fast, adjust=False).mean()
             ema_slow = close.ewm(span=slow, adjust=False).mean()
@@ -181,7 +180,7 @@ class FeatureEngineer:
             nan_series = pd.Series(np.nan, index=close.index)
             return nan_series, nan_series
 
-    def compute_opening_range_breakout(self, df: pd.DataFrame) -> Tuple[pd.Series, pd.Series, pd.Series]:
+    def compute_opening_range_breakout(self, df: pd.DataFrame) -> tuple[pd.Series, pd.Series, pd.Series]:
         """
         For each calendar day, computes the opening-range high/low from the
         first `orb_bar_count` bars. Bars within the opening range have NaN ORB levels.
@@ -200,13 +199,14 @@ class FeatureEngineer:
                 day_or_high = opening_bars["High"].max()
                 day_or_low = opening_bars["Low"].min()
 
-                post_orb_index = day_df.index[self.orb_bar_count:]
+                post_orb_index = day_df.index[self.orb_bar_count :]
                 or_high.loc[post_orb_index] = day_or_high
                 or_low.loc[post_orb_index] = day_or_low
 
                 post_orb_close = day_df.loc[post_orb_index, "Close"]
                 day_breakout = np.where(
-                    post_orb_close > day_or_high, 1,
+                    post_orb_close > day_or_high,
+                    1,
                     np.where(post_orb_close < day_or_low, -1, 0),
                 )
                 breakout.loc[post_orb_index] = day_breakout
@@ -218,7 +218,7 @@ class FeatureEngineer:
             return nan_series, nan_series, pd.Series(0, index=df.index)
 
     @staticmethod
-    def compute_gap(df: pd.DataFrame, threshold_pct: float = GAP_THRESHOLD_PCT) -> Tuple[pd.Series, pd.Series]:
+    def compute_gap(df: pd.DataFrame, threshold_pct: float = GAP_THRESHOLD_PCT) -> tuple[pd.Series, pd.Series]:
         """
         Computes the day's opening gap vs the previous day's last close,
         broadcast across every bar of that day (so the dashboard can show
@@ -250,7 +250,7 @@ class FeatureEngineer:
         volume: pd.Series,
         lookback: int = VOLUME_SPIKE_LOOKBACK_BARS,
         multiplier: float = VOLUME_SPIKE_MULTIPLIER,
-    ) -> Tuple[pd.Series, pd.Series]:
+    ) -> tuple[pd.Series, pd.Series]:
         try:
             # Baseline uses only PRIOR bars (shift(1) before rolling) so the
             # current bar's own volume is never part of its own baseline.
@@ -265,7 +265,7 @@ class FeatureEngineer:
     @staticmethod
     def compute_outperformance(
         stock_close: pd.Series, index_close: pd.Series, threshold_pct: float = OUTPERFORMANCE_THRESHOLD_PCT
-    ) -> Tuple[pd.Series, pd.Series]:
+    ) -> tuple[pd.Series, pd.Series]:
         """Stock's cumulative % change since day-open minus the index's, aligned by timestamp."""
         try:
             aligned_stock, aligned_index = stock_close.align(index_close, join="inner")
@@ -292,7 +292,7 @@ class FeatureEngineer:
         index_close: pd.Series,
         lookback: int = CORRELATION_LOOKBACK_BARS,
         threshold: float = CORRELATION_BREAKDOWN_THRESHOLD,
-    ) -> Tuple[pd.Series, pd.Series]:
+    ) -> tuple[pd.Series, pd.Series]:
         try:
             aligned_stock, aligned_index = stock_close.align(index_close, join="inner")
             if len(aligned_stock) < lookback:
@@ -312,9 +312,11 @@ class FeatureEngineer:
     # Master orchestration
     # -----------------------------------------------------------------
     def engineer_features(
-        self, stock_df: pd.DataFrame, index_df: Optional[pd.DataFrame] = None,
-        reference_deltas: Optional[ReferenceLevelDeltas] = None
-    ) -> Optional[pd.DataFrame]:
+        self,
+        stock_df: pd.DataFrame,
+        index_df: pd.DataFrame | None = None,
+        reference_deltas: ReferenceLevelDeltas | None = None,
+    ) -> pd.DataFrame | None:
         """
         Computes every technical feature for one stock's OHLCV DataFrame.
         Returns a new DataFrame (does not mutate the input) with:
@@ -371,9 +373,11 @@ class FeatureEngineer:
 
             vol_ratio, vol_spike = self.compute_volume_spike(volume)
             out["volume_ratio"], out["volume_spike"] = vol_ratio, vol_spike
-            rolling_vol_avg = volume.shift(1).rolling(
-                window=VOLUME_SPIKE_LOOKBACK_BARS, min_periods=VOLUME_SPIKE_LOOKBACK_BARS
-            ).mean()
+            rolling_vol_avg = (
+                volume.shift(1)
+                .rolling(window=VOLUME_SPIKE_LOOKBACK_BARS, min_periods=VOLUME_SPIKE_LOOKBACK_BARS)
+                .mean()
+            )
             out["low_liquidity"] = rolling_vol_avg < LOW_LIQUIDITY_VOLUME_FLOOR
 
             if index_df is not None and _validate_ohlcv(index_df, "index_df"):
@@ -408,11 +412,27 @@ class FeatureEngineer:
             # model_trainer.py gets an explicit '_feat' column shifted by exactly
             # one bar, so training never sees a bar's own not-yet-fully-realized value.
             ml_candidate_cols = [
-                "rsi", "macd_line", "macd_signal", "macd_histogram", "bb_upper", "bb_middle", "bb_lower",
-                "atr", "vwap", "ema_fast", "ema_slow", "orb_breakout", "gap_pct", "volume_ratio",
-                "outperformance_pct", "nifty_correlation",
-                "pct_from_ma", "pct_from_support_band", "pct_from_resistance_band",
-                "pct_from_user_avg_cost", "has_position",
+                "rsi",
+                "macd_line",
+                "macd_signal",
+                "macd_histogram",
+                "bb_upper",
+                "bb_middle",
+                "bb_lower",
+                "atr",
+                "vwap",
+                "ema_fast",
+                "ema_slow",
+                "orb_breakout",
+                "gap_pct",
+                "volume_ratio",
+                "outperformance_pct",
+                "nifty_correlation",
+                "pct_from_ma",
+                "pct_from_support_band",
+                "pct_from_resistance_band",
+                "pct_from_user_avg_cost",
+                "has_position",
             ]
             for col in ml_candidate_cols:
                 if col in out.columns:
@@ -425,87 +445,104 @@ class FeatureEngineer:
             return None
 
     def engineer_features_for_horizon(
-        self, stock_df: pd.DataFrame, index_df: Optional[pd.DataFrame] = None,
-        reference_deltas: Optional[ReferenceLevelDeltas] = None,
-        horizon: str = HORIZON_INTRADAY
-    ) -> Optional[pd.DataFrame]:
+        self,
+        stock_df: pd.DataFrame,
+        index_df: pd.DataFrame | None = None,
+        reference_deltas: ReferenceLevelDeltas | None = None,
+        horizon: str = HORIZON_INTRADAY,
+    ) -> pd.DataFrame | None:
         """
-        Computes features tailored to a specific horizon. 
+        Computes features tailored to a specific horizon.
         For daily and above, it drops intraday noise features (orb, vwap, gap)
         and computes macro momentum features (1M, 3M rolling returns).
         """
         out = self.engineer_features(stock_df, index_df, reference_deltas)
         if out is None:
             return None
-            
+
         if reference_deltas is None:
             # Fix pipeline leakage: populate historical rolling S/R and MA features for the level model
-            from config import HORIZON_TO_MA_PERIOD, HORIZON_TO_SR_METHOD, BOLLINGER_PERIOD, BOLLINGER_STD_DEV
-            
+            from config import BOLLINGER_PERIOD, BOLLINGER_STD_DEV, HORIZON_TO_MA_PERIOD, HORIZON_TO_SR_METHOD
+
             ma_period = HORIZON_TO_MA_PERIOD.get(horizon, 50)
             rolling_ma = out["Close"].rolling(window=ma_period, min_periods=1).mean()
             out["pct_from_ma"] = ((out["Close"] - rolling_ma) / rolling_ma) * 100.0
-            
+
             sr_method = HORIZON_TO_SR_METHOD.get(horizon, "bollinger")
             if sr_method == "bollinger":
                 sma = out["Close"].rolling(window=BOLLINGER_PERIOD, min_periods=1).mean()
                 std = out["Close"].rolling(window=BOLLINGER_PERIOD, min_periods=1).std().fillna(0)
                 upper = sma + (BOLLINGER_STD_DEV * std)
                 lower = sma - (BOLLINGER_STD_DEV * std)
-                
+
                 out["pct_from_support_band"] = np.where(
-                    out["Close"] < lower * 0.995, ((out["Close"] - lower * 0.995) / (lower * 0.995)) * 100.0,
-                    np.where(out["Close"] > lower * 1.005, ((out["Close"] - lower * 1.005) / (lower * 1.005)) * 100.0, 0.0)
+                    out["Close"] < lower * 0.995,
+                    ((out["Close"] - lower * 0.995) / (lower * 0.995)) * 100.0,
+                    np.where(
+                        out["Close"] > lower * 1.005, ((out["Close"] - lower * 1.005) / (lower * 1.005)) * 100.0, 0.0
+                    ),
                 )
                 out["pct_from_resistance_band"] = np.where(
-                    out["Close"] < upper * 0.995, ((out["Close"] - upper * 0.995) / (upper * 0.995)) * 100.0,
-                    np.where(out["Close"] > upper * 1.005, ((out["Close"] - upper * 1.005) / (upper * 1.005)) * 100.0, 0.0)
+                    out["Close"] < upper * 0.995,
+                    ((out["Close"] - upper * 0.995) / (upper * 0.995)) * 100.0,
+                    np.where(
+                        out["Close"] > upper * 1.005, ((out["Close"] - upper * 1.005) / (upper * 1.005)) * 100.0, 0.0
+                    ),
                 )
             else:
                 lookback_map = {"30D": 60, "3M": 120, "6M": 252, "1Y": 500}
                 lookback = lookback_map.get(horizon, 120)
-                
+
                 res_high = out["High"].rolling(window=lookback, min_periods=1).quantile(0.90)
                 res_low = out["High"].rolling(window=lookback, min_periods=1).quantile(0.75)
                 sup_high = out["Low"].rolling(window=lookback, min_periods=1).quantile(0.25)
                 sup_low = out["Low"].rolling(window=lookback, min_periods=1).min()
-                
+
                 out["pct_from_support_band"] = np.where(
-                    out["Close"] < sup_low, ((out["Close"] - sup_low) / sup_low) * 100.0,
-                    np.where(out["Close"] > sup_high, ((out["Close"] - sup_high) / sup_high) * 100.0, 0.0)
+                    out["Close"] < sup_low,
+                    ((out["Close"] - sup_low) / sup_low) * 100.0,
+                    np.where(out["Close"] > sup_high, ((out["Close"] - sup_high) / sup_high) * 100.0, 0.0),
                 )
                 out["pct_from_resistance_band"] = np.where(
-                    out["Close"] < res_low, ((out["Close"] - res_low) / res_low) * 100.0,
-                    np.where(out["Close"] > res_high, ((out["Close"] - res_high) / res_high) * 100.0, 0.0)
+                    out["Close"] < res_low,
+                    ((out["Close"] - res_low) / res_low) * 100.0,
+                    np.where(out["Close"] > res_high, ((out["Close"] - res_high) / res_high) * 100.0, 0.0),
                 )
-            
+
             # Re-shift the ML-safe columns to prevent lookahead
             for col in ["pct_from_ma", "pct_from_support_band", "pct_from_resistance_band"]:
                 out[f"{col}{ML_SAFE_SUFFIX}"] = out[col].shift(1)
 
         if horizon == HORIZON_INTRADAY:
             return out
-            
+
         # For non-intraday horizons (daily bars), exclude intraday-specific features
         intraday_cols = [
-            "orb_breakout", "orb_breakout_feat",
-            "orb_high", "orb_low",
-            "vwap", "vwap_feat",
-            "above_vwap", "vwap_cross_up", "vwap_cross_down",
-            "gap_pct", "gap_pct_feat", "gap_event"
+            "orb_breakout",
+            "orb_breakout_feat",
+            "orb_high",
+            "orb_low",
+            "vwap",
+            "vwap_feat",
+            "above_vwap",
+            "vwap_cross_up",
+            "vwap_cross_down",
+            "gap_pct",
+            "gap_pct_feat",
+            "gap_event",
         ]
         out.drop(columns=[c for c in intraday_cols if c in out.columns], inplace=True)
-        
+
         # Add long-horizon features
         # 1-month return (approx 21 trading days)
         out["rolling_1m_return"] = out["Close"].pct_change(periods=21) * 100.0
         # 3-month return (approx 63 trading days)
         out["rolling_3m_return"] = out["Close"].pct_change(periods=63) * 100.0
-        
+
         # Make them ML-safe
         out[f"rolling_1m_return{ML_SAFE_SUFFIX}"] = out["rolling_1m_return"].shift(1)
         out[f"rolling_3m_return{ML_SAFE_SUFFIX}"] = out["rolling_3m_return"].shift(1)
-        
+
         return out
 
 
@@ -554,20 +591,41 @@ if __name__ == "__main__":
 
         features = engineer.engineer_features(stock_df, index_df)
         basic_ok = features is not None and not features.empty
-        print(f"Feature computation ran: {'OK' if basic_ok else 'FAILED'} — rows={0 if features is None else len(features)}")
+        print(
+            f"Feature computation ran: {'OK' if basic_ok else 'FAILED'} — rows={0 if features is None else len(features)}"
+        )
 
         expected_cols = [
-            "rsi", "macd_line", "bb_upper", "atr", "vwap", "ema_fast", "orb_breakout",
-            "gap_pct", "volume_ratio", "outperformance_pct", "nifty_correlation",
-            "pct_from_ma", "pct_from_support_band", "pct_from_resistance_band",
-            "pct_from_user_avg_cost", "has_position",
-            "rsi_feat", "macd_line_feat", "vwap_feat",
-            "pct_from_ma_feat", "pct_from_support_band_feat", "pct_from_resistance_band_feat",
-            "pct_from_user_avg_cost_feat", "has_position_feat"
+            "rsi",
+            "macd_line",
+            "bb_upper",
+            "atr",
+            "vwap",
+            "ema_fast",
+            "orb_breakout",
+            "gap_pct",
+            "volume_ratio",
+            "outperformance_pct",
+            "nifty_correlation",
+            "pct_from_ma",
+            "pct_from_support_band",
+            "pct_from_resistance_band",
+            "pct_from_user_avg_cost",
+            "has_position",
+            "rsi_feat",
+            "macd_line_feat",
+            "vwap_feat",
+            "pct_from_ma_feat",
+            "pct_from_support_band_feat",
+            "pct_from_resistance_band_feat",
+            "pct_from_user_avg_cost_feat",
+            "has_position_feat",
         ]
         missing_cols = [c for c in expected_cols if c not in features.columns]
-        print(f"All expected columns present: {len(missing_cols) == 0}" +
-              (f" (missing: {missing_cols})" if missing_cols else ""))
+        print(
+            f"All expected columns present: {len(missing_cols) == 0}"
+            + (f" (missing: {missing_cols})" if missing_cols else "")
+        )
 
         # --- Critical test: NO LOOKAHEAD BIAS ---
         # Mutate only the LAST bar's Close/Volume drastically, recompute, and confirm
@@ -604,21 +662,29 @@ if __name__ == "__main__":
         stock_df_long = _build_synthetic_ohlcv(n_days=70, bars_per_day=1, seed=42)
         index_df_long = _build_synthetic_ohlcv(n_days=70, bars_per_day=1, seed=7)
         index_df_long.index = stock_df_long.index
-        
+
         features_long = engineer.engineer_features_for_horizon(
             stock_df_long, index_df_long, horizon="30D"  # Any non-INTRADAY horizon
         )
-        
+
         horizon_ok = features_long is not None and not features_long.empty
         print(f"Multi-horizon feature computation ran: {'OK' if horizon_ok else 'FAILED'}")
-        
+
         intraday_excluded = "vwap_feat" not in features_long.columns and "gap_pct_feat" not in features_long.columns
         print(f"Intraday features excluded for long horizon: {intraday_excluded}")
-        
+
         rolling_present = "rolling_3m_return_feat" in features_long.columns
         print(f"Long-horizon momentum features present: {rolling_present}")
 
-        overall_pass = basic_ok and not missing_cols and no_lookahead and rsi_in_range and horizon_ok and intraday_excluded and rolling_present
+        overall_pass = (
+            basic_ok
+            and not missing_cols
+            and no_lookahead
+            and rsi_in_range
+            and horizon_ok
+            and intraday_excluded
+            and rolling_present
+        )
         print("STATUS: PASS" if overall_pass else "STATUS: FAIL — see details above")
 
         assert overall_pass, "One or more feature_engineer.py self-test checks failed"

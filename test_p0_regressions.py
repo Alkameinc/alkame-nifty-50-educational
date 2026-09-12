@@ -1,19 +1,20 @@
-import pytest
-from datetime import datetime, date, time
+from datetime import datetime
 from zoneinfo import ZoneInfo
+
 import pandas as pd
-import numpy as np
+
+from config import HORIZON_3D, HORIZON_INTRADAY
+from data_fetcher import DataFetcher, DataStatus, MarketDataResult
+from event_classifier import EventBatchResult, EventClassifier
 
 # Imports from codebase
 from feature_engineer import FeatureEngineer
-from market_calendar import MarketCalendar, is_trading_day, is_market_open
-from runtime_validator import RuntimeValidator, CalibrationBin, CalibrationResult
 from history_manager import HistoryManager
-from predictor import PredictionSignal, Predictor, ACTION_BUY, ACTION_HOLD
-from event_classifier import EventClassifier, EventBatchResult
+from market_calendar import MarketCalendar
+from predictor import ACTION_BUY, ACTION_HOLD, PredictionSignal
+from runtime_validator import CalibrationBin, CalibrationResult, RuntimeValidator
 from scanner import OpportunityScanner, ScanSummary
-from data_fetcher import DataFetcher, DataStatus, MarketDataResult
-from config import HORIZON_INTRADAY, HORIZON_3D
+
 
 # ============================================================================
 # 1. ORB Lookahead Leakage (P0 3.2 & Invariant A)
@@ -24,13 +25,16 @@ def test_orb_lookahead_leakage_and_future_mutation_invariance():
     timestamps = pd.date_range("2026-07-14 09:15", "2026-07-14 11:00", freq="5min")
     n_bars = len(timestamps)
 
-    df1 = pd.DataFrame({
-        "Open": [100.0] * n_bars,
-        "High": [105.0] * n_bars,
-        "Low": [95.0] * n_bars,
-        "Close": [100.0] * n_bars,
-        "Volume": [1000] * n_bars,
-    }, index=timestamps)
+    df1 = pd.DataFrame(
+        {
+            "Open": [100.0] * n_bars,
+            "High": [105.0] * n_bars,
+            "Low": [95.0] * n_bars,
+            "Close": [100.0] * n_bars,
+            "Volume": [1000] * n_bars,
+        },
+        index=timestamps,
+    )
 
     # 3 bars opening range: 09:15, 09:20, 09:25 (orb_bar_count=3 by default)
     or_high1, or_low1, breakout1 = fe.compute_opening_range_breakout(df1)
@@ -61,12 +65,15 @@ def test_calibration_bin_explicit_boundary_lookup():
     rv = RuntimeValidator()
     # Construct calibration bins with an explicit gap: [0.0, 0.4] and [0.6, 1.0] (no [0.4, 0.6])
     bins = [
-        CalibrationBin(lower_bound=0.0, upper_bound=0.4, count=100, mean_predicted_confidence=0.2, empirical_accuracy=0.35),
-        CalibrationBin(lower_bound=0.6, upper_bound=1.0, count=100, mean_predicted_confidence=0.8, empirical_accuracy=0.85),
+        CalibrationBin(
+            lower_bound=0.0, upper_bound=0.4, count=100, mean_predicted_confidence=0.2, empirical_accuracy=0.35
+        ),
+        CalibrationBin(
+            lower_bound=0.6, upper_bound=1.0, count=100, mean_predicted_confidence=0.8, empirical_accuracy=0.85
+        ),
     ]
     cal_result = CalibrationResult(
-        status="SUFFICIENT", n_samples=200, expected_calibration_error=0.05,
-        is_well_calibrated=True, bins=bins
+        status="SUFFICIENT", n_samples=200, expected_calibration_error=0.05, is_well_calibrated=True, bins=bins
     )
 
     # Raw confidence in first bin
@@ -94,9 +101,17 @@ def test_calibration_isolation_by_horizon_and_model_version(tmp_path):
     hm = HistoryManager(db_path=db_path)
 
     base_sig = dict(
-        symbol="TCS", timestamp=datetime.now(), action="BUY", model_predicted_class="UP",
-        raw_confidence=0.8, risk_adjusted_confidence=0.8, calibrated_confidence=0.75,
-        agreement_fraction=0.7, downside_summary="d", upside_summary="u", reasoning=[]
+        symbol="TCS",
+        timestamp=datetime.now(),
+        action="BUY",
+        model_predicted_class="UP",
+        raw_confidence=0.8,
+        risk_adjusted_confidence=0.8,
+        calibrated_confidence=0.75,
+        agreement_fraction=0.7,
+        downside_summary="d",
+        upside_summary="u",
+        reasoning=[],
     )
 
     # 1. INTRADAY with model v1
@@ -144,10 +159,9 @@ def test_calibration_isolation_by_horizon_and_model_version(tmp_path):
 def test_data_freshness_explicit_state():
     fetcher = DataFetcher()
     result = fetcher.fetch_ohlcv("RELIANCE.NS", return_metadata=True)
-
     assert isinstance(result, MarketDataResult)
     assert result.status in [DataStatus.LIVE, DataStatus.CACHED_FRESH, DataStatus.CACHED_STALE, DataStatus.UNAVAILABLE]
-    assert result.source.upper() in ["LIVE", "CACHE", "UNAVAILABLE"]
+    assert result.source.upper() in ["LIVE", "CACHE", "UNAVAILABLE", "YAHOO", "LOCAL_CACHE", "TEST_FIXTURE"]
     if result.status == DataStatus.CACHED_STALE:
         assert result.is_stale is True
 
@@ -176,6 +190,7 @@ def test_market_calendar_unification():
 
     # Scheduler and DataFetcher agree
     from scheduler import Scheduler
+
     assert Scheduler.is_market_open(tuesday) == cal.is_market_open(tuesday)
     assert Scheduler.is_market_open(holiday) == cal.is_market_open(holiday)
 
@@ -202,24 +217,39 @@ def test_scanner_rejection_summary():
     class MockFetcher:
         def fetch_ohlcv(self, ticker, **kwargs):
             return pd.DataFrame({"Close": [100.0]})
+
         def check_staleness(self, df, ticker):
             return False
 
     class MockPred:
         def generate_multi_horizon_signal(self, symbol, **kwargs):
             from predictor import MultiHorizonSignal
+
             action = ACTION_HOLD if symbol == "INFY" else ACTION_BUY
             sig = PredictionSignal(
-                symbol=symbol, timestamp=datetime.now(), horizon=HORIZON_INTRADAY,
-                action=action, model_predicted_class="UP" if action == ACTION_BUY else "FLAT",
-                model_version="v1", feature_version="v1",
-                raw_confidence=0.8, risk_adjusted_confidence=0.8, calibrated_confidence=0.75,
-                agreement_fraction=0.8, downside_summary="", upside_summary="", reasoning=[],
-                is_safe_to_trade_live=(action == ACTION_BUY)
+                symbol=symbol,
+                timestamp=datetime.now(),
+                horizon=HORIZON_INTRADAY,
+                action=action,
+                model_predicted_class="UP" if action == ACTION_BUY else "FLAT",
+                model_version="v1",
+                feature_version="v1",
+                raw_confidence=0.8,
+                risk_adjusted_confidence=0.8,
+                calibrated_confidence=0.75,
+                agreement_fraction=0.8,
+                downside_summary="",
+                upside_summary="",
+                reasoning=[],
+                is_safe_to_trade_live=(action == ACTION_BUY),
             )
             return MultiHorizonSignal(
-                symbol=symbol, timestamp=datetime.now(), signals={HORIZON_INTRADAY: sig},
-                primary_action=action, primary_horizon=HORIZON_INTRADAY, reasoning=[]
+                symbol=symbol,
+                timestamp=datetime.now(),
+                signals={HORIZON_INTRADAY: sig},
+                primary_action=action,
+                primary_horizon=HORIZON_INTRADAY,
+                reasoning=[],
             )
 
     scanner = OpportunityScanner(predictor=MockPred(), data_fetcher=MockFetcher())
@@ -239,6 +269,7 @@ def test_scanner_rejection_summary():
 # ============================================================================
 def test_api_refresh_rate_limiting():
     from api import refresh_backtest
+
     # First refresh succeeds or attempts fetch
     res1 = refresh_backtest("RELIANCE")
 
@@ -257,12 +288,14 @@ def test_position_planner_risk_sizing():
 
     planner = PositionPlanner(portfolio_capital=10_00_000, max_position_pct=0.10)
     sig = MultiHorizonSignal(
-        symbol="RELIANCE", timestamp=datetime.now(), signals={},
-        primary_action=ACTION_BUY, primary_horizon="1D", reasoning=[]
+        symbol="RELIANCE",
+        timestamp=datetime.now(),
+        signals={},
+        primary_action=ACTION_BUY,
+        primary_horizon="1D",
+        reasoning=[],
     )
-    plan = planner.generate_plan(
-        multi_signal=sig, current_price=2500.0, ma_level=2400.0, support_level=2300.0
-    )
+    plan = planner.generate_plan(multi_signal=sig, current_price=2500.0, ma_level=2400.0, support_level=2300.0)
 
     assert plan.action == ACTION_BUY
     assert plan.planned_capital == 1_00_000.0
@@ -275,7 +308,7 @@ def test_position_planner_risk_sizing():
 # 10. Structured Scheduler Results (P1 4.10)
 # ============================================================================
 def test_scheduler_cycle_result():
-    from scheduler import Scheduler, CycleResult
+    from scheduler import CycleResult, Scheduler
 
     sched = Scheduler()
     # When data is empty, returns structured failure
@@ -310,6 +343,7 @@ def test_model_trainer_walk_forward_split():
 # ============================================================================
 def test_api_requires_authentication():
     from fastapi.testclient import TestClient
+
     from api import app
 
     client = TestClient(app)
@@ -327,6 +361,7 @@ def test_api_requires_authentication():
 # ============================================================================
 def test_api_rbac_permissions():
     from fastapi.testclient import TestClient
+
     from api import app
 
     client = TestClient(app)
@@ -344,7 +379,7 @@ def test_api_rbac_permissions():
 # 14. Strict CORS Configuration (P0-002)
 # ============================================================================
 def test_api_cors_no_wildcard_credentials():
-    from config import CORS_ALLOWED_ORIGINS, CORS_ALLOW_CREDENTIALS
+    from config import CORS_ALLOW_CREDENTIALS, CORS_ALLOWED_ORIGINS
 
     if CORS_ALLOW_CREDENTIALS:
         assert "*" not in CORS_ALLOWED_ORIGINS, "Wildcard '*' origin is prohibited when CORS credentials are enabled."
@@ -363,25 +398,23 @@ def test_no_training_label_reaches_into_test_window():
     X = pd.DataFrame({"f1_feat": range(n_samples)}, index=dates)
     y = pd.Series(["UP"] * n_samples, index=dates)
 
-    X_tr, X_te, y_tr, y_te = ModelTrainer.time_based_split(
-        X, y, test_fraction=0.20, purge_window=horizon_bars
-    )
+    X_tr, X_te, y_tr, y_te = ModelTrainer.time_based_split(X, y, test_fraction=0.20, purge_window=horizon_bars)
 
     test_start_idx = X.index.get_loc(X_te.index[0])
     train_end_idx = X.index.get_loc(X_tr.index[-1])
 
     # The gap between last train row and first test row must equal or exceed purge_window
     purge_gap = test_start_idx - train_end_idx
-    assert purge_gap >= horizon_bars + 1, (
-        f"Purge gap ({purge_gap}) must be >= {horizon_bars + 1} bars to prevent forward label leakage."
-    )
+    assert (
+        purge_gap >= horizon_bars + 1
+    ), f"Purge gap ({purge_gap}) must be >= {horizon_bars + 1} bars to prevent forward label leakage."
 
 
 # ============================================================================
 # 16. Global Risk Monitor Fail-Closed State (P0-004)
 # ============================================================================
 def test_global_risk_monitor_fails_closed_when_drivers_unavailable():
-    from global_risk_monitor import GlobalRiskMonitor, RISK_LEVEL_UNAVAILABLE
+    from global_risk_monitor import RISK_LEVEL_UNAVAILABLE, GlobalRiskMonitor
 
     class MockEmptyFetcher:
         def fetch_global_tickers(self, **kwargs):
@@ -399,8 +432,9 @@ def test_global_risk_monitor_fails_closed_when_drivers_unavailable():
 # 17. Model Artifact Provenance & Lineage (P0-006)
 # ============================================================================
 def test_model_metadata_lineage_fields(tmp_path):
-    from ensemble_manager import EnsembleManager
     import json
+
+    from ensemble_manager import EnsembleManager
 
     em = EnsembleManager()
     dummy_models = {"dummy": None}
@@ -423,14 +457,22 @@ def test_model_metadata_lineage_fields(tmp_path):
     meta_path = em._ensemble_metadata_path("TEST_LINEAGE", "INTRADAY")
     assert meta_path.exists(), "Metadata file was not created"
 
-    with open(meta_path, "r", encoding="utf-8") as f:
+    with open(meta_path, encoding="utf-8") as f:
         meta = json.load(f)
 
     # Invariants for P0-006 model lineage
     required_lineage_fields = [
-        "model_id", "symbol", "horizon", "model_version", "feature_version",
-        "trained_at", "code_commit_sha", "training_sample_count", "training_seed",
-        "feature_schema_hash", "environment"
+        "model_id",
+        "symbol",
+        "horizon",
+        "model_version",
+        "feature_version",
+        "trained_at",
+        "code_commit_sha",
+        "training_sample_count",
+        "training_seed",
+        "feature_schema_hash",
+        "environment",
     ]
     for field in required_lineage_fields:
         assert field in meta, f"Required lineage field '{field}' missing from metadata"
@@ -438,4 +480,3 @@ def test_model_metadata_lineage_fields(tmp_path):
     assert len(meta["model_id"]) > 10, "model_id must be a non-empty UUID"
     assert "python_version" in meta["environment"]
     assert "sklearn_version" in meta["environment"]
-

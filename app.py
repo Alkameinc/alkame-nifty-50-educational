@@ -1,20 +1,20 @@
 # 1. Standard library imports
 import logging
-from typing import Dict, List, Optional
+
+import pandas as pd
 
 # 2. Third-party imports
 import streamlit as st
 import streamlit.runtime as st_runtime
-import pandas as pd
 
 # 3. Local imports
-from config import NIFTY50_SYMBOLS, to_yfinance_ticker, configure_logging
+from config import NIFTY50_SYMBOLS, configure_logging, to_yfinance_ticker
 from data_fetcher import DataFetcher
-from predictor import PredictionSignal, MultiHorizonSignal, ACTION_BUY, ACTION_SELL, ACTION_HOLD
-from scheduler import Scheduler
+from event_classifier import Event
 from history_manager import HistoryManager
 from human_insight_manager import HumanInsightManager
-from event_classifier import Event
+from predictor import ACTION_BUY, ACTION_HOLD, ACTION_SELL, MultiHorizonSignal, PredictionSignal
+from scheduler import Scheduler
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 # 5. Constants
 # ---------------------------------------------------------------------------
 PAGE_TITLE = "Alkame-Nifty50"
-ACTION_EMOJI = {ACTION_BUY: "\U0001F7E2", ACTION_SELL: "\U0001F534", ACTION_HOLD: "\U0001F7E1"}
+ACTION_EMOJI = {ACTION_BUY: "\U0001f7e2", ACTION_SELL: "\U0001f534", ACTION_HOLD: "\U0001f7e1"}
 RISK_LEVEL_TO_BANNER_STYLE = {"NORMAL": "success", "ELEVATED": "warning", "CRISIS": "error", "UNAVAILABLE": "warning"}
 OVERRIDE_ACTIONS = [ACTION_BUY, ACTION_SELL, ACTION_HOLD]
 
@@ -50,7 +50,7 @@ def format_confidence_display(signal: PredictionSignal) -> str:
     )
 
 
-def format_events_for_table(events: List[Event]) -> List[dict]:
+def format_events_for_table(events: list[Event]) -> list[dict]:
     return [
         {
             "scope": e.scope,
@@ -110,8 +110,7 @@ def render_dashboard() -> None:
     refresh_backtest = st.sidebar.button("Refresh backtest / live-worthiness")
     st.sidebar.divider()
     st.sidebar.caption(
-        "A HOLD with a clear reason is a successful output, not a failure. "
-        "Downside is always shown before upside."
+        "A HOLD with a clear reason is a successful output, not a failure. " "Downside is always shown before upside."
     )
 
     # --- Global risk banner: always visible, never silently applied ---
@@ -153,7 +152,9 @@ def render_dashboard() -> None:
         st.success("Live-worthiness refreshed.")
 
     scheduler.resolve_pending_outcomes(symbol, stock_df)
-    signal = scheduler.run_one_cycle_for_symbol(symbol, stock_df, index_df, macro_events=[], corporate_events=[], news_articles=[])
+    signal = scheduler.run_one_cycle_for_symbol(
+        symbol, stock_df, index_df, macro_events=[], corporate_events=[], news_articles=[]
+    )
 
     if signal is None:
         st.error("Signal could not be generated for this stock right now.")
@@ -166,10 +167,10 @@ def render_dashboard() -> None:
             fundamentals = fetcher.fetch_stock_fundamentals(yf_ticker)
         else:
             fundamentals = DataFetcher().fetch_stock_fundamentals(yf_ticker)
-    
+
     cmp = stock_df["Close"].iloc[-1] if not stock_df.empty else 0.0
     st.subheader(f"📊 {symbol} Key Data Points & Valuation")
-    
+
     col_f1, col_f2, col_f3, col_f4 = st.columns(4)
     with col_f1:
         st.metric("Current Price (CMP)", f"₹{cmp:,.2f}")
@@ -183,14 +184,14 @@ def render_dashboard() -> None:
     with col_f4:
         st.metric("52-Week Low", fundamentals.get("fifty_two_week_low", "N/A"))
         st.metric("Dividend Yield", fundamentals.get("dividend_yield", "N/A"))
-        
+
     st.caption(f"Sector: **{fundamentals.get('sector', 'N/A')}** | Industry: **{fundamentals.get('industry', 'N/A')}**")
-    
+
     # Valuation Evaluation Card (Underpriced / Fair Priced / Overpriced)
     val_status = fundamentals.get("valuation_status", "FAIR PRICED")
     val_badge = fundamentals.get("valuation_badge", "🟡 FAIR PRICED")
     val_rationale = fundamentals.get("valuation_rationale", "Valuation metrics evaluated against baseline norms.")
-    
+
     val_box_type = "info"
     if "UNDERPRICED" in val_status:
         st.success(f"**Valuation Status: {val_badge}**\n\n{val_rationale}")
@@ -218,15 +219,23 @@ def render_dashboard() -> None:
         st.metric("Active Horizon", active_signal.horizon)
     with col_sig2:
         tgt_txt = f"₹{active_signal.target_price:,.2f}" if active_signal.target_price is not None else "N/A"
-        tgt_delta = f"{((active_signal.target_price - cmp) / cmp) * 100:+.1f}%" if active_signal.target_price and cmp > 0 else None
+        tgt_delta = (
+            f"{((active_signal.target_price - cmp) / cmp) * 100:+.1f}%"
+            if active_signal.target_price and cmp > 0
+            else None
+        )
         st.metric("Expected Target Price", tgt_txt, delta=tgt_delta)
     with col_sig3:
         stop_txt = f"₹{active_signal.stop_loss:,.2f}" if active_signal.stop_loss is not None else "N/A"
-        stop_delta = f"{((active_signal.stop_loss - cmp) / cmp) * 100:+.1f}%" if active_signal.stop_loss and cmp > 0 else None
+        stop_delta = (
+            f"{((active_signal.stop_loss - cmp) / cmp) * 100:+.1f}%" if active_signal.stop_loss and cmp > 0 else None
+        )
         st.metric("Risk Threshold / Stop Loss", stop_txt, delta=stop_delta, delta_color="inverse")
 
     if active_signal.suppressed:
-        st.info(f"**Safety Gate Active**: The raw AI model leans **{active_signal.model_predicted_class}** (confidence: {active_signal.raw_confidence:.1%}), but the final recommendation is held at **HOLD** because runtime safety checks (backtest alpha edge or historical calibration) must be proven before risking capital.")
+        st.info(
+            f"**Safety Gate Active**: The raw AI model leans **{active_signal.model_predicted_class}** (confidence: {active_signal.raw_confidence:.1%}), but the final recommendation is held at **HOLD** because runtime safety checks (backtest alpha edge or historical calibration) must be proven before risking capital."
+        )
         if active_signal.suppression_reasons:
             with st.expander("Why was this held? (Safety Gate Details)", expanded=True):
                 for reason in active_signal.suppression_reasons:
@@ -234,29 +243,43 @@ def render_dashboard() -> None:
 
     if multi_sig and len(multi_sig.signals) > 1:
         st.markdown("### ⏱️ Multi-Horizon Forecasts & Expected Price Targets")
-        
+
         # Build clean structured summary table for all horizons
         horizon_rows = []
         for h, h_sig in multi_sig.signals.items():
             action_badge = format_action_label(h_sig.action)
-            lean_badge = f"{h_sig.model_predicted_class} ↗" if h_sig.model_predicted_class == "UP" else (f"{h_sig.model_predicted_class} ↘" if h_sig.model_predicted_class == "DOWN" else f"{h_sig.model_predicted_class} ↔")
+            lean_badge = (
+                f"{h_sig.model_predicted_class} ↗"
+                if h_sig.model_predicted_class == "UP"
+                else (
+                    f"{h_sig.model_predicted_class} ↘"
+                    if h_sig.model_predicted_class == "DOWN"
+                    else f"{h_sig.model_predicted_class} ↔"
+                )
+            )
             target_str = f"₹{h_sig.target_price:,.2f}" if h_sig.target_price is not None else "N/A"
             stop_str = f"₹{h_sig.stop_loss:,.2f}" if h_sig.stop_loss is not None else "N/A"
             expected_change = ""
             if h_sig.target_price is not None and cmp > 0:
                 chg = ((h_sig.target_price - cmp) / cmp) * 100.0
                 expected_change = f" ({chg:+.1f}%)"
-            
-            horizon_rows.append({
-                "Horizon": h,
-                "Action": action_badge,
-                "Model Lean": lean_badge,
-                "Expected Target": f"{target_str}{expected_change}",
-                "Risk Threshold / Stop": stop_str,
-                "AI Confidence": f"{h_sig.raw_confidence:.0%}",
-                "Safety Gate": "Safe to Trade" if h_sig.is_safe_to_trade_live and not h_sig.suppressed else "Held (Educational)",
-            })
-            
+
+            horizon_rows.append(
+                {
+                    "Horizon": h,
+                    "Action": action_badge,
+                    "Model Lean": lean_badge,
+                    "Expected Target": f"{target_str}{expected_change}",
+                    "Risk Threshold / Stop": stop_str,
+                    "AI Confidence": f"{h_sig.raw_confidence:.0%}",
+                    "Safety Gate": (
+                        "Safe to Trade"
+                        if h_sig.is_safe_to_trade_live and not h_sig.suppressed
+                        else "Held (Educational)"
+                    ),
+                }
+            )
+
         st.dataframe(pd.DataFrame(horizon_rows), use_container_width=True, hide_index=True)
 
     st.markdown("**Downside — read this first:**")
@@ -342,21 +365,43 @@ if __name__ == "__main__":
         buy_label = format_action_label(ACTION_BUY)
         sell_label = format_action_label(ACTION_SELL)
         hold_label = format_action_label(ACTION_HOLD)
-        print(f"Action labels: BUY='{buy_label.encode('ascii', 'ignore').decode()}', SELL='{sell_label.encode('ascii', 'ignore').decode()}', HOLD='{hold_label.encode('ascii', 'ignore').decode()}'")
+        print(
+            f"Action labels: BUY='{buy_label.encode('ascii', 'ignore').decode()}', SELL='{sell_label.encode('ascii', 'ignore').decode()}', HOLD='{hold_label.encode('ascii', 'ignore').decode()}'"
+        )
         assert "BUY" in buy_label and "SELL" in sell_label and "HOLD" in hold_label
 
         # format_confidence_display — must never show a raw number when uncalibrated
         signal_calibrated = PredictionSignal(
-            symbol="TEST", timestamp=datetime.now(), horizon="INTRADAY", action=ACTION_BUY, model_predicted_class="UP",
-            model_version="UNKNOWN", feature_version="UNKNOWN",
-            raw_confidence=0.8, risk_adjusted_confidence=0.8, calibrated_confidence=0.75, agreement_fraction=0.66,
-            downside_summary="d", upside_summary="u", reasoning=[],
+            symbol="TEST",
+            timestamp=datetime.now(),
+            horizon="INTRADAY",
+            action=ACTION_BUY,
+            model_predicted_class="UP",
+            model_version="UNKNOWN",
+            feature_version="UNKNOWN",
+            raw_confidence=0.8,
+            risk_adjusted_confidence=0.8,
+            calibrated_confidence=0.75,
+            agreement_fraction=0.66,
+            downside_summary="d",
+            upside_summary="u",
+            reasoning=[],
         )
         signal_uncalibrated = PredictionSignal(
-            symbol="TEST", timestamp=datetime.now(), horizon="INTRADAY", action=ACTION_BUY, model_predicted_class="UP",
-            model_version="UNKNOWN", feature_version="UNKNOWN",
-            raw_confidence=0.8, risk_adjusted_confidence=0.8, calibrated_confidence=None, agreement_fraction=0.66,
-            downside_summary="d", upside_summary="u", reasoning=[],
+            symbol="TEST",
+            timestamp=datetime.now(),
+            horizon="INTRADAY",
+            action=ACTION_BUY,
+            model_predicted_class="UP",
+            model_version="UNKNOWN",
+            feature_version="UNKNOWN",
+            raw_confidence=0.8,
+            risk_adjusted_confidence=0.8,
+            calibrated_confidence=None,
+            agreement_fraction=0.66,
+            downside_summary="d",
+            upside_summary="u",
+            reasoning=[],
         )
         calibrated_display = format_confidence_display(signal_calibrated)
         uncalibrated_display = format_confidence_display(signal_uncalibrated)
@@ -368,9 +413,17 @@ if __name__ == "__main__":
 
         # format_events_for_table
         test_event = Event(
-            event_id="E1", source="NEWS", event_type="NEWS_HEADLINE", timestamp=datetime.now(),
-            scope="STOCK", affected_tickers=["TEST"], sector=None, confidence_in_scope=1.0,
-            headline_or_label="Test headline", sentiment_score=0.3, magnitude_estimate="MEDIUM",
+            event_id="E1",
+            source="NEWS",
+            event_type="NEWS_HEADLINE",
+            timestamp=datetime.now(),
+            scope="STOCK",
+            affected_tickers=["TEST"],
+            sector=None,
+            confidence_in_scope=1.0,
+            headline_or_label="Test headline",
+            sentiment_score=0.3,
+            magnitude_estimate="MEDIUM",
         )
         table_rows = format_events_for_table([test_event])
         print(f"Events table row: {table_rows}")
@@ -401,7 +454,4 @@ if __name__ == "__main__":
     if st_runtime.exists():
         render_dashboard()
     else:
-        print(
-            "\n(Self-test complete. To actually use the dashboard, run: "
-            "streamlit run app.py)"
-        )
+        print("\n(Self-test complete. To actually use the dashboard, run: " "streamlit run app.py)")

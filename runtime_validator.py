@@ -1,7 +1,6 @@
 # 1. Standard library imports
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 
 # 2. Third-party imports
 import numpy as np
@@ -9,11 +8,10 @@ import pandas as pd
 
 # 3. Local imports
 from config import (
-    MIN_CALIBRATION_SAMPLES,
-    CALIBRATION_N_BINS,
     CALIBRATION_ECE_THRESHOLD,
+    CALIBRATION_N_BINS,
     EDGE_CHECK_MIN_ALPHA_PCT,
-    SLIPPAGE_BPS,
+    MIN_CALIBRATION_SAMPLES,
     SLIPPAGE_BPS,
     TRANSACTION_COST_BPS,
     configure_logging,
@@ -38,22 +36,22 @@ STATUS_CALIBRATION_STALE = "CALIBRATION_STALE"
 
 @dataclass
 class DriftCheckResult:
-    status: str                         # STABLE | DRIFT_DETECTED | INSUFFICIENT_DATA
+    status: str  # STABLE | DRIFT_DETECTED | INSUFFICIENT_DATA
     drift_detected: bool
-    confidence_psi: float               # Population Stability Index
-    ks_statistic: float                # Kolmogorov-Smirnov statistic
-    class_variation_distance: float    # Max absolute class frequency shift
-    reasons: List[str] = field(default_factory=list)
+    confidence_psi: float  # Population Stability Index
+    ks_statistic: float  # Kolmogorov-Smirnov statistic
+    class_variation_distance: float  # Max absolute class frequency shift
+    reasons: list[str] = field(default_factory=list)
 
 
 @dataclass
 class FreshnessCheckResult:
-    status: str                         # FRESH | CALIBRATION_STALE | INSUFFICIENT_DATA
+    status: str  # FRESH | CALIBRATION_STALE | INSUFFICIENT_DATA
     is_fresh: bool
     recent_sample_count: int
-    oldest_sample_age_days: Optional[float]
-    newest_sample_age_days: Optional[float]
-    reasons: List[str] = field(default_factory=list)
+    oldest_sample_age_days: float | None
+    newest_sample_age_days: float | None
+    reasons: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -67,16 +65,16 @@ class CalibrationBin:
 
 @dataclass
 class CalibrationResult:
-    status: str                      # SUFFICIENT | INSUFFICIENT_DATA
+    status: str  # SUFFICIENT | INSUFFICIENT_DATA
     n_samples: int
-    expected_calibration_error: Optional[float]
+    expected_calibration_error: float | None
     is_well_calibrated: bool
-    bins: List[CalibrationBin] = field(default_factory=list)
+    bins: list[CalibrationBin] = field(default_factory=list)
 
 
 @dataclass
 class EdgeCheckResult:
-    status: str                          # EDGE_CONFIRMED | NO_EDGE
+    status: str  # EDGE_CONFIRMED | NO_EDGE
     n_periods: int
     strategy_cumulative_return_pct: float
     baseline_cumulative_return_pct: float
@@ -90,7 +88,7 @@ class EdgeCheckResult:
 class LiveGateResult:
     safe_to_show_calibrated_confidence: bool
     safe_to_treat_as_live_edge: bool
-    reasons: List[str]
+    reasons: list[str]
 
 
 # ---------------------------------------------------------------------------
@@ -142,8 +140,11 @@ class RuntimeValidator:
                     "must be treated as unverified until more history accumulates."
                 )
                 return CalibrationResult(
-                    status=STATUS_INSUFFICIENT_DATA, n_samples=n_samples,
-                    expected_calibration_error=None, is_well_calibrated=False, bins=[],
+                    status=STATUS_INSUFFICIENT_DATA,
+                    n_samples=n_samples,
+                    expected_calibration_error=None,
+                    is_well_calibrated=False,
+                    bins=[],
                 )
 
             df = predictions_df.copy()
@@ -151,40 +152,56 @@ class RuntimeValidator:
             bin_edges = np.linspace(0.0, 1.0, self.n_bins + 1)
             df["bin"] = pd.cut(df["confidence"], bins=bin_edges, include_lowest=True)
 
-            bins: List[CalibrationBin] = []
+            bins: list[CalibrationBin] = []
             ece = 0.0
             for bin_range, group in df.groupby("bin", observed=False):
                 count = len(group)
                 if count == 0:
-                    bins.append(CalibrationBin(
-                        lower_bound=float(bin_range.left), upper_bound=float(bin_range.right), count=0,
-                        mean_predicted_confidence=0.0, empirical_accuracy=0.0,
-                    ))
+                    bins.append(
+                        CalibrationBin(
+                            lower_bound=float(bin_range.left),
+                            upper_bound=float(bin_range.right),
+                            count=0,
+                            mean_predicted_confidence=0.0,
+                            empirical_accuracy=0.0,
+                        )
+                    )
                     continue
                 mean_conf = float(group["confidence"].mean())
                 empirical_acc = float(group["correct"].mean())
-                bins.append(CalibrationBin(
-                    lower_bound=float(bin_range.left), upper_bound=float(bin_range.right), count=count,
-                    mean_predicted_confidence=mean_conf, empirical_accuracy=empirical_acc,
-                ))
+                bins.append(
+                    CalibrationBin(
+                        lower_bound=float(bin_range.left),
+                        upper_bound=float(bin_range.right),
+                        count=count,
+                        mean_predicted_confidence=mean_conf,
+                        empirical_accuracy=empirical_acc,
+                    )
+                )
                 ece += (count / n_samples) * abs(mean_conf - empirical_acc)
 
             is_well_calibrated = ece <= self.ece_threshold
             health_registry.report("runtime_validator", ok=True, detail="Calibration computed")
             return CalibrationResult(
-                status=STATUS_SUFFICIENT, n_samples=n_samples,
-                expected_calibration_error=ece, is_well_calibrated=is_well_calibrated, bins=bins,
+                status=STATUS_SUFFICIENT,
+                n_samples=n_samples,
+                expected_calibration_error=ece,
+                is_well_calibrated=is_well_calibrated,
+                bins=bins,
             )
 
         except Exception as e:
             logger.error(f"Failed computing calibration: {e}")
             health_registry.report("runtime_validator", ok=False, detail="Failed computing calibration", error=str(e))
             return CalibrationResult(
-                status=STATUS_INSUFFICIENT_DATA, n_samples=len(predictions_df) if predictions_df is not None else 0,
-                expected_calibration_error=None, is_well_calibrated=False, bins=[],
+                status=STATUS_INSUFFICIENT_DATA,
+                n_samples=len(predictions_df) if predictions_df is not None else 0,
+                expected_calibration_error=None,
+                is_well_calibrated=False,
+                bins=[],
             )
 
-    def get_calibrated_confidence(self, raw_confidence: float, calibration_result: CalibrationResult) -> Optional[float]:
+    def get_calibrated_confidence(self, raw_confidence: float, calibration_result: CalibrationResult) -> float | None:
         """
         Returns the historically-observed empirical accuracy for the bin that
         raw_confidence falls into — i.e. what confidence SHOULD actually be
@@ -196,20 +213,23 @@ class RuntimeValidator:
                 return None
             raw_confidence = max(0.0, min(1.0, raw_confidence))
             health_registry.report("runtime_validator", ok=True)
-            
+
             target_bin = None
             for b in calibration_result.bins:
-                if (raw_confidence > b.lower_bound and raw_confidence <= b.upper_bound) or \
-                   (raw_confidence == 0.0 and b.lower_bound == 0.0):
+                if (raw_confidence > b.lower_bound and raw_confidence <= b.upper_bound) or (
+                    raw_confidence == 0.0 and b.lower_bound == 0.0
+                ):
                     target_bin = b
                     break
-                    
+
             if target_bin is None or target_bin.count == 0:
                 return None
             return target_bin.empirical_accuracy
         except Exception as e:
             logger.error(f"Failed getting calibrated confidence for raw={raw_confidence}: {e}")
-            health_registry.report("runtime_validator", ok=False, detail="Failed getting calibrated confidence", error=str(e))
+            health_registry.report(
+                "runtime_validator", ok=False, detail="Failed getting calibrated confidence", error=str(e)
+            )
             return None
 
     # -----------------------------------------------------------------
@@ -234,8 +254,11 @@ class RuntimeValidator:
             if n_periods == 0:
                 logger.error("No overlapping periods between strategy and baseline returns.")
                 return EdgeCheckResult(
-                    status=STATUS_NO_EDGE, n_periods=0,
-                    strategy_cumulative_return_pct=0.0, baseline_cumulative_return_pct=0.0, alpha_pct=0.0,
+                    status=STATUS_NO_EDGE,
+                    n_periods=0,
+                    strategy_cumulative_return_pct=0.0,
+                    baseline_cumulative_return_pct=0.0,
+                    alpha_pct=0.0,
                 )
 
             total_cost_pct = (slippage_bps + transaction_cost_bps) / 100.0  # bps -> %
@@ -259,7 +282,8 @@ class RuntimeValidator:
             status = STATUS_EDGE_CONFIRMED if alpha > self.min_alpha_pct else STATUS_NO_EDGE
             health_registry.report("runtime_validator", ok=True, detail="Edge check computed")
             return EdgeCheckResult(
-                status=status, n_periods=n_periods,
+                status=status,
+                n_periods=n_periods,
                 strategy_cumulative_return_pct=float(strategy_cum),
                 baseline_cumulative_return_pct=float(baseline_cum),
                 alpha_pct=float(alpha),
@@ -272,8 +296,11 @@ class RuntimeValidator:
             logger.error(f"Failed computing edge vs baseline: {e}")
             health_registry.report("runtime_validator", ok=False, detail="Failed computing edge", error=str(e))
             return EdgeCheckResult(
-                status=STATUS_NO_EDGE, n_periods=0,
-                strategy_cumulative_return_pct=0.0, baseline_cumulative_return_pct=0.0, alpha_pct=0.0,
+                status=STATUS_NO_EDGE,
+                n_periods=0,
+                strategy_cumulative_return_pct=0.0,
+                baseline_cumulative_return_pct=0.0,
+                alpha_pct=0.0,
             )
 
     # -----------------------------------------------------------------
@@ -282,11 +309,9 @@ class RuntimeValidator:
     def validate_before_live(
         self, calibration_result: CalibrationResult, edge_check_result: EdgeCheckResult
     ) -> LiveGateResult:
-        reasons: List[str] = []
+        reasons: list[str] = []
 
-        safe_confidence = (
-            calibration_result.status == STATUS_SUFFICIENT and calibration_result.is_well_calibrated
-        )
+        safe_confidence = calibration_result.status == STATUS_SUFFICIENT and calibration_result.is_well_calibrated
         if calibration_result.status == STATUS_INSUFFICIENT_DATA:
             reasons.append(
                 f"Only {calibration_result.n_samples} historical predictions available "
@@ -356,13 +381,23 @@ class RuntimeValidator:
         psi = float(np.sum((rec_dist - ref_dist) * np.log(rec_dist / ref_dist)))
 
         from scipy.stats import ks_2samp
+
         ks_res = ks_2samp(rec_conf, ref_conf)
         ks_stat = float(ks_res.statistic)
 
         class_var_dist = 0.0
-        class_col = next((c for c in ["predicted_class", "action", "model_predicted_class"] if c in recent_df.columns and c in reference_df.columns), None)
+        class_col = next(
+            (
+                c
+                for c in ["predicted_class", "action", "model_predicted_class"]
+                if c in recent_df.columns and c in reference_df.columns
+            ),
+            None,
+        )
         if class_col:
-            all_classes = set(recent_df[class_col].dropna().unique()).union(set(reference_df[class_col].dropna().unique()))
+            all_classes = set(recent_df[class_col].dropna().unique()).union(
+                set(reference_df[class_col].dropna().unique())
+            )
             rec_vc = recent_df[class_col].value_counts(normalize=True)
             ref_vc = reference_df[class_col].value_counts(normalize=True)
             diffs = [abs(rec_vc.get(c, 0.0) - ref_vc.get(c, 0.0)) for c in all_classes]
@@ -374,7 +409,9 @@ class RuntimeValidator:
         if ks_stat > 0.35:
             reasons.append(f"Confidence KS statistic={ks_stat:.3f} indicates significant distribution shift.")
         if class_var_dist > 0.3:
-            reasons.append(f"Class distribution variation distance={class_var_dist:.3f} indicates significant regime shift.")
+            reasons.append(
+                f"Class distribution variation distance={class_var_dist:.3f} indicates significant regime shift."
+            )
 
         status = STATUS_DRIFT_DETECTED if drift else STATUS_STABLE
         if not drift:
@@ -506,16 +543,20 @@ if __name__ == "__main__":
         # Test 2: well-calibrated predictions -> low ECE, is_well_calibrated True
         good_df = _build_well_calibrated_predictions(n=1000)
         good_result = validator.compute_calibration(good_df)
-        print(f"Well-calibrated case -> status={good_result.status}, ECE={good_result.expected_calibration_error:.4f}, "
-              f"is_well_calibrated={good_result.is_well_calibrated}")
+        print(
+            f"Well-calibrated case -> status={good_result.status}, ECE={good_result.expected_calibration_error:.4f}, "
+            f"is_well_calibrated={good_result.is_well_calibrated}"
+        )
         assert good_result.status == STATUS_SUFFICIENT
         assert good_result.is_well_calibrated is True
 
         # Test 3: overconfident predictions -> high ECE, is_well_calibrated False
         bad_df = _build_overconfident_predictions(n=1000)
         bad_result = validator.compute_calibration(bad_df)
-        print(f"Overconfident case -> status={bad_result.status}, ECE={bad_result.expected_calibration_error:.4f}, "
-              f"is_well_calibrated={bad_result.is_well_calibrated}")
+        print(
+            f"Overconfident case -> status={bad_result.status}, ECE={bad_result.expected_calibration_error:.4f}, "
+            f"is_well_calibrated={bad_result.is_well_calibrated}"
+        )
         assert bad_result.is_well_calibrated is False
         assert bad_result.expected_calibration_error > good_result.expected_calibration_error
 
@@ -532,23 +573,30 @@ if __name__ == "__main__":
         strategy_returns = pd.Series(rng.normal(0.15, 0.3, size=100), index=dates)  # positive drift
         baseline_returns = pd.Series(rng.normal(0.02, 0.3, size=100), index=dates)  # smaller drift
         edge_result_positive = validator.compute_edge_vs_baseline(strategy_returns, baseline_returns)
-        print(f"Positive-edge case -> alpha={edge_result_positive.alpha_pct:.2f}%, status={edge_result_positive.status}")
+        print(
+            f"Positive-edge case -> alpha={edge_result_positive.alpha_pct:.2f}%, status={edge_result_positive.status}"
+        )
         assert edge_result_positive.status == STATUS_EDGE_CONFIRMED
 
         # Test 6: edge check — strategy has NO real edge (identical distribution to baseline, heavy costs)
         no_edge_strategy = pd.Series(rng.normal(0.02, 0.3, size=100), index=dates)
-        edge_result_negative = validator.compute_edge_vs_baseline(no_edge_strategy, baseline_returns,
-                                                                    slippage_bps=50, transaction_cost_bps=50)
+        edge_result_negative = validator.compute_edge_vs_baseline(
+            no_edge_strategy, baseline_returns, slippage_bps=50, transaction_cost_bps=50
+        )
         print(f"No-edge case -> alpha={edge_result_negative.alpha_pct:.2f}%, status={edge_result_negative.status}")
         assert edge_result_negative.status == STATUS_NO_EDGE
 
         # Test 7: combined gate
         gate_good = validator.validate_before_live(good_result, edge_result_positive)
         gate_bad = validator.validate_before_live(bad_result, edge_result_negative)
-        print(f"Combined gate (good calibration + positive edge): show_confidence={gate_good.safe_to_show_calibrated_confidence}, "
-              f"live_edge={gate_good.safe_to_treat_as_live_edge}")
-        print(f"Combined gate (bad calibration + no edge): show_confidence={gate_bad.safe_to_show_calibrated_confidence}, "
-              f"live_edge={gate_bad.safe_to_treat_as_live_edge}")
+        print(
+            f"Combined gate (good calibration + positive edge): show_confidence={gate_good.safe_to_show_calibrated_confidence}, "
+            f"live_edge={gate_good.safe_to_treat_as_live_edge}"
+        )
+        print(
+            f"Combined gate (bad calibration + no edge): show_confidence={gate_bad.safe_to_show_calibrated_confidence}, "
+            f"live_edge={gate_bad.safe_to_treat_as_live_edge}"
+        )
         assert gate_good.safe_to_show_calibrated_confidence is True and gate_good.safe_to_treat_as_live_edge is True
         assert gate_bad.safe_to_show_calibrated_confidence is False and gate_bad.safe_to_treat_as_live_edge is False
 

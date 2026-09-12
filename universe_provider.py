@@ -2,16 +2,16 @@
 import hashlib
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Dict, List, Optional
 
 # 2. Local imports
-from config import DATA_DIR, configure_logging
+from config import configure_logging
 
 # 3. Logger setup
 logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Models & Provider
@@ -21,10 +21,10 @@ class UniverseSnapshot:
     index_name: str
     version: str
     effective_from: str
-    effective_to: Optional[str]
+    effective_to: str | None
     source: str
     total_constituents: int
-    constituents: List[str]
+    constituents: list[str]
     checksum: str
 
 
@@ -35,13 +35,13 @@ class UniverseProvider:
     and SHA-256 integrity checksums.
     """
 
-    def __init__(self, universe_dir: Optional[Path] = None):
+    def __init__(self, universe_dir: Path | None = None):
         self.universe_dir = universe_dir or (Path(__file__).parent / "data" / "universe")
-        self._snapshots: Dict[str, UniverseSnapshot] = {}
-        self._active_version: Optional[str] = None
+        self._snapshots: dict[str, UniverseSnapshot] = {}
+        self._active_version: str | None = None
         self.load_universes()
 
-    def _compute_checksum(self, constituents: List[str]) -> str:
+    def _compute_checksum(self, constituents: list[str]) -> str:
         data_str = ",".join(sorted(constituents))
         return hashlib.sha256(data_str.encode("utf-8")).hexdigest()
 
@@ -54,7 +54,7 @@ class UniverseProvider:
         json_files = list(self.universe_dir.glob("nifty50_constituents_*.json"))
         for fpath in sorted(json_files):
             try:
-                with open(fpath, "r", encoding="utf-8-sig") as f:
+                with open(fpath, encoding="utf-8-sig") as f:
                     data = json.load(f)
 
                 version = data.get("version", "1.0")
@@ -73,11 +73,13 @@ class UniverseProvider:
                 )
                 self._snapshots[version] = snapshot
                 self._active_version = version
-                logger.info(f"Loaded universe {snapshot.index_name} v{version} ({len(constituents)} constituents, checksum: {checksum[:8]}...)")
+                logger.info(
+                    f"Loaded universe {snapshot.index_name} v{version} ({len(constituents)} constituents, checksum: {checksum[:8]}...)"
+                )
             except Exception as e:
                 logger.error(f"Failed loading universe file {fpath}: {e}")
 
-    def get_constituents(self, version: Optional[str] = None, as_of_date: Optional[date] = None) -> List[str]:
+    def get_constituents(self, version: str | None = None, as_of_date: date | None = None) -> list[str]:
         """Return the list of constituents for a given version or the latest active universe."""
         target_version = version or self._active_version
         if target_version and target_version in self._snapshots:
@@ -90,9 +92,10 @@ class UniverseProvider:
 
         # Default hardcoded fallback
         from config import NIFTY50_SYMBOLS
+
         return list(NIFTY50_SYMBOLS)
 
-    def get_snapshot(self, version: Optional[str] = None) -> Optional[UniverseSnapshot]:
+    def get_snapshot(self, version: str | None = None) -> UniverseSnapshot | None:
         target_version = version or self._active_version
         return self._snapshots.get(target_version) if target_version else None
 
@@ -111,7 +114,8 @@ class UniverseProvider:
 # Global default instance
 universe_provider = UniverseProvider()
 
-def get_nifty50_constituents() -> List[str]:
+
+def get_nifty50_constituents() -> list[str]:
     return universe_provider.get_constituents()
 
 

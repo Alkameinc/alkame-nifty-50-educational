@@ -1,8 +1,8 @@
 # 1. Standard library imports
-import os
 import logging
-from pathlib import Path
+import os
 from datetime import time as dt_time
+from pathlib import Path
 
 # 2. Third-party imports
 # (none required for config itself; kept dependency-free on purpose)
@@ -91,13 +91,13 @@ CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.environ.get(
         "ALKAME_CORS_ORIGINS",
-        "http://localhost:8501,http://127.0.0.1:8501,http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000"
+        "http://localhost:8501,http://127.0.0.1:8501,http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000",
     ).split(",")
     if origin.strip()
 ]
 CORS_ALLOW_CREDENTIALS = True
 
-REQUIRED_ENV_VARS = ["MARKETAUX_API_KEY"]   # IMD key is optional (monsoon feature degrades gracefully without it)
+REQUIRED_ENV_VARS = ["MARKETAUX_API_KEY"]  # IMD key is optional (monsoon feature degrades gracefully without it)
 
 
 # --- NIFTY 50 universe ----------------------------------------------------
@@ -107,18 +107,61 @@ REQUIRED_ENV_VARS = ["MARKETAUX_API_KEY"]   # IMD key is optional (monsoon featu
 
 # Fallback static constituent list (50 stocks)
 _DEFAULT_NIFTY50_SYMBOLS = [
-    "RELIANCE", "HDFCBANK", "ICICIBANK", "INFY", "TCS", "BHARTIARTL", "SBIN",
-    "LT", "ITC", "HINDUNILVR", "BAJFINANCE", "KOTAKBANK", "AXISBANK", "MARUTI",
-    "SUNPHARMA", "TITAN", "ULTRACEMCO", "NTPC", "HCLTECH", "ONGC", "ADANIENT",
-    "ADANIPORTS", "M&M", "COALINDIA", "ASIANPAINT", "BAJAJFINSV", "WIPRO",
-    "NESTLEIND", "POWERGRID", "JSWSTEEL", "TATASTEEL", "GRASIM",
-    "TECHM", "HINDALCO", "CIPLA", "DRREDDY", "EICHERMOT", "BRITANNIA",
-    "DIVISLAB", "BPCL", "HEROMOTOCO", "APOLLOHOSP", "SBILIFE", "HDFCLIFE",
-    "INDUSINDBK", "BAJAJ-AUTO", "TATAMOTORS", "SHRIRAMFIN", "TATACONSUM", "BEL",
+    "RELIANCE",
+    "HDFCBANK",
+    "ICICIBANK",
+    "INFY",
+    "TCS",
+    "BHARTIARTL",
+    "SBIN",
+    "LT",
+    "ITC",
+    "HINDUNILVR",
+    "BAJFINANCE",
+    "KOTAKBANK",
+    "AXISBANK",
+    "MARUTI",
+    "SUNPHARMA",
+    "TITAN",
+    "ULTRACEMCO",
+    "NTPC",
+    "HCLTECH",
+    "ONGC",
+    "ADANIENT",
+    "ADANIPORTS",
+    "M&M",
+    "COALINDIA",
+    "ASIANPAINT",
+    "BAJAJFINSV",
+    "WIPRO",
+    "NESTLEIND",
+    "POWERGRID",
+    "JSWSTEEL",
+    "TATASTEEL",
+    "GRASIM",
+    "TECHM",
+    "HINDALCO",
+    "CIPLA",
+    "DRREDDY",
+    "EICHERMOT",
+    "BRITANNIA",
+    "DIVISLAB",
+    "BPCL",
+    "HEROMOTOCO",
+    "APOLLOHOSP",
+    "SBILIFE",
+    "HDFCLIFE",
+    "INDUSINDBK",
+    "BAJAJ-AUTO",
+    "TATAMOTORS",
+    "SHRIRAMFIN",
+    "TATACONSUM",
+    "BEL",
 ]
 
 try:
     from universe_provider import universe_provider
+
     NIFTY50_SYMBOLS = universe_provider.get_constituents()
     if not NIFTY50_SYMBOLS:
         NIFTY50_SYMBOLS = _DEFAULT_NIFTY50_SYMBOLS
@@ -140,27 +183,61 @@ NIFTY_INDEX_TICKER = "^NSEI"  # NIFTY 50 index itself, used as the baseline for 
 
 # --- Sector mapping (used by event_classifier.py for SECTOR-scope tagging) ---
 _DEFAULT_SECTOR_MAP = {
-    "RELIANCE": "Energy", "ONGC": "Energy", "BPCL": "Energy", "COALINDIA": "Energy",
-    "NTPC": "Power", "POWERGRID": "Power", "ADANIENT": "Conglomerate", "ADANIPORTS": "Infra",
-    "HDFCBANK": "Banking", "ICICIBANK": "Banking", "SBIN": "Banking", "KOTAKBANK": "Banking",
-    "AXISBANK": "Banking", "INDUSINDBK": "Banking",
-    "BAJFINANCE": "NBFC", "BAJAJFINSV": "NBFC", "SHRIRAMFIN": "NBFC",
-    "SBILIFE": "Insurance", "HDFCLIFE": "Insurance",
-    "INFY": "IT", "TCS": "IT", "HCLTECH": "IT", "WIPRO": "IT", "TECHM": "IT",
+    "RELIANCE": "Energy",
+    "ONGC": "Energy",
+    "BPCL": "Energy",
+    "COALINDIA": "Energy",
+    "NTPC": "Power",
+    "POWERGRID": "Power",
+    "ADANIENT": "Conglomerate",
+    "ADANIPORTS": "Infra",
+    "HDFCBANK": "Banking",
+    "ICICIBANK": "Banking",
+    "SBIN": "Banking",
+    "KOTAKBANK": "Banking",
+    "AXISBANK": "Banking",
+    "INDUSINDBK": "Banking",
+    "BAJFINANCE": "NBFC",
+    "BAJAJFINSV": "NBFC",
+    "SHRIRAMFIN": "NBFC",
+    "SBILIFE": "Insurance",
+    "HDFCLIFE": "Insurance",
+    "INFY": "IT",
+    "TCS": "IT",
+    "HCLTECH": "IT",
+    "WIPRO": "IT",
+    "TECHM": "IT",
     "BHARTIARTL": "Telecom",
-    "LT": "Infra", "ULTRACEMCO": "Cement", "GRASIM": "Cement",
-    "ITC": "FMCG", "HINDUNILVR": "FMCG", "NESTLEIND": "FMCG", "BRITANNIA": "FMCG", "TATACONSUM": "FMCG",
-    "MARUTI": "Auto", "M&M": "Auto", "EICHERMOT": "Auto", "TATAMOTORS": "Auto",
-    "HEROMOTOCO": "Auto", "BAJAJ-AUTO": "Auto",
-    "SUNPHARMA": "Pharma", "CIPLA": "Pharma", "DRREDDY": "Pharma", "DIVISLAB": "Pharma",
+    "LT": "Infra",
+    "ULTRACEMCO": "Cement",
+    "GRASIM": "Cement",
+    "ITC": "FMCG",
+    "HINDUNILVR": "FMCG",
+    "NESTLEIND": "FMCG",
+    "BRITANNIA": "FMCG",
+    "TATACONSUM": "FMCG",
+    "MARUTI": "Auto",
+    "M&M": "Auto",
+    "EICHERMOT": "Auto",
+    "TATAMOTORS": "Auto",
+    "HEROMOTOCO": "Auto",
+    "BAJAJ-AUTO": "Auto",
+    "SUNPHARMA": "Pharma",
+    "CIPLA": "Pharma",
+    "DRREDDY": "Pharma",
+    "DIVISLAB": "Pharma",
     "APOLLOHOSP": "Healthcare",
-    "TITAN": "ConsumerDurables", "ASIANPAINT": "ConsumerDurables",
-    "JSWSTEEL": "Metals", "TATASTEEL": "Metals", "HINDALCO": "Metals",
+    "TITAN": "ConsumerDurables",
+    "ASIANPAINT": "ConsumerDurables",
+    "JSWSTEEL": "Metals",
+    "TATASTEEL": "Metals",
+    "HINDALCO": "Metals",
     "BEL": "CapitalGoods",
 }
 
 try:
     from sector_provider import sector_map_provider
+
     SECTOR_MAP = sector_map_provider.get_full_sector_dict()
     if not SECTOR_MAP:
         SECTOR_MAP = _DEFAULT_SECTOR_MAP
@@ -170,9 +247,9 @@ except Exception:
 # Sectors considered exposed to specific macro/global-risk triggers.
 # Used by global_risk_monitor.py and event_classifier.py to scope MARKET-level events
 # down to the sectors actually affected, instead of blanket-tagging all 50 stocks.
-CRUDE_SENSITIVE_SECTORS = ["Energy", "Auto"]           # importers hurt, oil producers mixed
-INR_WEAKNESS_BENEFICIARY_SECTORS = ["IT", "Pharma"]     # exporters benefit from weak INR
-INR_WEAKNESS_HURT_SECTORS = ["Energy", "Auto"]          # importers hurt by weak INR
+CRUDE_SENSITIVE_SECTORS = ["Energy", "Auto"]  # importers hurt, oil producers mixed
+INR_WEAKNESS_BENEFICIARY_SECTORS = ["IT", "Pharma"]  # exporters benefit from weak INR
+INR_WEAKNESS_HURT_SECTORS = ["Energy", "Auto"]  # importers hurt by weak INR
 MONSOON_SENSITIVE_SECTORS = ["FMCG", "Auto", "Agrochemicals"]
 RATE_SENSITIVE_SECTORS = ["Banking", "NBFC", "Insurance", "ConsumerDurables", "Auto"]
 
@@ -196,15 +273,15 @@ PRE_MARKET_OPEN_TIME = dt_time(9, 0)
 MARKET_TIMEZONE = "Asia/Kolkata"
 
 # --- Data fetch parameters -------------------------------------------------
-BAR_INTERVAL = "5m"          # 5-minute bars: ~60-day history, stable. Change to "1m" for finer/shorter history.
+BAR_INTERVAL = "5m"  # 5-minute bars: ~60-day history, stable. Change to "1m" for finer/shorter history.
 BAR_HISTORY_PERIOD = "60d"
-DATA_STALENESS_THRESHOLD_MINUTES = 15   # if last bar older than this during market hours -> flag UNSAFE
+DATA_STALENESS_THRESHOLD_MINUTES = 15  # if last bar older than this during market hours -> flag UNSAFE
 DATA_STALENESS_THRESHOLD_TRADING_DAYS = 1  # if last daily bar is more than 1 trading day old -> flag UNSAFE
 
 # --- Technical event thresholds --------------------------------------------
-ORB_MINUTES = 15                    # opening range breakout window
-GAP_THRESHOLD_PCT = 1.0             # % gap vs prior close to flag a gap event
-VOLUME_SPIKE_MULTIPLIER = 2.5       # current bar volume vs rolling average to flag spike
+ORB_MINUTES = 15  # opening range breakout window
+GAP_THRESHOLD_PCT = 1.0  # % gap vs prior close to flag a gap event
+VOLUME_SPIKE_MULTIPLIER = 2.5  # current bar volume vs rolling average to flag spike
 VOLUME_SPIKE_LOOKBACK_BARS = 20
 RSI_PERIOD = 14
 RSI_OVERBOUGHT = 70
@@ -215,40 +292,40 @@ MACD_SIGNAL = 9
 BOLLINGER_PERIOD = 20
 BOLLINGER_STD_DEV = 2.0
 ATR_PERIOD = 14
-ATR_EXPANSION_MULTIPLIER = 1.8      # current ATR vs its own rolling average to flag volatility expansion
+ATR_EXPANSION_MULTIPLIER = 1.8  # current ATR vs its own rolling average to flag volatility expansion
 MA_FAST_PERIOD = 9
 MA_SLOW_PERIOD = 21
 LOW_LIQUIDITY_VOLUME_FLOOR = 10000  # rolling average volume below this -> confidence downgrade
 
 # --- Relative / market-context thresholds -----------------------------------
-OUTPERFORMANCE_THRESHOLD_PCT = 1.5   # stock % move minus index % move beyond this -> flag
+OUTPERFORMANCE_THRESHOLD_PCT = 1.5  # stock % move minus index % move beyond this -> flag
 CORRELATION_LOOKBACK_BARS = 60
 CORRELATION_BREAKDOWN_THRESHOLD = 0.3  # rolling correlation with NIFTY drops below this -> flag
 
 # --- Global risk monitor thresholds ------------------------------------------
-GLOBAL_RISK_ZSCORE_WARN_THRESHOLD = 1.5     # composite z-score above this -> show banner
-GLOBAL_RISK_ZSCORE_CRISIS_THRESHOLD = 2.5   # above this -> stronger banner language
-GLOBAL_RISK_CONFIDENCE_DOWNGRADE_ELEVATED = 0.85   # multiplier applied to confidence when toggle ON, elevated
-GLOBAL_RISK_CONFIDENCE_DOWNGRADE_CRISIS = 0.60     # multiplier applied to confidence when toggle ON, crisis
-GLOBAL_RISK_LOOKBACK_DAYS = 20               # window used to compute rolling mean/std for z-score
+GLOBAL_RISK_ZSCORE_WARN_THRESHOLD = 1.5  # composite z-score above this -> show banner
+GLOBAL_RISK_ZSCORE_CRISIS_THRESHOLD = 2.5  # above this -> stronger banner language
+GLOBAL_RISK_CONFIDENCE_DOWNGRADE_ELEVATED = 0.85  # multiplier applied to confidence when toggle ON, elevated
+GLOBAL_RISK_CONFIDENCE_DOWNGRADE_CRISIS = 0.60  # multiplier applied to confidence when toggle ON, crisis
+GLOBAL_RISK_LOOKBACK_DAYS = 20  # window used to compute rolling mean/std for z-score
 
 # --- News / sentiment parameters ---------------------------------------------
 MARKETAUX_BASE_URL = "https://api.marketaux.com/v1/news/all"
 MARKETAUX_COUNTRY = "in"
 NEWS_FETCH_LIMIT = 20
-NEWS_STALENESS_HOURS = 24            # news older than this is not considered "active" for signal purposes
+NEWS_STALENESS_HOURS = 24  # news older than this is not considered "active" for signal purposes
 GOOGLE_NEWS_RSS_BASE = "https://news.google.com/rss/search"
 
 # --- NSE corporate events fetch parameters -----------------------------------
-NSE_RATE_LIMIT_DELAY_SECONDS = 0.4   # NSE throttles to ~3 req/sec; we stay comfortably under that
+NSE_RATE_LIMIT_DELAY_SECONDS = 0.4  # NSE throttles to ~3 req/sec; we stay comfortably under that
 NSE_ANNOUNCEMENT_REFRESH_MINUTES = 10  # corporate announcements refresh cadence during market hours
 
 # --- Model / validation parameters -------------------------------------------
-TIME_SERIES_SPLIT_TEST_FRACTION = 0.2   # always time-based, never random shuffle
-MIN_CALIBRATION_SAMPLES = 50            # minimum historical predictions needed before trusting confidence scores
-CALIBRATION_N_BINS = 10                 # number of confidence buckets used to build the reliability curve
-CALIBRATION_ECE_THRESHOLD = 0.10        # max acceptable Expected Calibration Error to call confidence "well calibrated"
-EDGE_CHECK_MIN_ALPHA_PCT = 0.0          # signal must show >0 edge vs NIFTY baseline in backtest to be enabled live
+TIME_SERIES_SPLIT_TEST_FRACTION = 0.2  # always time-based, never random shuffle
+MIN_CALIBRATION_SAMPLES = 50  # minimum historical predictions needed before trusting confidence scores
+CALIBRATION_N_BINS = 10  # number of confidence buckets used to build the reliability curve
+CALIBRATION_ECE_THRESHOLD = 0.10  # max acceptable Expected Calibration Error to call confidence "well calibrated"
+EDGE_CHECK_MIN_ALPHA_PCT = 0.0  # signal must show >0 edge vs NIFTY baseline in backtest to be enabled live
 
 # --- Multi-Horizon parameters (Phase 2) ---------------------------------------
 HORIZON_INTRADAY = "INTRADAY"
@@ -263,38 +340,59 @@ ALL_HORIZONS = [HORIZON_INTRADAY, HORIZON_3D, HORIZON_7D, HORIZON_30D, HORIZON_3
 
 HORIZON_CONFIG = {
     HORIZON_INTRADAY: {
-        "bar_interval": "5m", "horizon_bars": 6, "deadband_pct_default": 0.15,
-        "history_period": "60d", "min_training_samples": 500,
+        "bar_interval": "5m",
+        "horizon_bars": 6,
+        "deadband_pct_default": 0.15,
+        "history_period": "60d",
+        "min_training_samples": 500,
         "retrain_cadence_days": 1,
     },
     HORIZON_3D: {
-        "bar_interval": "1d", "horizon_bars": 3, "deadband_pct_default": 1.0,
-        "history_period": "2y", "min_training_samples": 300,
+        "bar_interval": "1d",
+        "horizon_bars": 3,
+        "deadband_pct_default": 1.0,
+        "history_period": "2y",
+        "min_training_samples": 300,
         "retrain_cadence_days": 7,
     },
     HORIZON_7D: {
-        "bar_interval": "1d", "horizon_bars": 5, "deadband_pct_default": 1.5,
-        "history_period": "3y", "min_training_samples": 400,
+        "bar_interval": "1d",
+        "horizon_bars": 5,
+        "deadband_pct_default": 1.5,
+        "history_period": "3y",
+        "min_training_samples": 400,
         "retrain_cadence_days": 7,
     },
     HORIZON_30D: {
-        "bar_interval": "1d", "horizon_bars": 21, "deadband_pct_default": 3.0,
-        "history_period": "5y", "min_training_samples": 350,
+        "bar_interval": "1d",
+        "horizon_bars": 21,
+        "deadband_pct_default": 3.0,
+        "history_period": "5y",
+        "min_training_samples": 350,
         "retrain_cadence_days": 14,
     },
     HORIZON_3M: {
-        "bar_interval": "1d", "horizon_bars": 63, "deadband_pct_default": 5.0,
-        "history_period": "7y", "min_training_samples": 300,
+        "bar_interval": "1d",
+        "horizon_bars": 63,
+        "deadband_pct_default": 5.0,
+        "history_period": "7y",
+        "min_training_samples": 300,
         "retrain_cadence_days": 30,
     },
     HORIZON_6M: {
-        "bar_interval": "1d", "horizon_bars": 126, "deadband_pct_default": 8.0,
-        "history_period": "10y", "min_training_samples": 250,
+        "bar_interval": "1d",
+        "horizon_bars": 126,
+        "deadband_pct_default": 8.0,
+        "history_period": "10y",
+        "min_training_samples": 250,
         "retrain_cadence_days": 60,
     },
     HORIZON_1Y: {
-        "bar_interval": "1d", "horizon_bars": 252, "deadband_pct_default": 12.0,
-        "history_period": "max", "min_training_samples": 200,
+        "bar_interval": "1d",
+        "horizon_bars": 252,
+        "deadband_pct_default": 12.0,
+        "history_period": "max",
+        "min_training_samples": 200,
         "retrain_cadence_days": 90,
     },
 }
@@ -344,12 +442,12 @@ MODEL_RANDOM_SEED = 42
 MODEL_N_ESTIMATORS = 200
 MODEL_MAX_DEPTH = 4
 MODEL_LEARNING_RATE = 0.05
-MIN_TRAINING_SAMPLES_PER_STOCK = 500    # below this, we refuse to train — too little data to trust
+MIN_TRAINING_SAMPLES_PER_STOCK = 500  # below this, we refuse to train — too little data to trust
 
 # --- Portfolio / Position Sizing (Phase 11) -----------------------------------
-PORTFOLIO_TOTAL_CAPITAL = 10_00_000   # Default 10 Lakhs INR
-MAX_POSITION_SIZE_PCT = 0.10          # Max 10% of portfolio per stock
-MAX_DCA_STEPS = 4                     # Max number of tranches in a DCA ladder
+PORTFOLIO_TOTAL_CAPITAL = 10_00_000  # Default 10 Lakhs INR
+MAX_POSITION_SIZE_PCT = 0.10  # Max 10% of portfolio per stock
+MAX_DCA_STEPS = 4  # Max number of tranches in a DCA ladder
 
 # --- Ensemble parameters (Phase 10) --------------------------------------------
 ENSEMBLE_MODEL_TYPES = ["gradient_boosting", "random_forest", "logistic_regression"]
@@ -358,23 +456,22 @@ ENSEMBLE_RF_MAX_DEPTH = 6
 ENSEMBLE_LR_MAX_ITER = 500
 
 # --- Backtest cost assumptions ------------------------------------------------
-SLIPPAGE_BPS = 5          # 0.05% slippage per trade
+SLIPPAGE_BPS = 5  # 0.05% slippage per trade
 TRANSACTION_COST_BPS = 3  # 0.03% brokerage + STT + other charges approximation
 
 # --- Scheduler parameters (Phase 16) -------------------------------------------
-SCHEDULER_INTERVAL_MINUTES = 5          # how often the live pipeline cycles during market hours (matches BAR_INTERVAL)
-LIVE_WORTHINESS_REFRESH_HOURS = 24      # how often the backtest-derived live/edge status is refreshed per symbol
+SCHEDULER_INTERVAL_MINUTES = 5  # how often the live pipeline cycles during market hours (matches BAR_INTERVAL)
+LIVE_WORTHINESS_REFRESH_HOURS = 24  # how often the backtest-derived live/edge status is refreshed per symbol
 
 # --- Health Monitor parameters (Phase 1) -------------------------------------------
 HEALTH_DEGRADED_THRESHOLD = 2
 HEALTH_DOWN_THRESHOLD = 5
-HEALTH_THRESHOLD_OVERRIDES = {
-    "data_fetcher": {"degraded": 1, "down": 3}
-}
+HEALTH_THRESHOLD_OVERRIDES = {"data_fetcher": {"degraded": 1, "down": 3}}
 
 # ---------------------------------------------------------------------------
 # 6. Functions
 # ---------------------------------------------------------------------------
+
 
 def validate_config() -> list:
     """
@@ -397,20 +494,24 @@ def validate_config() -> list:
         for var_name in REQUIRED_ENV_VARS:
             if not os.environ.get(var_name):
                 warnings.append(
-                    f"Environment variable '{var_name}' is not set. "
-                    "Related features will be degraded or disabled."
+                    f"Environment variable '{var_name}' is not set. " "Related features will be degraded or disabled."
                 )
 
         if not IMD_API_KEY:
-            warnings.append(
-                "IMD_API_KEY not set — monsoon data will fall back to manual entry only."
-            )
+            warnings.append("IMD_API_KEY not set — monsoon data will fall back to manual entry only.")
 
         for horizon in ALL_HORIZONS:
             if horizon not in HORIZON_CONFIG:
                 warnings.append(f"HORIZON_CONFIG missing entry for {horizon}")
             else:
-                expected_keys = {"bar_interval", "horizon_bars", "deadband_pct_default", "history_period", "min_training_samples", "retrain_cadence_days"}
+                expected_keys = {
+                    "bar_interval",
+                    "horizon_bars",
+                    "deadband_pct_default",
+                    "history_period",
+                    "min_training_samples",
+                    "retrain_cadence_days",
+                }
                 missing_keys = expected_keys - set(HORIZON_CONFIG[horizon].keys())
                 if missing_keys:
                     warnings.append(f"HORIZON_CONFIG[{horizon}] is missing keys: {missing_keys}")

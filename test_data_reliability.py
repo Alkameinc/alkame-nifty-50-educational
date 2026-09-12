@@ -1,41 +1,29 @@
 ﻿# 1. Standard library imports
-from datetime import date, datetime
-from pathlib import Path
-from zoneinfo import ZoneInfo
+from datetime import date
 
 # 2. Third-party imports
 import numpy as np
 import pandas as pd
-import pytest
+
+import config
 
 # 3. Local imports
 from market_calendar import (
-    MarketCalendar,
     CSVMarketCalendarProvider,
-    OFFICIAL_NSE_2026_HOLIDAYS,
-    is_market_open,
-    is_trading_day,
-    is_holiday,
+    MarketCalendar,
 )
-from universe_provider import (
-    UniverseProvider,
-    UniverseSnapshot,
-    get_nifty50_constituents,
+from market_data_provider import (
+    DataStatus,
+    PriceAdjustmentMode,
+    TestFixtureMarketDataProvider,
 )
 from sector_provider import (
     SectorMapProvider,
-    get_symbol_sector,
 )
-from market_data_provider import (
-    MarketDataProvider,
-    DataStatus,
-    PriceAdjustmentMode,
-    MarketDataResult,
-    TestFixtureMarketDataProvider,
-    LocalCacheMarketDataProvider,
-    DataQualityReport,
+from universe_provider import (
+    UniverseProvider,
+    get_nifty50_constituents,
 )
-import config
 
 
 def test_market_calendar_provider_versioned_csv_and_official_2026_holidays():
@@ -117,13 +105,16 @@ def test_sector_map_provider_coverage():
 def test_market_data_provider_abstraction_and_test_fixture():
     """DATA-005: Verify abstract MarketDataProvider with TestFixtureMarketDataProvider."""
     dates = pd.date_range("2026-07-01 09:15", periods=30, freq="5min", tz="Asia/Kolkata")
-    sample_df = pd.DataFrame({
-        "Open": np.linspace(2000, 2050, 30),
-        "High": np.linspace(2005, 2055, 30),
-        "Low": np.linspace(1995, 2045, 30),
-        "Close": np.linspace(2002, 2052, 30),
-        "Volume": np.full(30, 10000),
-    }, index=dates)
+    sample_df = pd.DataFrame(
+        {
+            "Open": np.linspace(2000, 2050, 30),
+            "High": np.linspace(2005, 2055, 30),
+            "Low": np.linspace(1995, 2045, 30),
+            "Close": np.linspace(2002, 2052, 30),
+            "Volume": np.full(30, 10000),
+        },
+        index=dates,
+    )
 
     fixture_provider = TestFixtureMarketDataProvider({"INFY.NS": sample_df})
 
@@ -150,13 +141,16 @@ def test_data_quality_rules_and_timestamp_normalization():
     t2 = pd.Timestamp("2026-07-01 09:25:00", tz="Asia/Kolkata")
 
     messy_index = [t0, t2, t1, t2]  # non-monotonic and duplicate t2
-    messy_df = pd.DataFrame({
-        "Open": [100, 102, 101, 102],
-        "High": [101, 103, 102, 103],
-        "Low": [99, 101, 100, 101],
-        "Close": [100.5, 102.5, 101.5, 102.5],
-        "Volume": [1000, 1000, 1000, 1000],
-    }, index=messy_index)
+    messy_df = pd.DataFrame(
+        {
+            "Open": [100, 102, 101, 102],
+            "High": [101, 103, 102, 103],
+            "Low": [99, 101, 100, 101],
+            "Close": [100.5, 102.5, 101.5, 102.5],
+            "Volume": [1000, 1000, 1000, 1000],
+        },
+        index=messy_index,
+    )
 
     report = provider.validate_data_quality(messy_df, "TEST")
     assert report.is_monotonic is False

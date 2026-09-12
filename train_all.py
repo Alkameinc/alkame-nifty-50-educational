@@ -1,6 +1,7 @@
-from data_fetcher import DataFetcher
 from backtester import Backtester
 from config import ALL_HORIZONS, HORIZON_CONFIG, NIFTY50_SYMBOLS, to_yfinance_ticker
+from data_fetcher import DataFetcher
+
 
 def train_all():
     fetcher = DataFetcher()
@@ -16,23 +17,24 @@ def train_all():
             print(f"Training {symbol} - {horizon}...")
             interval = HORIZON_CONFIG[horizon].get("bar_interval", "5m")
             period = HORIZON_CONFIG[horizon].get("history_period", "60d")
-            
+
             if interval == "1d":
                 stock_df = fetcher.fetch_daily_ohlcv(to_yfinance_ticker(symbol), period=period)
                 index_df = fetcher.fetch_daily_ohlcv("^NSEI", period=period)
             else:
                 stock_df = fetcher.fetch_ohlcv(to_yfinance_ticker(symbol), period=period)
                 index_df = fetcher.fetch_nifty_index(period=period)
-                
+
             if stock_df is None or stock_df.empty or index_df is None or index_df.empty:
                 print(f"  -> FAILED: Could not fetch {period} {interval} data for {symbol}.")
                 continue
-                
+
             res = backtester.run_backtest_for_symbol(symbol, stock_df, index_df, horizon=horizon)
             if res.success:
                 print(f"  -> SUCCESS! Edge: {res.edge_check_status}, Calibration: {res.calibration_status}")
             else:
                 print(f"  -> FAILED: {res.error}")
+
 
 if __name__ == "__main__":
     train_all()

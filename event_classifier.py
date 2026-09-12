@@ -1,29 +1,26 @@
 # 1. Standard library imports
 import logging
-import re
 from dataclasses import dataclass, field
-from datetime import datetime, date
-from typing import Dict, List, Optional
+from datetime import date, datetime
 
 # 2. Third-party imports
 # (none required)
-
 # 3. Local imports
 from config import (
-    NIFTY50_SYMBOLS,
-    SECTOR_MAP,
     CRUDE_SENSITIVE_SECTORS,
+    EVENT_IMPACT_HORIZON,
+    HORIZON_30D,
+    HORIZON_INTRADAY,
     INR_WEAKNESS_BENEFICIARY_SECTORS,
     INR_WEAKNESS_HURT_SECTORS,
     MONSOON_SENSITIVE_SECTORS,
+    NIFTY50_SYMBOLS,
     RATE_SENSITIVE_SECTORS,
-    EVENT_IMPACT_HORIZON,
-    HORIZON_INTRADAY,
-    HORIZON_30D,
+    SECTOR_MAP,
     configure_logging,
 )
-from macro_calendar import MacroCalendar, MacroEvent
 from health_monitor import registry as health_registry
+from macro_calendar import MacroCalendar, MacroEvent
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -37,7 +34,7 @@ SCOPE_STOCK = "STOCK"
 VALID_SCOPES = {SCOPE_MARKET, SCOPE_SECTOR, SCOPE_STOCK}
 
 # Reverse index: sector -> [symbols], built once from config.SECTOR_MAP
-SECTOR_TO_SYMBOLS: Dict[str, List[str]] = {}
+SECTOR_TO_SYMBOLS: dict[str, list[str]] = {}
 for _sym, _sector in SECTOR_MAP.items():
     SECTOR_TO_SYMBOLS.setdefault(_sector, []).append(_sym)
 
@@ -48,7 +45,7 @@ MACRO_EVENT_TYPE_TO_SECTORS = {
     "GDP_RELEASE": ["ALL"],
     "UNION_BUDGET": ["ALL"],
     "ELECTION": ["ALL"],
-    "FESTIVE_WINDOW": None,   # sector comes from the macro event's own sector_hint field
+    "FESTIVE_WINDOW": None,  # sector comes from the macro event's own sector_hint field
     "MONSOON_STATUS": MONSOON_SENSITIVE_SECTORS,
     "FDI_FLOW_RELEASE": ["ALL"],
     "GEOPOLITICAL": ["ALL"],
@@ -79,19 +76,20 @@ NEWS_KEYWORD_SECTOR_HINTS = {
 class Event:
     """Unified event schema used across the whole system, regardless of
     which source (macro calendar, corporate announcement, or news) it came from."""
+
     event_id: str
-    source: str                          # "MACRO", "CORPORATE", "NEWS"
-    event_type: str                      # e.g. "RBI_POLICY", "CORPORATE_ANNOUNCEMENT", "NEWS_HEADLINE"
+    source: str  # "MACRO", "CORPORATE", "NEWS"
+    event_type: str  # e.g. "RBI_POLICY", "CORPORATE_ANNOUNCEMENT", "NEWS_HEADLINE"
     timestamp: datetime
-    scope: str                           # MARKET | SECTOR | STOCK
-    affected_tickers: List[str]          # explicit list, never implied
-    sector: Optional[str] = None
-    confidence_in_scope: float = 1.0     # 1.0 = certain, lower = ambiguous, needs human review
+    scope: str  # MARKET | SECTOR | STOCK
+    affected_tickers: list[str]  # explicit list, never implied
+    sector: str | None = None
+    confidence_in_scope: float = 1.0  # 1.0 = certain, lower = ambiguous, needs human review
     headline_or_label: str = ""
-    sentiment_score: Optional[float] = None
-    magnitude_estimate: str = "MEDIUM"   # "LOW" | "MEDIUM" | "HIGH"
+    sentiment_score: float | None = None
+    magnitude_estimate: str = "MEDIUM"  # "LOW" | "MEDIUM" | "HIGH"
     impact_horizon: str = HORIZON_INTRADAY
-    raw: Optional[dict] = field(default=None, repr=False)
+    raw: dict | None = field(default=None, repr=False)
 
     def needs_human_review(self, low_confidence_threshold: float = 0.5) -> bool:
         return self.confidence_in_scope < low_confidence_threshold
@@ -99,9 +97,10 @@ class Event:
 
 @dataclass
 class EventBatchResult:
-    events: List[Event]
+    events: list[Event]
     status: str  # EVENTS_AVAILABLE, NO_EVENTS, EVENT_SOURCE_UNAVAILABLE, EVENT_SOURCE_PARTIAL
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
 
 class EventClassifier:
     """
@@ -110,7 +109,7 @@ class EventClassifier:
     scope tag and explicit affected-ticker list.
     """
 
-    def __init__(self, macro_calendar: Optional[MacroCalendar] = None):
+    def __init__(self, macro_calendar: MacroCalendar | None = None):
         self.macro_calendar = macro_calendar or MacroCalendar()
         self._event_counter = 0
 
@@ -118,13 +117,13 @@ class EventClassifier:
         self._event_counter += 1
         return f"{prefix}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{self._event_counter}"
 
-    def _sectors_to_tickers(self, sectors: List[str]) -> List[str]:
+    def _sectors_to_tickers(self, sectors: list[str]) -> list[str]:
         """Expand a list of sector names (or ['ALL']) into a flat ticker list."""
         if not sectors:
             return []
         if "ALL" in sectors:
             return list(NIFTY50_SYMBOLS)
-        tickers: List[str] = []
+        tickers: list[str] = []
         for sector in sectors:
             tickers.extend(SECTOR_TO_SYMBOLS.get(sector, []))
         return sorted(set(tickers))
@@ -159,8 +158,11 @@ class EventClassifier:
                 confidence_in_scope=1.0,  # macro calendar entries are human-curated, high confidence
                 headline_or_label=macro_event.label,
                 sentiment_score=None,
-                magnitude_estimate="HIGH" if macro_event.event_type in
-                    {"RBI_POLICY", "UNION_BUDGET", "ELECTION", "GEOPOLITICAL"} else "MEDIUM",
+                magnitude_estimate=(
+                    "HIGH"
+                    if macro_event.event_type in {"RBI_POLICY", "UNION_BUDGET", "ELECTION", "GEOPOLITICAL"}
+                    else "MEDIUM"
+                ),
                 impact_horizon=EVENT_IMPACT_HORIZON.get(macro_event.event_type, HORIZON_30D),
                 raw=None,
             )
@@ -171,7 +173,7 @@ class EventClassifier:
             health_registry.report("event_classifier", ok=False, detail="Failed classifying macro event", error=str(e))
             return self._fallback_event("MACRO", macro_event.label)
 
-    def get_active_macro_events_classified(self, check_date: Optional[date] = None) -> List[Event]:
+    def get_active_macro_events_classified(self, check_date: date | None = None) -> list[Event]:
         try:
             raw_events = self.macro_calendar.get_active_macro_events(check_date)
             res = [self.classify_macro_event(e) for e in raw_events]
@@ -179,7 +181,9 @@ class EventClassifier:
             return res
         except Exception as e:
             logger.error(f"Failed getting active classified macro events: {e}")
-            health_registry.report("event_classifier", ok=False, detail="Failed getting active classified macro events", error=str(e))
+            health_registry.report(
+                "event_classifier", ok=False, detail="Failed getting active classified macro events", error=str(e)
+            )
             return []
 
     # -----------------------------------------------------------------
@@ -207,14 +211,18 @@ class EventClassifier:
                 headline_or_label=str(label),
                 sentiment_score=None,
                 magnitude_estimate="MEDIUM",
-                impact_horizon=EVENT_IMPACT_HORIZON.get(category, EVENT_IMPACT_HORIZON.get("CORPORATE_ANNOUNCEMENT", HORIZON_INTRADAY)),
+                impact_horizon=EVENT_IMPACT_HORIZON.get(
+                    category, EVENT_IMPACT_HORIZON.get("CORPORATE_ANNOUNCEMENT", HORIZON_INTRADAY)
+                ),
                 raw=raw,
             )
             health_registry.report("event_classifier", ok=True)
             return evt
         except Exception as e:
             logger.error(f"Failed classifying corporate event {corporate_event}: {e}")
-            health_registry.report("event_classifier", ok=False, detail="Failed classifying corporate event", error=str(e))
+            health_registry.report(
+                "event_classifier", ok=False, detail="Failed classifying corporate event", error=str(e)
+            )
             return self._fallback_event("CORPORATE", str(corporate_event))
 
     # -----------------------------------------------------------------
@@ -227,7 +235,7 @@ class EventClassifier:
             title = news_article.get("title", "")
             title_lower = title.lower()
 
-            matched_sectors: Optional[List[str]] = None
+            matched_sectors: list[str] | None = None
             for keyword, sectors in NEWS_KEYWORD_SECTOR_HINTS.items():
                 if keyword in title_lower:
                     if keyword == "rupee":
@@ -271,7 +279,7 @@ class EventClassifier:
             return self._fallback_event("NEWS", news_article.get("title", ""))
 
     @staticmethod
-    def _classify_currency_headline(title_lower: str) -> List[str]:
+    def _classify_currency_headline(title_lower: str) -> list[str]:
         """USD/INR moves affect exporters and importers in opposite directions —
         this needs its own logic rather than a flat sector list."""
         if "weak" in title_lower or "depreciat" in title_lower or "falls" in title_lower:
@@ -303,14 +311,14 @@ class EventClassifier:
 
     def classify_batch(
         self,
-        macro_events: Optional[List[MacroEvent]] = None,
-        corporate_events: Optional[List[dict]] = None,
-        news_articles: Optional[List[dict]] = None,
+        macro_events: list[MacroEvent] | None = None,
+        corporate_events: list[dict] | None = None,
+        news_articles: list[dict] | None = None,
     ) -> EventBatchResult:
         """Classify a mixed batch from all three sources into one unified Event list."""
-        results: List[Event] = []
-        errors: List[str] = []
-        
+        results: list[Event] = []
+        errors: list[str] = []
+
         sources_total = 3
         sources_unavailable = 0
 
@@ -358,7 +366,12 @@ class EventClassifier:
 
         if errors:
             logger.error(f"Event classification encountered errors: {errors}")
-            health_registry.report("event_classifier", ok=(status != "EVENT_SOURCE_UNAVAILABLE"), detail="Errors in classify_batch", error=str(errors))
+            health_registry.report(
+                "event_classifier",
+                ok=(status != "EVENT_SOURCE_UNAVAILABLE"),
+                detail="Errors in classify_batch",
+                error=str(errors),
+            )
         else:
             health_registry.report("event_classifier", ok=True)
 
@@ -378,8 +391,13 @@ if __name__ == "__main__":
 
         # Test 1: macro event (RBI policy) -> should be SECTOR scope (rate-sensitive sectors only)
         rbi_macro = MacroEvent(
-            event_date=date(2026, 8, 5), event_type="RBI_POLICY", label="RBI MPC Policy Decision",
-            scope="MARKET", sector_hint="ALL", impact_window_days_before=1, impact_window_days_after=1,
+            event_date=date(2026, 8, 5),
+            event_type="RBI_POLICY",
+            label="RBI MPC Policy Decision",
+            scope="MARKET",
+            sector_hint="ALL",
+            impact_window_days_before=1,
+            impact_window_days_after=1,
         )
         rbi_event = classifier.classify_macro_event(rbi_macro)
         print(f"RBI macro event -> scope={rbi_event.scope}, affected_tickers={len(rbi_event.affected_tickers)}")
@@ -388,32 +406,50 @@ if __name__ == "__main__":
         assert "INFY" not in rbi_event.affected_tickers, "IT stocks should NOT be tagged for a pure rate event"
 
         # Test 2: corporate event -> should be STOCK scope, single ticker
-        corp_raw = {"symbol": "RELIANCE", "category": "CORPORATE_ANNOUNCEMENT",
-                    "raw": {"subject": "Board Meeting Intimation"}, "fetched_at": datetime.now().isoformat()}
+        corp_raw = {
+            "symbol": "RELIANCE",
+            "category": "CORPORATE_ANNOUNCEMENT",
+            "raw": {"subject": "Board Meeting Intimation"},
+            "fetched_at": datetime.now().isoformat(),
+        }
         corp_event = classifier.classify_corporate_event(corp_raw)
         print(f"Corporate event -> scope={corp_event.scope}, affected_tickers={corp_event.affected_tickers}")
         assert corp_event.scope == SCOPE_STOCK
         assert corp_event.affected_tickers == ["RELIANCE"]
 
         # Test 3: news headline with a sector keyword (crude) -> should escalate to SECTOR scope
-        news_crude = {"symbol": "RELIANCE", "title": "Crude oil prices spike 6% overnight on supply fears",
-                      "published_at": datetime.now(), "sentiment_score": -0.4}
+        news_crude = {
+            "symbol": "RELIANCE",
+            "title": "Crude oil prices spike 6% overnight on supply fears",
+            "published_at": datetime.now(),
+            "sentiment_score": -0.4,
+        }
         news_event = classifier.classify_news_event(news_crude)
-        print(f"Crude news event -> scope={news_event.scope}, sectors touched via tickers={len(news_event.affected_tickers)}")
+        print(
+            f"Crude news event -> scope={news_event.scope}, sectors touched via tickers={len(news_event.affected_tickers)}"
+        )
         assert news_event.scope == SCOPE_SECTOR
         assert "MARUTI" in news_event.affected_tickers  # Auto sector should be tagged for crude sensitivity
 
         # Test 4: plain single-stock news with no macro keyword -> should stay STOCK scope
-        news_plain = {"symbol": "TCS", "title": "TCS wins new multi-year contract with European client",
-                      "published_at": datetime.now(), "sentiment_score": 0.5}
+        news_plain = {
+            "symbol": "TCS",
+            "title": "TCS wins new multi-year contract with European client",
+            "published_at": datetime.now(),
+            "sentiment_score": 0.5,
+        }
         news_plain_event = classifier.classify_news_event(news_plain)
-        print(f"Plain company news -> scope={news_plain_event.scope}, affected_tickers={news_plain_event.affected_tickers}")
+        print(
+            f"Plain company news -> scope={news_plain_event.scope}, affected_tickers={news_plain_event.affected_tickers}"
+        )
         assert news_plain_event.scope == SCOPE_STOCK
         assert news_plain_event.affected_tickers == ["TCS"]
 
         # Test 5: batch classification combines all sources correctly
         batch_res = classifier.classify_batch(
-            macro_events=[rbi_macro], corporate_events=[corp_raw], news_articles=[news_crude, news_plain],
+            macro_events=[rbi_macro],
+            corporate_events=[corp_raw],
+            news_articles=[news_crude, news_plain],
         )
         print(f"Batch classification produced {len(batch_res.events)} unified events (expected 4)")
         assert len(batch_res.events) == 4

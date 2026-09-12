@@ -1,27 +1,25 @@
 # 1. Standard library imports
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional
+
+import numpy as np
 
 # 2. Third-party imports
 import pandas as pd
-import numpy as np
 
 # 3. Local imports
 from config import (
-    GLOBAL_TICKERS,
-    GLOBAL_RISK_ZSCORE_WARN_THRESHOLD,
-    GLOBAL_RISK_ZSCORE_CRISIS_THRESHOLD,
-    GLOBAL_RISK_CONFIDENCE_DOWNGRADE_ELEVATED,
-    GLOBAL_RISK_CONFIDENCE_DOWNGRADE_CRISIS,
-    GLOBAL_RISK_LOOKBACK_DAYS,
     CRUDE_SENSITIVE_SECTORS,
     DATA_DIR,
-    ensure_directories,
+    GLOBAL_RISK_CONFIDENCE_DOWNGRADE_CRISIS,
+    GLOBAL_RISK_CONFIDENCE_DOWNGRADE_ELEVATED,
+    GLOBAL_RISK_LOOKBACK_DAYS,
+    GLOBAL_RISK_ZSCORE_CRISIS_THRESHOLD,
+    GLOBAL_RISK_ZSCORE_WARN_THRESHOLD,
     configure_logging,
+    ensure_directories,
 )
 from data_fetcher import DataFetcher
 from health_monitor import registry as health_registry
@@ -59,8 +57,8 @@ class GlobalRiskReading:
     timestamp: datetime
     composite_zscore: float
     risk_level: str
-    dominant_driver: Optional[str]
-    driver_details: Dict[str, float]
+    dominant_driver: str | None
+    driver_details: dict[str, float]
     banner_message: str
     is_available: bool = True
 
@@ -69,8 +67,8 @@ class GlobalRiskReading:
 class ToggleState:
     enabled: bool
     reason: str
-    level_at_activation: Optional[str]
-    activated_at: Optional[str]
+    level_at_activation: str | None
+    activated_at: str | None
     updated_at: str
 
 
@@ -82,7 +80,7 @@ class GlobalRiskMonitor:
     only applies once a human explicitly enables the toggle via set_toggle().
     """
 
-    def __init__(self, data_fetcher: Optional[DataFetcher] = None):
+    def __init__(self, data_fetcher: DataFetcher | None = None):
         self.data_fetcher = data_fetcher or DataFetcher()
         ensure_directories()
         self._toggle_state = self._load_toggle_state()
@@ -93,14 +91,17 @@ class GlobalRiskMonitor:
     def _load_toggle_state(self) -> ToggleState:
         try:
             if TOGGLE_STATE_PATH.exists():
-                with open(TOGGLE_STATE_PATH, "r", encoding="utf-8") as f:
+                with open(TOGGLE_STATE_PATH, encoding="utf-8") as f:
                     data = json.load(f)
                 return ToggleState(**data)
         except Exception as e:
             logger.error(f"Failed loading toggle state, defaulting to OFF: {e}")
         return ToggleState(
-            enabled=False, reason="", level_at_activation=None,
-            activated_at=None, updated_at=datetime.now().isoformat(),
+            enabled=False,
+            reason="",
+            level_at_activation=None,
+            activated_at=None,
+            updated_at=datetime.now().isoformat(),
         )
 
     def _save_toggle_state(self) -> None:
@@ -114,7 +115,7 @@ class GlobalRiskMonitor:
             if f is not None:
                 f.close()
 
-    def set_toggle(self, enabled: bool, reason: str = "", current_level: Optional[str] = None) -> ToggleState:
+    def set_toggle(self, enabled: bool, reason: str = "", current_level: str | None = None) -> ToggleState:
         """Human-gated override switch. Nothing in this system flips this automatically."""
         try:
             now_iso = datetime.now().isoformat()
@@ -137,7 +138,7 @@ class GlobalRiskMonitor:
     # -----------------------------------------------------------------
     # Composite risk computation
     # -----------------------------------------------------------------
-    def _pct_change_zscore(self, df: pd.DataFrame) -> Optional[float]:
+    def _pct_change_zscore(self, df: pd.DataFrame) -> float | None:
         """Compute the z-score of the most recent bar's % change relative to
         its own rolling history — i.e. 'how unusual is today's move'."""
         try:
@@ -166,10 +167,10 @@ class GlobalRiskMonitor:
         """
         now = datetime.now()
         if hasattr(self, "_cached_reading") and hasattr(self, "_cached_time"):
-            if (now - self._cached_time).total_seconds() < 300: # 5 minutes
+            if (now - self._cached_time).total_seconds() < 300:  # 5 minutes
                 return self._cached_reading
 
-        driver_zscores: Dict[str, float] = {}
+        driver_zscores: dict[str, float] = {}
         try:
             global_data = self.data_fetcher.fetch_global_tickers()
             for name in ["VIX", "DOLLAR_INDEX", "GOLD", "CRUDE_BRENT"]:
@@ -184,8 +185,11 @@ class GlobalRiskMonitor:
                 logger.error("No global risk drivers available at all — failing closed to UNAVAILABLE.")
                 health_registry.report("global_risk_monitor", ok=False, detail="No global risk drivers available")
                 return GlobalRiskReading(
-                    timestamp=datetime.now(), composite_zscore=0.0, risk_level=RISK_LEVEL_UNAVAILABLE,
-                    dominant_driver=None, driver_details={},
+                    timestamp=datetime.now(),
+                    composite_zscore=0.0,
+                    risk_level=RISK_LEVEL_UNAVAILABLE,
+                    dominant_driver=None,
+                    driver_details={},
                     banner_message="Global risk data unavailable — operating in conservative fail-closed mode.",
                     is_available=False,
                 )
@@ -202,10 +206,14 @@ class GlobalRiskMonitor:
 
             banner = self._build_banner_message(level, dominant_driver, driver_zscores)
             health_registry.report("global_risk_monitor", ok=True)
-            
+
             result = GlobalRiskReading(
-                timestamp=datetime.now(), composite_zscore=composite, risk_level=level,
-                dominant_driver=dominant_driver, driver_details=driver_zscores, banner_message=banner,
+                timestamp=datetime.now(),
+                composite_zscore=composite,
+                risk_level=level,
+                dominant_driver=dominant_driver,
+                driver_details=driver_zscores,
+                banner_message=banner,
                 is_available=True,
             )
             self._cached_reading = result
@@ -214,10 +222,15 @@ class GlobalRiskMonitor:
 
         except Exception as e:
             logger.error(f"Failed computing composite global risk: {e}")
-            health_registry.report("global_risk_monitor", ok=False, detail="Failed computing composite risk", error=str(e))
+            health_registry.report(
+                "global_risk_monitor", ok=False, detail="Failed computing composite risk", error=str(e)
+            )
             result = GlobalRiskReading(
-                timestamp=datetime.now(), composite_zscore=0.0, risk_level=RISK_LEVEL_UNAVAILABLE,
-                dominant_driver=None, driver_details={},
+                timestamp=datetime.now(),
+                composite_zscore=0.0,
+                risk_level=RISK_LEVEL_UNAVAILABLE,
+                dominant_driver=None,
+                driver_details={},
                 banner_message=f"Global risk monitor error — risk state UNAVAILABLE ({e}).",
                 is_available=False,
             )
@@ -226,7 +239,7 @@ class GlobalRiskMonitor:
             return result
 
     @staticmethod
-    def _build_banner_message(level: str, dominant_driver: Optional[str], driver_zscores: Dict[str, float]) -> str:
+    def _build_banner_message(level: str, dominant_driver: str | None, driver_zscores: dict[str, float]) -> str:
         if level == RISK_LEVEL_UNAVAILABLE:
             return "Global risk data unavailable — operating in conservative fail-closed mode."
         if level == RISK_LEVEL_NORMAL:
@@ -248,7 +261,7 @@ class GlobalRiskMonitor:
     # -----------------------------------------------------------------
     # Confidence adjustment (only applied by predictor.py when toggle is ON)
     # -----------------------------------------------------------------
-    def get_confidence_multiplier(self, sector: Optional[str], reading: GlobalRiskReading) -> float:
+    def get_confidence_multiplier(self, sector: str | None, reading: GlobalRiskReading) -> float:
         """
         Returns the multiplier predictor.py should apply to a stock's confidence
         score, based on the CURRENT toggle state and the stock's sector exposure
@@ -311,16 +324,21 @@ if __name__ == "__main__":
         # Force a synthetic CRISIS reading to test the multiplier logic deterministically
         # (we don't rely on live data actually being in a crisis state for this test)
         synthetic_reading = GlobalRiskReading(
-            timestamp=datetime.now(), composite_zscore=3.0, risk_level=RISK_LEVEL_CRISIS,
-            dominant_driver="CRUDE_BRENT", driver_details={"CRUDE_BRENT": 3.0},
+            timestamp=datetime.now(),
+            composite_zscore=3.0,
+            risk_level=RISK_LEVEL_CRISIS,
+            dominant_driver="CRUDE_BRENT",
+            driver_details={"CRUDE_BRENT": 3.0},
             banner_message="synthetic test reading",
         )
-        exposed_multiplier = monitor.get_confidence_multiplier("Energy", synthetic_reading)   # Energy IS crude-sensitive
-        unexposed_multiplier = monitor.get_confidence_multiplier("IT", synthetic_reading)     # IT is NOT crude-sensitive
+        exposed_multiplier = monitor.get_confidence_multiplier("Energy", synthetic_reading)  # Energy IS crude-sensitive
+        unexposed_multiplier = monitor.get_confidence_multiplier("IT", synthetic_reading)  # IT is NOT crude-sensitive
         print(f"Exposed sector (Energy) multiplier during synthetic crude CRISIS: {exposed_multiplier}")
         print(f"Unexposed sector (IT) multiplier during synthetic crude CRISIS: {unexposed_multiplier}")
         assert exposed_multiplier == GLOBAL_RISK_CONFIDENCE_DOWNGRADE_CRISIS
-        assert unexposed_multiplier > exposed_multiplier, "Unexposed sector should be downgraded less than exposed sector"
+        assert (
+            unexposed_multiplier > exposed_multiplier
+        ), "Unexposed sector should be downgraded less than exposed sector"
 
         # Reset toggle back off so repeated test runs start clean
         monitor.set_toggle(False, reason="Self-test cleanup")
