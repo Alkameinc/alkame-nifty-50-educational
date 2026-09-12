@@ -9,6 +9,7 @@ from scheduler import Scheduler
 from scalping import ScalpingEngine
 from history_manager import HistoryManager
 from health_monitor import registry as health_registry
+from itertools import chain
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -171,56 +172,119 @@ def get_signal(symbol: str):
 def stream_signal(symbol: str):
     if symbol not in NIFTY50_SYMBOLS:
         return {"error": "Invalid symbol"}
-    
+
     yf_ticker = to_yfinance_ticker(symbol)
     stock_df = scheduler.data_fetcher.fetch_ohlcv(yf_ticker)
     index_df = scheduler.data_fetcher.fetch_nifty_index()
-    
+
     if stock_df is None or stock_df.empty:
         return {"error": f"Could not fetch data for {symbol}"}
-        
+
     scheduler.resolve_pending_outcomes(symbol, stock_df)
-    
+
+    stream = scheduler.run_cycle_stream_for_symbol(
+        symbol,
+        stock_df,
+        index_df,
+        macro_events=[],
+        corporate_events=[],
+        news_articles=[]
+    )
+
+    try:
+        first_signal = next(stream)
+    except StopIteration:
+        return {"error": f"No signal available for {symbol}"}
+    except Exception:
+        logger.exception("Signal stream failed before first item for %s", symbol)
+        return {"error": f"Signal stream failed for {symbol}"}
+
     def generate():
-        stream = scheduler.run_cycle_stream_for_symbol(symbol, stock_df, index_df, macro_events=[], corporate_events=[], news_articles=[])
-        for sig in stream:
-            if sig.action == "BUY":
-                verdict_text = "Strong opportunity identified. Proceed with entry according to your risk parameters."
-            elif sig.action == "SELL":
-                verdict_text = "Warning: Downward pressure detected. Consider hedging or reducing exposure."
-            else:
-                if getattr(sig, 'suppressed', False):
-                    verdict_text = "Holding back: We don't have enough historical proof that this pattern works yet."
+        try:
+            for sig in chain((first_signal,), stream):
+
+                if sig.action == "BUY":
+                    verdict_text = (
+                        "Strong opportunity identified. "
+                        "Proceed with entry according to your risk parameters."
+                    )
+
+                elif sig.action == "SELL":
+                    verdict_text = (
+                        "Warning: Downward pressure detected. "
+                        "Consider hedging or reducing exposure."
+                    )
+
                 else:
-                    verdict_text = "No clear edge detected. Better to stay out and wait for a higher-probability setup."
+                    if getattr(sig, 'suppressed', False):
+                        verdict_text = (
+                            "Holding back: We don't have enough historical proof "
+                            "that this pattern works yet."
+                        )
+                    else:
+                        verdict_text = (
+                            "No clear edge detected. Better to stay out and wait "
+                            "for a higher-probability setup."
+                        )
 
-            events = []
-            if getattr(sig, 'contributing_events', None):
-                for e in sig.contributing_events:
-                    events.append({
-                        "type": getattr(e, 'event_type', ''),
-                        "label": getattr(e, 'headline_or_label', ''),
-                        "sentiment": getattr(e, 'sentiment_score', 0.0)
-                    })
-                
-            data = {
-                "horizon": sig.horizon,
-                "action": sig.action,
-                "verdict_text": verdict_text,
-                "confidence": getattr(sig, 'risk_adjusted_confidence', getattr(sig, 'raw_confidence', 0.0)),
-                "current_price": float(stock_df["Close"].iloc[-1]) if not stock_df.empty else None,
-                "target_price": getattr(sig, 'target_price', None),
-                "stop_loss": getattr(sig, 'stop_loss', None),
-                "peak_potential_price": getattr(sig, 'peak_potential_price', None),
-                "downside_summary": getattr(sig, 'downside_summary', ""),
-                "upside_summary": getattr(sig, 'upside_summary', ""),
-                "events": events,
-                "reasoning": humanize_reasoning(getattr(sig, 'reasoning', []))
-            }
-            yield f"data: {json.dumps(data)}\n\n"
-            
-    return StreamingResponse(generate(), media_type="text/event-stream")
+                events = []
 
+                if getattr(sig, 'contributing_events', None):
+                    for e in sig.contributing_events:
+                        events.append({
+                            "type": getattr(e, 'event_type', ''),
+                            "label": getattr(e, 'headline_or_label', ''),
+                            "sentiment": getattr(e, 'sentiment_score', 0.0)
+                        })
+
+                data = {
+                    "horizon": sig.horizon,
+                    "action": sig.action,
+                    "verdict_text": verdict_text,
+                    "confidence": getattr(
+                        sig,
+                        'risk_adjusted_confidence',
+                        getattr(sig, 'raw_confidence', 0.0)
+                    ),
+                    "current_price": (
+                        float(stock_df["Close"].iloc[-1])
+                        if not stock_df.empty else None
+                    ),
+                    "target_price": getattr(sig, 'target_price', None),
+                    "stop_loss": getattr(sig, 'stop_loss', None),
+                    "peak_potential_price": getattr(
+                        sig, 'peak_potential_price', None
+                    ),
+                    "downside_summary": getattr(
+                        sig, 'downside_summary', ""
+                    ),
+                    "upside_summary": getattr(
+                        sig, 'upside_summary', ""
+                    ),
+                    "events": events,
+                    "reasoning": humanize_reasoning(
+                        getattr(sig, 'reasoning', [])
+                    )
+                }
+
+                yield f"data: {json.dumps(data)}\n\n"
+
+        except Exception:
+            logger.exception(
+                "Signal stream failed during streaming for %s",
+                symbol
+            )
+            raise
+
+        finally:
+            close_stream = getattr(stream, "close", None)
+            if close_stream is not None:
+                close_stream()
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream"
+    )
 
 @app.post("/api/signal/{symbol}/refresh")
 def refresh_backtest(symbol: str):

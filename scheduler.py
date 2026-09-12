@@ -18,6 +18,7 @@ from config import (
     PREDICTION_HORIZON_BARS,
     PREDICTION_DEADBAND_PCT,
     BAR_INTERVAL,
+    HORIZON_CONFIG,
     configure_logging,
 )
 from data_fetcher import DataFetcher
@@ -199,6 +200,40 @@ class Scheduler:
         except Exception as e:
             logger.error(f"Cycle failed for {symbol}: {e}")
             return None
+
+    def run_cycle_stream_for_symbol(
+        self,
+        symbol: str,
+        stock_df: pd.DataFrame,
+        index_df: pd.DataFrame,
+        macro_events: Optional[List] = None,
+        corporate_events: Optional[List[dict]] = None,
+        news_articles: Optional[List[dict]] = None,
+    ):
+        """Generate prediction signals for all configured horizons."""
+
+        snapshot = self.get_cached_live_worthiness(symbol)
+
+        calibration_result = (
+            snapshot.calibration_result if snapshot else None
+        )
+        edge_check_result = (
+            snapshot.edge_check_result if snapshot else None
+        )
+
+        horizons = list(HORIZON_CONFIG.keys())
+
+        yield from self.predictor.generate_multi_horizon_stream(
+            symbol=symbol,
+            horizons=horizons,
+            stock_df=stock_df,
+            index_df=index_df,
+            macro_events=macro_events,
+            corporate_events=corporate_events,
+            news_articles=news_articles,
+            calibration_result=calibration_result,
+            edge_check_result=edge_check_result,
+        )
 
     # -----------------------------------------------------------------
     # Outcome resolution — closes the loop that grows real calibration data
