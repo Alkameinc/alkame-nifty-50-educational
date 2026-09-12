@@ -29,10 +29,17 @@ class ScalpingEngine:
     opportunities using ATR-based risk management.
     """
 
-    def __init__(self, predictor: Predictor, data_fetcher: DataFetcher, feature_engineer: FeatureEngineer):
+    def __init__(
+        self,
+        predictor: Predictor,
+        data_fetcher: DataFetcher,
+        feature_engineer: FeatureEngineer,
+        scheduler=None,
+    ):
         self.predictor = predictor
         self.data_fetcher = data_fetcher
         self.feature_engineer = feature_engineer
+        self.scheduler = scheduler
 
     def find_opportunities(self, limit: int = 5) -> list[ScalpSetup]:
         """
@@ -56,6 +63,18 @@ class ScalpingEngine:
                 if self.data_fetcher.check_staleness(stock_df, yf_ticker):
                     continue
 
+                calibration_result = None
+                edge_check_result = None
+
+                if self.scheduler is not None:
+                    snapshot = self.scheduler.get_cached_live_worthiness(
+                        symbol,
+                        horizon=HORIZON_INTRADAY,
+                    )
+                    if snapshot is not None:
+                        calibration_result = snapshot.calibration_result
+                        edge_check_result = snapshot.edge_check_result
+
                 sig = self.predictor.generate_signal(
                     symbol=symbol,
                     horizon=HORIZON_INTRADAY,
@@ -63,6 +82,8 @@ class ScalpingEngine:
                     index_df=index_df,
                     macro_events=[],
                     news_articles=[],
+                    calibration_result=calibration_result,
+                    edge_check_result=edge_check_result,
                 )
 
                 # We want actionable BUY or SELL setups

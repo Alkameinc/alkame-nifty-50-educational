@@ -82,7 +82,12 @@ app.add_middleware(
 
 scheduler = Scheduler()
 history_manager = HistoryManager()
-scalping_engine = ScalpingEngine(scheduler.predictor, scheduler.data_fetcher, scheduler.predictor.feature_engineer)
+scalping_engine = ScalpingEngine(
+    scheduler.predictor,
+    scheduler.data_fetcher,
+    scheduler.predictor.feature_engineer,
+    scheduler=scheduler,
+)
 
 
 def translate_health_message(component: str, status: str) -> str:

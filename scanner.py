@@ -63,12 +63,14 @@ class OpportunityScanner:
         macro_events: list | None = None,
         corporate_events: list[dict] | None = None,
         news_articles: list[dict] | None = None,
+        scheduler=None,
     ):
         self.predictor = predictor
         self.data_fetcher = data_fetcher
         self.macro_events = macro_events
         self.corporate_events = corporate_events
         self.news_articles = news_articles
+        self.scheduler = scheduler
 
     def scan(
         self,
@@ -137,6 +139,19 @@ class OpportunityScanner:
                     continue
 
                 # Pass events into signal generation so safety gates and conviction scores reflect current macro/news
+                calibration_results = {}
+                edge_check_results = {}
+
+                if self.scheduler is not None:
+                    for horizon in ALL_HORIZONS:
+                        snapshot = self.scheduler.get_cached_live_worthiness(
+                            symbol,
+                            horizon=horizon,
+                        )
+                        if snapshot is not None:
+                            calibration_results[horizon] = snapshot.calibration_result
+                            edge_check_results[horizon] = snapshot.edge_check_result
+
                 multi_sig = self.predictor.generate_multi_horizon_signal(
                     symbol=symbol,
                     horizons=ALL_HORIZONS,
@@ -145,6 +160,8 @@ class OpportunityScanner:
                     macro_events=macros,
                     corporate_events=corps,
                     news_articles=news,
+                    calibration_results=calibration_results,
+                    edge_check_results=edge_check_results,
                 )
 
                 # Filter to actionable BUY signals

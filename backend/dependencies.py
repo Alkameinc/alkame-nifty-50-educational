@@ -4,6 +4,7 @@ from data_fetcher import DataFetcher
 from history_manager import HistoryManager
 from human_insight_manager import HumanInsightManager
 from predictor import Predictor
+from scheduler import Scheduler
 
 
 @lru_cache
@@ -24,3 +25,7 @@ def get_history_manager() -> HistoryManager:
 @lru_cache
 def get_insight_manager() -> HumanInsightManager:
     return HumanInsightManager()
+
+@lru_cache
+def get_scheduler() -> Scheduler:
+    return Scheduler()

@@ -6,12 +6,14 @@ from backend.dependencies import (
     get_data_fetcher,
     get_history_manager,
     get_predictor,
+    get_scheduler,
 )
 from backend.schemas import EventOut, SignalResponse
 from config import NIFTY50_YFINANCE_TICKERS, to_yfinance_ticker
 from data_fetcher import DataFetcher
 from history_manager import HistoryManager
 from predictor import Predictor
+from scheduler import Scheduler
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/signal", tags=["signals"])
@@ -22,6 +24,7 @@ def get_signal(
     symbol: str,
     data_fetcher: DataFetcher = Depends(get_data_fetcher),
     predictor: Predictor = Depends(get_predictor),
+    scheduler: Scheduler = Depends(get_scheduler),
     history_manager: HistoryManager = Depends(get_history_manager),
 ):
     symbol = symbol.upper().strip()
@@ -49,12 +52,23 @@ def get_signal(
     calibration_result = None
     edge_check_result = None
 
-    calibration_df = history_manager.build_calibration_dataset(symbol)
+    # Prefer the scheduler's cached live-worthiness evidence.
+    # If no cached evidence exists, keep the independently computed
+    # calibration but leave edge evidence missing so the predictor's
+    # safety gate cannot authorize a live-worthy signal.
+    snapshot = scheduler.get_cached_live_worthiness(
+        symbol,
+        horizon="INTRADAY",
+    )
 
-    if len(calibration_df) >= 30:
-        from runtime_validator import RuntimeValidator
-
-        calibration_result = RuntimeValidator().compute_calibration(calibration_df)
+    if snapshot is not None:
+        calibration_result = snapshot.calibration_result
+        edge_check_result = snapshot.edge_check_result
+    else:
+        calibration_df = history_manager.build_calibration_dataset(symbol)
+        if len(calibration_df) >= 30:
+            from runtime_validator import RuntimeValidator
+            calibration_result = RuntimeValidator().compute_calibration(calibration_df)
 
     # Step 4 — generate signal
     signal = predictor.generate_signal(

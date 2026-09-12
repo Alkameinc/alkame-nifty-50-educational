@@ -242,17 +242,19 @@ class Scheduler:
 
             calib_results = {}
             edge_results = {}
+
             for h in horizons:
                 snapshot = self.get_cached_live_worthiness(symbol, horizon=h)
+
                 if snapshot:
                     calib_results[h] = snapshot.calibration_result
                     edge_results[h] = snapshot.edge_check_result
 
-            stream = self.predictor.generate_multi_horizon_stream(
-                symbol,
-                horizons,
-                stock_df,
-                index_df,
+            yield from self.predictor.generate_multi_horizon_stream(
+                symbol=symbol,
+                horizons=horizons,
+                stock_df=stock_df,
+                index_df=index_df,
                 macro_events=macro_events,
                 corporate_events=corporate_events,
                 news_articles=news_articles,
@@ -260,26 +262,9 @@ class Scheduler:
                 edge_check_results=edge_results,
             )
 
-        calibration_result = (
-            snapshot.calibration_result if snapshot else None
-        )
-        edge_check_result = (
-            snapshot.edge_check_result if snapshot else None
-        )
-
-        horizons = list(HORIZON_CONFIG.keys())
-
-        yield from self.predictor.generate_multi_horizon_stream(
-            symbol=symbol,
-            horizons=horizons,
-            stock_df=stock_df,
-            index_df=index_df,
-            macro_events=macro_events,
-            corporate_events=corporate_events,
-            news_articles=news_articles,
-            calibration_result=calibration_result,
-            edge_check_result=edge_check_result,
-        )
+        except Exception as e:
+            logger.error(f"Streaming cycle failed for {symbol}: {e}")
+            raise
 
     # -----------------------------------------------------------------
     # Outcome resolution — closes the loop that grows real calibration data
