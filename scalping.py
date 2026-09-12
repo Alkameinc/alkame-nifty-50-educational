@@ -61,8 +61,9 @@ class ScalpingEngine:
                     horizon=HORIZON_INTRADAY,
                     stock_df=stock_df,
                     index_df=index_df,
-                    macro_events=[],
-                    news_articles=[],
+                    macro_events=None,
+                    corporate_events=None,
+                    news_articles=None,
                 )
 
                 # We want actionable BUY or SELL setups

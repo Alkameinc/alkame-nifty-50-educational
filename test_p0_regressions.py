@@ -348,11 +348,11 @@ def test_api_requires_authentication():
 
     client = TestClient(app)
     # Unauthenticated mutating request must return 401
-    r_no_auth = client.post("/api/risk/toggle?enabled=true")
+    r_no_auth = client.post("/api/v1/risk/toggle?enabled=true")
     assert r_no_auth.status_code == 401, f"Expected 401, got {r_no_auth.status_code}"
 
     # Invalid key must return 401
-    r_bad_key = client.post("/api/risk/toggle?enabled=true", headers={"X-API-Key": "invalid-key-xyz"})
+    r_bad_key = client.post("/api/v1/risk/toggle?enabled=true", headers={"X-API-Key": "invalid-key-xyz"})
     assert r_bad_key.status_code == 401, f"Expected 401, got {r_bad_key.status_code}"
 
 
@@ -366,11 +366,11 @@ def test_api_rbac_permissions():
 
     client = TestClient(app)
     # Read-only key trying to perform mutating admin action must return 403
-    r_readonly = client.post("/api/risk/toggle?enabled=true", headers={"X-API-Key": "dev-alkame-readonly-key"})
+    r_readonly = client.post("/api/v1/risk/toggle?enabled=true", headers={"X-API-Key": "dev-alkame-readonly-key"})
     assert r_readonly.status_code == 403, f"Expected 403, got {r_readonly.status_code}"
 
     # Admin key must succeed
-    r_admin = client.post("/api/risk/toggle?enabled=true", headers={"X-API-Key": "dev-alkame-admin-key"})
+    r_admin = client.post("/api/v1/risk/toggle?enabled=true", headers={"X-API-Key": "dev-alkame-admin-key"})
     assert r_admin.status_code == 200, f"Expected 200, got {r_admin.status_code}"
     assert r_admin.json().get("status") == "success"
 

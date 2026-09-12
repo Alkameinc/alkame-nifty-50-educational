@@ -171,7 +171,7 @@ class HealthRegistry:
     def get_overall_status(self) -> str:
         statuses = self.get_status()
         if not statuses:
-            return "OK"
+            return "UNKNOWN"
         status_levels = [s.status for s in statuses]
         if "DOWN" in status_levels:
             return "DOWN"
@@ -202,6 +202,9 @@ if __name__ == "__main__":
 
     try:
         registry = HealthRegistry(db_path=test_db_path)
+
+        # Test: empty registry returns UNKNOWN
+        assert registry.get_overall_status() == "UNKNOWN"
 
         # Test: report a success, confirm status == "OK"
         st = registry.report("test_comp", ok=True, detail="first success")

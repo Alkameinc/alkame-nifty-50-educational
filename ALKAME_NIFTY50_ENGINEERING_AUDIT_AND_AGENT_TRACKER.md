@@ -2587,6 +2587,15 @@ All Engineering Maturity items resolved and verified:
 - Created `CHANGELOG.md` following Keep a Changelog standards.
 - Updated `.gitignore` with standard exclusions for new tooling.
 
+## 2026-09-12 - Phase 4A: Application Layer Hardening Complete
+
+All Phase 4A tasks resolved and verified via full regression suite:
+- `API-001`, `API-002`, `API-003`: Implemented `/api/v1/` route versioning, strict Pydantic response contracts, and HTTP status codes (e.g. 404, 503) for all endpoints (`api.py`, `api_schemas.py`).
+- `HEALTH-001`: Fixed `get_overall_status` fail-open vulnerability (`health_monitor.py`).
+- `HEALTH-002`: Rewrote health endpoint language to be fact-based instead of implying financial safety (`api.py`).
+- `SCALP-001`: Enforced event safety contract in scalping engine by explicitly handling missing event feeds to fail closed (`scalping.py`).
+- `TEST-001`: Rewrote `test_scheduler.py` as a hermetic pytest suite using `unittest.mock`.
+
 ---
 
 # 37. Current Status Snapshot
@@ -2596,7 +2605,8 @@ Phase 0 (Stabilization): COMPLETE (6/6 P0 verified)
 Phase 1 (Quant Correctness): COMPLETE (8/8 QNT verified, FEAT-002 verified)
 Phase 2 (Data Reliability): COMPLETE (5/5 DATA verified, quality rules verified)
 Phase 3 (Engineering Maturity): COMPLETE (CI, tools, changelog verified)
-Total Automated Tests Passing: 36 / 36
+Phase 4A (App Hardening): COMPLETE (API contracts, health, scalping safety verified)
+Total Automated Tests Passing: 38 / 38
 Production-ready: IN_PROGRESS (Phase 4 Production Architecture next)
 Public internet API: SECURED (API auth & RBAC enabled)
 Live trading: EDUCATIONAL_ONLY
