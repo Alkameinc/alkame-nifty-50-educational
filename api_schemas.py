@@ -1,10 +1,12 @@
 from datetime import datetime
 from pydantic import BaseModel, Field
 
+
 class EventOut(BaseModel):
     type: str
     label: str
     sentiment: float | None = None
+
 
 class HorizonSignalOut(BaseModel):
     horizon: str
@@ -24,22 +26,27 @@ class HorizonSignalOut(BaseModel):
     events: list[EventOut]
     reasoning: list[str]
 
+
 class MultiHorizonSignalResponse(BaseModel):
     symbol: str
     narrative: str
     signals: dict[str, HorizonSignalOut]
+
 
 class HealthDiagnosticOut(BaseModel):
     component: str
     status: str
     message: str
 
+
 class HealthResponse(BaseModel):
     overall: str
     diagnostics: list[HealthDiagnosticOut]
 
+
 class SymbolsResponse(BaseModel):
     symbols: list[str]
+
 
 class PredictionRecordOut(BaseModel):
     id: int
@@ -59,10 +66,12 @@ class PredictionRecordOut(BaseModel):
     narrative: str | None = None
     dca_ladder: str | None = None
 
+
 class HistoryResponse(BaseModel):
     symbol: str
     count: int
     predictions: list[PredictionRecordOut]
+
 
 class OverrideRequest(BaseModel):
     symbol: str
@@ -71,6 +80,7 @@ class OverrideRequest(BaseModel):
     reason: str = Field(..., min_length=1)
     created_by: str = "default_trader"
 
+
 class OverrideResponse(BaseModel):
     id: int
     symbol: str
@@ -78,6 +88,7 @@ class OverrideResponse(BaseModel):
     overridden_action: str
     reason: str
     created_by: str
+
 
 class ErrorResponse(BaseModel):
     detail: str

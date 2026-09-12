@@ -282,7 +282,7 @@ class Scheduler:
                 is_safe_to_trade_live=False,
                 data_stale=True,
                 suppressed=True,
-                suppression_reasons=[f"Stream failed: {e}"]
+                suppression_reasons=[f"Stream failed: {e}"],
             )
 
     # -----------------------------------------------------------------

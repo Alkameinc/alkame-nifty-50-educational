@@ -16,7 +16,15 @@ from config import (
 )
 from health_monitor import registry as health_registry
 from history_manager import HistoryManager
-from api_schemas import MultiHorizonSignalResponse, HealthResponse, SymbolsResponse, HistoryResponse, OverrideRequest, OverrideResponse, ErrorResponse
+from api_schemas import (
+    MultiHorizonSignalResponse,
+    HealthResponse,
+    SymbolsResponse,
+    HistoryResponse,
+    OverrideRequest,
+    OverrideResponse,
+    ErrorResponse,
+)
 from scalping import ScalpingEngine
 from scheduler import Scheduler
 
@@ -160,7 +168,11 @@ def get_symbols():
     return {"symbols": NIFTY50_SYMBOLS}
 
 
-@app.get("/api/v1/signal/{symbol}", response_model=MultiHorizonSignalResponse, responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}})
+@app.get(
+    "/api/v1/signal/{symbol}",
+    response_model=MultiHorizonSignalResponse,
+    responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
 def get_signal(symbol: str):
     if symbol not in NIFTY50_SYMBOLS:
         raise HTTPException(status_code=404, detail="Invalid symbol")
@@ -291,10 +303,8 @@ def stream_signal(symbol: str):
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream"
-    )
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
 
 import threading
 import time
