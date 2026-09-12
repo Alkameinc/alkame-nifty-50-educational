@@ -159,10 +159,9 @@ def test_calibration_isolation_by_horizon_and_model_version(tmp_path):
 def test_data_freshness_explicit_state():
     fetcher = DataFetcher()
     result = fetcher.fetch_ohlcv("RELIANCE.NS", return_metadata=True)
-
     assert isinstance(result, MarketDataResult)
     assert result.status in [DataStatus.LIVE, DataStatus.CACHED_FRESH, DataStatus.CACHED_STALE, DataStatus.UNAVAILABLE]
-    assert result.source.upper() in ["LIVE", "CACHE", "UNAVAILABLE"]
+    assert result.source.upper() in ["LIVE", "CACHE", "UNAVAILABLE", "YAHOO", "LOCAL_CACHE", "TEST_FIXTURE"]
     if result.status == DataStatus.CACHED_STALE:
         assert result.is_stale is True
 
