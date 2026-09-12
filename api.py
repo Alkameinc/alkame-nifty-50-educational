@@ -16,6 +16,7 @@ from config import (
 )
 from health_monitor import registry as health_registry
 from history_manager import HistoryManager
+from api_schemas import MultiHorizonSignalResponse, HealthResponse, SymbolsResponse, HistoryResponse, OverrideRequest, OverrideResponse, ErrorResponse
 from scalping import ScalpingEngine
 from scheduler import Scheduler
 
@@ -88,18 +89,18 @@ scalping_engine = ScalpingEngine(scheduler.predictor, scheduler.data_fetcher, sc
 def translate_health_message(component: str, status: str) -> str:
     if status == "OK":
         messages = {
-            "history_manager": "Records verified and synced successfully.",
-            "data_fetcher": "Live market data is streaming perfectly.",
-            "runtime_validator": "All strict safety rules are currently passing.",
-            "global_risk_monitor": "Global conditions are stable and safe for trading.",
-            "human_insight_manager": "Manual override controls are online.",
-            "ensemble_manager": "AI models are loaded and ready to analyze.",
-            "predictor": "Signal engine is functioning flawlessly.",
+            "history_manager": "Database operations are completing successfully.",
+            "data_fetcher": "Market data providers are reachable.",
+            "runtime_validator": "Safety gate checks are executing normally.",
+            "global_risk_monitor": "Risk thresholds are within standard operational limits.",
+            "human_insight_manager": "Override subsystem is available.",
+            "ensemble_manager": "Models loaded successfully.",
+            "predictor": "Signal inference is operational.",
         }
-        return messages.get(component, "All system checks passed.")
+        return messages.get(component, "Component is operational.")
     elif status == "DEGRADED":
-        return "Experiencing slight delays in data, but recovering."
-    return "Currently offline or unresponsive, checking connections."
+        return "Component is experiencing elevated latency or partial failure."
+    return "Component is offline or failing all checks."
 
 
 def humanize_reasoning(reasons: list) -> list:
@@ -136,7 +137,7 @@ def humanize_reasoning(reasons: list) -> list:
     return list(dict.fromkeys(humanized))  # remove duplicates
 
 
-@app.get("/api/health")
+@app.get("/api/v1/health", response_model=HealthResponse)
 def get_health():
     overall = health_registry.get_overall_status()
     statuses = health_registry.get_status()
@@ -154,29 +155,29 @@ def get_health():
     return {"overall": overall, "diagnostics": diagnostic}
 
 
-@app.get("/api/symbols")
+@app.get("/api/v1/symbols", response_model=SymbolsResponse)
 def get_symbols():
     return {"symbols": NIFTY50_SYMBOLS}
 
 
-@app.get("/api/signal/{symbol}")
+@app.get("/api/v1/signal/{symbol}", response_model=MultiHorizonSignalResponse, responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}})
 def get_signal(symbol: str):
     if symbol not in NIFTY50_SYMBOLS:
-        return {"error": "Invalid symbol"}
+        raise HTTPException(status_code=404, detail="Invalid symbol")
 
     yf_ticker = to_yfinance_ticker(symbol)
     stock_df = scheduler.data_fetcher.fetch_ohlcv(yf_ticker)
     index_df = scheduler.data_fetcher.fetch_nifty_index()
 
     if stock_df is None or stock_df.empty:
-        return {"error": f"Could not fetch data for {symbol}"}
+        raise HTTPException(status_code=503, detail=f"Could not fetch data for {symbol}")
 
     scheduler.resolve_pending_outcomes(symbol, stock_df)
     multi_signal = scheduler.run_one_cycle_for_symbol(
         symbol, stock_df, index_df, macro_events=[], corporate_events=[], news_articles=[]
     )
     if multi_signal is None or not getattr(multi_signal, "signals", None):
-        return {"error": f"No signal available for {symbol}"}
+        raise HTTPException(status_code=503, detail=f"No signal available for {symbol}")
 
     # We can fetch narrative once
     recent_records = history_manager.get_predictions(symbol, limit=1)
@@ -224,17 +225,17 @@ def get_signal(symbol: str):
     return {"symbol": symbol, "narrative": narrative, "signals": all_horizons_data}
 
 
-@app.get("/api/signal/stream/{symbol}")
+@app.get("/api/v1/signal/stream/{symbol}")
 def stream_signal(symbol: str):
     if symbol not in NIFTY50_SYMBOLS:
-        return {"error": "Invalid symbol"}
+        raise HTTPException(status_code=404, detail="Invalid symbol")
 
     yf_ticker = to_yfinance_ticker(symbol)
     stock_df = scheduler.data_fetcher.fetch_ohlcv(yf_ticker)
     index_df = scheduler.data_fetcher.fetch_nifty_index()
 
     if stock_df is None or stock_df.empty:
-        return {"error": f"Could not fetch data for {symbol}"}
+        raise HTTPException(status_code=503, detail=f"Could not fetch data for {symbol}")
 
     scheduler.resolve_pending_outcomes(symbol, stock_df)
 
@@ -310,10 +311,10 @@ def _get_refresh_lock(symbol: str) -> threading.Lock:
     return _refresh_locks[symbol]
 
 
-@app.post("/api/signal/{symbol}/refresh")
+@app.post("/api/v1/signal/{symbol}/refresh")
 def refresh_backtest(symbol: str, response: Response = Response(), client: ClientAuth = Depends(get_current_client)):
     if symbol not in NIFTY50_SYMBOLS:
-        return {"error": "Invalid symbol"}
+        raise HTTPException(status_code=404, detail="Invalid symbol")
 
     lock = _get_refresh_lock(symbol)
     if not lock.acquire(blocking=False):
@@ -346,7 +347,7 @@ def refresh_backtest(symbol: str, response: Response = Response(), client: Clien
         lock.release()
 
 
-@app.get("/api/scalping")
+@app.get("/api/v1/scalping")
 def get_scalping():
     setups = scalping_engine.find_opportunities(limit=5)
     result = []
@@ -368,10 +369,10 @@ def get_scalping():
 from config import HORIZON_CONFIG
 
 
-@app.get("/api/chart/{symbol}")
+@app.get("/api/v1/chart/{symbol}")
 def get_chart(symbol: str, horizon: str = "INTRADAY"):
     if symbol not in NIFTY50_SYMBOLS:
-        return {"error": "Invalid symbol"}
+        raise HTTPException(status_code=404, detail="Invalid symbol")
     yf_ticker = to_yfinance_ticker(symbol)
 
     cfg = HORIZON_CONFIG.get(horizon, HORIZON_CONFIG["INTRADAY"])
@@ -398,7 +399,7 @@ def get_chart(symbol: str, horizon: str = "INTRADAY"):
     return {"chart": chart_data}
 
 
-@app.get("/api/risk/toggle")
+@app.get("/api/v1/risk/toggle")
 def get_risk_toggle():
     state = scheduler.predictor.global_risk_monitor.get_toggle_state()
     return {
@@ -409,7 +410,7 @@ def get_risk_toggle():
     }
 
 
-@app.post("/api/risk/toggle")
+@app.post("/api/v1/risk/toggle")
 def set_risk_toggle(enabled: bool, client: ClientAuth = Depends(require_role("ADMIN"))):
     # In a real app, you might take the reason from the request body.
     # For now, we'll just toggle it with a generic reason.

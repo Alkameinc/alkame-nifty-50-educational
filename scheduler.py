@@ -259,27 +259,31 @@ class Scheduler:
                 calibration_results=calib_results,
                 edge_check_results=edge_results,
             )
-
-        calibration_result = (
-            snapshot.calibration_result if snapshot else None
-        )
-        edge_check_result = (
-            snapshot.edge_check_result if snapshot else None
-        )
-
-        horizons = list(HORIZON_CONFIG.keys())
-
-        yield from self.predictor.generate_multi_horizon_stream(
-            symbol=symbol,
-            horizons=horizons,
-            stock_df=stock_df,
-            index_df=index_df,
-            macro_events=macro_events,
-            corporate_events=corporate_events,
-            news_articles=news_articles,
-            calibration_result=calibration_result,
-            edge_check_result=edge_check_result,
-        )
+            yield from stream
+        except Exception as e:
+            logger.error(f"Stream cycle failed for {symbol}: {e}")
+            yield PredictionSignal(
+                symbol=symbol,
+                timestamp=stock_df.index[-1] if not stock_df.empty else pd.Timestamp.now(),
+                action="HOLD",
+                model_predicted_class="FLAT",
+                raw_confidence=0.0,
+                risk_adjusted_confidence=0.0,
+                calibrated_confidence=None,
+                agreement_fraction=0.0,
+                target_price=0.0,
+                stop_loss=0.0,
+                downside_summary=f"Stream error: {e}",
+                upside_summary="",
+                reasoning=[f"Stream failed: {e}"],
+                contributing_events=[],
+                global_risk_level="UNKNOWN",
+                risk_toggle_enabled=False,
+                is_safe_to_trade_live=False,
+                data_stale=True,
+                suppressed=True,
+                suppression_reasons=[f"Stream failed: {e}"]
+            )
 
     # -----------------------------------------------------------------
     # Outcome resolution — closes the loop that grows real calibration data
