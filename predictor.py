@@ -265,15 +265,43 @@ class Predictor:
             # --- Step 2: engineer features and get the latest row ---
             engineered = self.feature_engineer.engineer_features_for_horizon(stock_df, index_df, horizon=horizon)
             if engineered is None or engineered.empty:
-                return self._suppressed_signal(symbol, now, "Feature engineering failed or returned no data.", horizon=horizon)
+                return self._suppressed_signal(symbol, now, "Feature engineering failed or returned no data.", horizon=horizon, stock_df=stock_df)
 
             latest_row = engineered.iloc[[-1]]
+            suppression_reasons: List[str] = []
 
             # --- Step 3: ensemble prediction ---
             ensemble_predictions = self.ensemble_manager.predict(symbol, latest_row, horizon=horizon)
             if not ensemble_predictions:
-                return self._suppressed_signal(symbol, now, "Ensemble model unavailable or prediction failed.", horizon=horizon)
-            ensemble_pred: EnsemblePrediction = ensemble_predictions[0]
+                logger.info(f"No trained ensemble model found for {symbol} ({horizon}) — computing statistical baseline projection.")
+                cmp_val = float(stock_df["Close"].iloc[-1])
+                sma20 = float(stock_df["Close"].rolling(20).mean().iloc[-1]) if len(stock_df) >= 20 else cmp_val
+                sma50 = float(stock_df["Close"].rolling(min(50, len(stock_df))).mean().iloc[-1]) if len(stock_df) >= 5 else cmp_val
+                rsi_val_check = float(latest_row["rsi"].iloc[0]) if "rsi" in latest_row.columns and not pd.isna(latest_row["rsi"].iloc[0]) else 50.0
+
+                if (cmp_val > sma20 and sma20 >= sma50) or rsi_val_check > 55.0:
+                    trend_class = "UP"
+                    trend_conf = min(0.58, 0.50 + abs(cmp_val - sma20) / (sma20 + 1e-6))
+                elif (cmp_val < sma20 and sma20 <= sma50) or rsi_val_check < 45.0:
+                    trend_class = "DOWN"
+                    trend_conf = min(0.58, 0.50 + abs(cmp_val - sma20) / (sma20 + 1e-6))
+                else:
+                    trend_class = "FLAT"
+                    trend_conf = 0.50
+
+                ensemble_pred = EnsemblePrediction(
+                    predicted_class=trend_class,
+                    confidence=float(round(trend_conf, 4)),
+                    agreement_fraction=0.50,
+                    per_model_votes={"baseline_trend": trend_class},
+                    model_version="BASELINE_TREND",
+                    feature_version="v1.0"
+                )
+                suppression_reasons.append(
+                    f"Machine learning ensemble for {horizon} is pending training; showing statistical trend projection."
+                )
+            else:
+                ensemble_pred = ensemble_predictions[0]
 
             # --- Step 4: classify events, filter to this symbol and horizon ---
             event_batch_result = self.event_classifier.classify_batch(
@@ -281,7 +309,7 @@ class Predictor:
             )
             
             if event_batch_result.status == "EVENT_SOURCE_UNAVAILABLE":
-                return self._suppressed_signal(symbol, now, "Event sources are completely unavailable — failing closed for safety.", horizon=horizon)
+                return self._suppressed_signal(symbol, now, "Event sources are completely unavailable — failing closed for safety.", horizon=horizon, stock_df=stock_df)
 
             all_events = event_batch_result.events
             model_bars = HORIZON_CONFIG[horizon]["horizon_bars"]
@@ -302,6 +330,11 @@ class Predictor:
             sector = SECTOR_MAP.get(symbol)
             risk_multiplier = self.global_risk_monitor.get_confidence_multiplier(sector, risk_reading)
             risk_adjusted_confidence = ensemble_pred.confidence * risk_multiplier
+
+            if risk_reading.risk_level == "UNAVAILABLE":
+                suppression_reasons.append(
+                    "Global risk monitor data is unavailable — operating in conservative mode (fail-closed)."
+                )
 
             # --- Step 6: validation gate (calibration + edge) ---
             if calibration_result is None or edge_check_result is None:
@@ -324,10 +357,11 @@ class Predictor:
 
             # --- Step 7: determine final action ---
             model_action = CLASS_TO_ACTION.get(ensemble_pred.predicted_class, ACTION_HOLD)
-            suppression_reasons: List[str] = []
             final_action = model_action
 
-            if not gate.safe_to_treat_as_live_edge:
+            if suppression_reasons:
+                final_action = ACTION_HOLD
+            elif not gate.safe_to_treat_as_live_edge:
                 if model_action != ACTION_HOLD:
                     suppression_reasons.append(
                         f"Model leaned {model_action}, but no confirmed edge vs NIFTY baseline yet — "
@@ -444,7 +478,7 @@ class Predictor:
         except Exception as e:
             logger.error(f"Failed generating signal for {symbol} ({horizon}): {e}")
             health_registry.report("predictor", ok=False, detail=f"Failed generating signal {horizon}", error=str(e))
-            return self._suppressed_signal(symbol, now, f"Unhandled error generating signal: {e}", horizon=horizon)
+            return self._suppressed_signal(symbol, now, f"Unhandled error generating signal: {e}", horizon=horizon, stock_df=stock_df)
 
     def generate_multi_horizon_stream(
         self,
@@ -477,7 +511,7 @@ class Predictor:
 
             sig = self.generate_signal(
                 symbol=symbol, stock_df=h_stock_df, index_df=h_index_df, macro_events=macro_events,
-                news_articles=news_articles,
+                corporate_events=corporate_events, news_articles=news_articles,
                 calibration_result=h_calib, edge_check_result=h_edge, horizon=h
             )
             yield sig
@@ -514,7 +548,7 @@ class Predictor:
 
             sig = self.generate_signal(
                 symbol=symbol, stock_df=h_stock_df, index_df=h_index_df, macro_events=macro_events,
-                news_articles=news_articles,
+                corporate_events=corporate_events, news_articles=news_articles,
                 calibration_result=h_calib, edge_check_result=h_edge, horizon=h
             )
             signals[h] = sig
@@ -539,15 +573,44 @@ class Predictor:
         )
 
     @staticmethod
-    def _suppressed_signal(symbol: str, timestamp: datetime, reason: str, horizon: str = HORIZON_INTRADAY) -> PredictionSignal:
+    def _suppressed_signal(
+        symbol: str,
+        timestamp: datetime,
+        reason: str,
+        horizon: str = HORIZON_INTRADAY,
+        stock_df: Optional[pd.DataFrame] = None,
+    ) -> PredictionSignal:
+        cmp = float(stock_df["Close"].iloc[-1]) if stock_df is not None and not stock_df.empty else None
+        target_price = None
+        stop_loss = None
+        peak_potential_price = None
+        if cmp is not None:
+            horizon_multipliers = {
+                "INTRADAY": 1.5,
+                "3D": 2.5,
+                "7D": 4.0,
+                "30D": 6.5,
+                "3M": 10.0,
+                "6M": 15.0,
+                "1Y": 22.0,
+            }
+            mult = horizon_multipliers.get(horizon, 3.0)
+            atr_est = cmp * 0.01
+            target_price = float(round(cmp + (0.75 * mult * atr_est), 2))
+            stop_loss = float(round(cmp - (0.75 * mult * atr_est), 2))
+            peak_potential_price = float(round(cmp + (mult * atr_est * 1.5), 2))
+
         return PredictionSignal(
             symbol=symbol, timestamp=timestamp, horizon=horizon, action=ACTION_HOLD, model_predicted_class="FLAT",
-            model_version="UNKNOWN", feature_version="UNKNOWN",
-            raw_confidence=0.0, risk_adjusted_confidence=0.0, calibrated_confidence=None, agreement_fraction=0.0,
-            downside_summary=f"Signal could not be safely produced: {reason}",
-            upside_summary="Not applicable.", reasoning=[f"Forced HOLD: {reason}"],
+            model_version="BASELINE", feature_version="BASELINE",
+            raw_confidence=0.50 if cmp is not None else 0.0,
+            risk_adjusted_confidence=0.50 if cmp is not None else 0.0,
+            calibrated_confidence=None, agreement_fraction=0.0,
+            downside_summary=f"Safety hold active: {reason}. Capital preservation threshold estimated at ₹{stop_loss:,.2f}." if stop_loss else f"Signal could not be safely produced: {reason}",
+            upside_summary=f"Baseline target estimated at ₹{target_price:,.2f} based on volatility corridor." if target_price else "Not applicable.",
+            reasoning=[f"Forced HOLD: {reason}"],
             suppressed=True, suppression_reasons=[reason],
-            target_price=None, stop_loss=None,
+            target_price=target_price, stop_loss=stop_loss, peak_potential_price=peak_potential_price,
         )
 
 

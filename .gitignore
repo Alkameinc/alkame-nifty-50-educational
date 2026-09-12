@@ -21,6 +21,8 @@ data/cache/
 # Models & Weights
 models/*.joblib
 models/*_metadata.json
+models/*/*/
+models/*/*/*/
 
 # Logs
 logs/

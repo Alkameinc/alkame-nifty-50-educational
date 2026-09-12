@@ -1,10 +1,15 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Security, HTTPException, status, Depends, Response
+from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 import json
 import logging
-from config import NIFTY50_SYMBOLS, HORIZON_INTRADAY, ALL_HORIZONS, to_yfinance_ticker
+from config import (
+    NIFTY50_SYMBOLS, HORIZON_INTRADAY, ALL_HORIZONS, to_yfinance_ticker,
+    API_AUTH_ENABLED, API_KEYS_ROLE_MAP, CORS_ALLOWED_ORIGINS, CORS_ALLOW_CREDENTIALS,
+    DEFAULT_DEV_API_KEY
+)
 from scheduler import Scheduler
 from scalping import ScalpingEngine
 from history_manager import HistoryManager
@@ -13,13 +18,55 @@ from health_monitor import registry as health_registry
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Alkame Nifty50 API")
+app = FastAPI(title="Alkame Nifty50 API", version="1.0.0")
 
-# Allow CORS for the React frontend
+# Security dependencies (P0-001)
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+bearer_auth = HTTPBearer(auto_error=False)
+
+class ClientAuth:
+    def __init__(self, key: str, role: str):
+        self.key = key
+        self.role = role
+
+def get_current_client(
+    api_key: Optional[str] = Security(api_key_header),
+    bearer: Optional[HTTPAuthorizationCredentials] = Security(bearer_auth)
+) -> ClientAuth:
+    if not API_AUTH_ENABLED:
+        return ClientAuth(key="disabled", role="ADMIN")
+    
+    provided_key = None
+    if api_key:
+        provided_key = api_key
+    elif bearer and bearer.credentials:
+        provided_key = bearer.credentials
+        
+    if not provided_key or provided_key not in API_KEYS_ROLE_MAP:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key. Provide valid key via 'X-API-Key' header or 'Authorization: Bearer <key>'.",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    role = API_KEYS_ROLE_MAP[provided_key]
+    return ClientAuth(key=provided_key, role=role)
+
+def require_role(required_role: str):
+    def role_checker(client: ClientAuth = Depends(get_current_client)) -> ClientAuth:
+        if required_role == "ADMIN" and client.role != "ADMIN":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Action requires '{required_role}' privilege. Client has role '{client.role}'."
+            )
+        return client
+    return role_checker
+
+# Strict CORS without wildcard credentials (P0-002)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust in production
-    allow_credentials=True,
+    allow_origins=CORS_ALLOWED_ORIGINS,
+    allow_credentials=CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -230,12 +277,18 @@ def _get_refresh_lock(symbol: str) -> threading.Lock:
 
 
 @app.post("/api/signal/{symbol}/refresh")
-def refresh_backtest(symbol: str):
+def refresh_backtest(
+    symbol: str,
+    response: Response = Response(),
+    client: ClientAuth = Depends(get_current_client)
+):
     if symbol not in NIFTY50_SYMBOLS:
         return {"error": "Invalid symbol"}
 
     lock = _get_refresh_lock(symbol)
     if not lock.acquire(blocking=False):
+        if response is not None:
+            response.status_code = status.HTTP_429_TOO_MANY_REQUESTS
         return {"status": "rejected", "reason": "A refresh is already running for this symbol.", "http_status": 429}
 
     try:
@@ -243,6 +296,8 @@ def refresh_backtest(symbol: str):
         elapsed = time.time() - last
         if elapsed < _REFRESH_COOLDOWN_SECONDS:
             remaining = int(_REFRESH_COOLDOWN_SECONDS - elapsed)
+            if response is not None:
+                response.status_code = status.HTTP_429_TOO_MANY_REQUESTS
             return {"status": "rejected", "reason": f"Refresh cooldown active. Try again in {remaining}s.", "http_status": 429}
 
         yf_ticker = to_yfinance_ticker(symbol)
@@ -316,10 +371,10 @@ def get_risk_toggle():
     }
 
 @app.post("/api/risk/toggle")
-def set_risk_toggle(enabled: bool):
+def set_risk_toggle(enabled: bool, client: ClientAuth = Depends(require_role("ADMIN"))):
     # In a real app, you might take the reason from the request body.
     # For now, we'll just toggle it with a generic reason.
-    reason = "User toggled via dashboard" if enabled else "User disabled via dashboard"
+    reason = f"Toggled by {client.role} ({client.key[:6]}...) via API"
     state = scheduler.predictor.global_risk_monitor.set_toggle(enabled, reason)
     return {"status": "success", "enabled": state.enabled}
 

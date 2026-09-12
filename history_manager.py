@@ -3,7 +3,7 @@ import json
 import logging
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
@@ -46,6 +46,7 @@ class PredictionRecord:
     outcome_correct: Optional[bool]
     outcome_actual_class: Optional[str]
     resolved_at: Optional[str]
+    is_out_of_sample: bool = False
 
 
 @dataclass
@@ -117,7 +118,8 @@ class HistoryManager:
                     resolved_at TEXT,
                     horizon TEXT DEFAULT 'INTRADAY',
                     narrative TEXT,
-                    dca_ladder TEXT
+                    dca_ladder TEXT,
+                    is_out_of_sample INTEGER DEFAULT 0
                 )
             """)
             # Try adding new columns if table already exists without them
@@ -135,6 +137,9 @@ class HistoryManager:
             except: pass
             try:
                 cursor.execute("ALTER TABLE predictions ADD COLUMN feature_version TEXT DEFAULT 'UNKNOWN'")
+            except: pass
+            try:
+                cursor.execute("ALTER TABLE predictions ADD COLUMN is_out_of_sample INTEGER DEFAULT 0")
             except: pass
 
             cursor.execute("""
@@ -181,7 +186,13 @@ class HistoryManager:
     # -----------------------------------------------------------------
     # Predictions
     # -----------------------------------------------------------------
-    def save_prediction(self, signal: PredictionSignal, narrative: Optional[str] = None, dca_ladder: Optional[dict] = None) -> Optional[int]:
+    def save_prediction(
+        self,
+        signal: PredictionSignal,
+        narrative: Optional[str] = None,
+        dca_ladder: Optional[dict] = None,
+        is_out_of_sample: bool = False,
+    ) -> Optional[int]:
         conn = None
         try:
             conn = self._get_connection()
@@ -194,8 +205,8 @@ class HistoryManager:
                     risk_adjusted_confidence, calibrated_confidence, agreement_fraction,
                     downside_summary, upside_summary, reasoning, global_risk_level,
                     risk_toggle_enabled, is_safe_to_trade_live, data_stale, suppressed, suppression_reasons,
-                    horizon, narrative, dca_ladder, model_version, feature_version
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    horizon, narrative, dca_ladder, model_version, feature_version, is_out_of_sample
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 signal.symbol, signal.timestamp.isoformat(), signal.action, signal.model_predicted_class,
                 signal.raw_confidence, signal.risk_adjusted_confidence, signal.calibrated_confidence,
@@ -203,7 +214,7 @@ class HistoryManager:
                 json.dumps(signal.reasoning), signal.global_risk_level, int(signal.risk_toggle_enabled),
                 int(signal.is_safe_to_trade_live), int(signal.data_stale), int(signal.suppressed),
                 json.dumps(signal.suppression_reasons), signal.horizon, narrative, dca_ladder_str,
-                signal.model_version, signal.feature_version
+                signal.model_version, signal.feature_version, int(is_out_of_sample)
             ))
 
             conn.commit()
@@ -249,15 +260,24 @@ class HistoryManager:
             if conn is not None:
                 conn.close()
 
-    def get_predictions(self, symbol: Optional[str] = None, horizon: Optional[str] = None, limit: int = 200,
-                         only_unresolved: bool = False, model_version: Optional[str] = None) -> List[PredictionRecord]:
+    def get_predictions(
+        self,
+        symbol: Optional[str] = None,
+        horizon: Optional[str] = None,
+        limit: int = 200,
+        only_unresolved: bool = False,
+        model_version: Optional[str] = None,
+        feature_version: Optional[str] = None,
+        only_out_of_sample: bool = False,
+    ) -> List[PredictionRecord]:
         conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             query = ("SELECT id, symbol, timestamp, action, model_predicted_class, raw_confidence, "
                       "risk_adjusted_confidence, calibrated_confidence, agreement_fraction, outcome_resolved, "
-                      "outcome_correct, outcome_actual_class, resolved_at, horizon, narrative, dca_ladder, model_version, feature_version FROM predictions WHERE 1=1")
+                      "outcome_correct, outcome_actual_class, resolved_at, horizon, narrative, dca_ladder, "
+                      "model_version, feature_version, is_out_of_sample FROM predictions WHERE 1=1")
             params = []
             if symbol:
                 query += " AND symbol = ?"
@@ -268,6 +288,11 @@ class HistoryManager:
             if model_version:
                 query += " AND model_version = ?"
                 params.append(model_version)
+            if feature_version:
+                query += " AND feature_version = ?"
+                params.append(feature_version)
+            if only_out_of_sample:
+                query += " AND is_out_of_sample = 1"
             if only_unresolved:
                 query += " AND outcome_resolved = 0"
             query += " ORDER BY id DESC LIMIT ?"
@@ -276,7 +301,6 @@ class HistoryManager:
             rows = cursor.fetchall()
             records = []
             for row in rows:
-
                 records.append(PredictionRecord(
                     id=row[0], symbol=row[1], timestamp=row[2], action=row[3], model_predicted_class=row[4],
                     raw_confidence=row[5], risk_adjusted_confidence=row[6], calibrated_confidence=row[7],
@@ -287,7 +311,8 @@ class HistoryManager:
                     narrative=row[14] if len(row) > 14 else None,
                     dca_ladder=row[15] if len(row) > 15 else None,
                     model_version=row[16] if len(row) > 16 and row[16] else 'LEGACY/UNKNOWN',
-                    feature_version=row[17] if len(row) > 17 and row[17] else 'LEGACY/UNKNOWN'
+                    feature_version=row[17] if len(row) > 17 and row[17] else 'LEGACY/UNKNOWN',
+                    is_out_of_sample=bool(row[18]) if len(row) > 18 and row[18] is not None else False
                 ))
 
             health_registry.report("history_manager", ok=True)
@@ -300,20 +325,43 @@ class HistoryManager:
             if conn is not None:
                 conn.close()
 
-    def build_calibration_dataset(self, symbol: Optional[str] = None, horizon: Optional[str] = None, model_version: Optional[str] = None) -> pd.DataFrame:
+    def build_calibration_dataset(
+        self,
+        symbol: Optional[str] = None,
+        horizon: Optional[str] = None,
+        model_version: Optional[str] = None,
+        feature_version: Optional[str] = None,
+        only_out_of_sample: bool = False,
+        max_age_days: Optional[int] = None,
+    ) -> pd.DataFrame:
         """
         Builds the (confidence, correct) DataFrame that runtime_validator.py's
         compute_calibration() expects, from REAL resolved predictions. Uses
         risk_adjusted_confidence (the confidence actually shown pre-calibration)
         rather than raw_confidence, since that's what's being calibrated.
+        Isolates calibration strictly by symbol, horizon, model_version, and feature_version.
+        Supports out-of-sample isolation (QNT-005) and rolling freshness windows (QNT-006).
         """
         try:
-            records = self.get_predictions(symbol=symbol, horizon=horizon, model_version=model_version, limit=100_000, only_unresolved=False)
+            records = self.get_predictions(
+                symbol=symbol,
+                horizon=horizon,
+                model_version=model_version,
+                feature_version=feature_version,
+                limit=100_000,
+                only_unresolved=False,
+                only_out_of_sample=only_out_of_sample,
+            )
+            cutoff_ts = None
+            if max_age_days is not None and max_age_days > 0:
+                cutoff_ts = (datetime.now() - timedelta(days=max_age_days)).isoformat()
+
             resolved = [
                 r for r in records
                 if r.outcome_resolved and r.outcome_correct is not None
                 and r.model_version not in ('LEGACY/UNKNOWN', 'UNKNOWN', 'LEGACY')
                 and r.feature_version not in ('LEGACY/UNKNOWN', 'UNKNOWN', 'LEGACY')
+                and (cutoff_ts is None or r.timestamp >= cutoff_ts)
             ]
             if not resolved:
                 health_registry.report("history_manager", ok=True)

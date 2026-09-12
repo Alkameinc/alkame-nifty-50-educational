@@ -1,7 +1,7 @@
 {
-  "enabled": false,
-  "reason": "Self-test cleanup",
-  "level_at_activation": "NORMAL",
-  "activated_at": "2026-07-14T22:58:44.356913",
-  "updated_at": "2026-07-14T22:58:44.360331"
+  "enabled": true,
+  "reason": "Toggled by ADMIN (dev-al...) via API",
+  "level_at_activation": null,
+  "activated_at": "2026-09-12T13:27:22.749557",
+  "updated_at": "2026-09-12T13:27:22.749557"
 }

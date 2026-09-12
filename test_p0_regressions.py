@@ -304,3 +304,138 @@ def test_model_trainer_walk_forward_split():
         # Chronological order invariant: max train timestamp < min test timestamp
         assert X_tr.index.max() < X_te.index.min()
 
+
+# ============================================================================
+# 12. API Authentication (P0-001)
+# ============================================================================
+def test_api_requires_authentication():
+    from fastapi.testclient import TestClient
+    from api import app
+
+    client = TestClient(app)
+    # Unauthenticated mutating request must return 401
+    r_no_auth = client.post("/api/risk/toggle?enabled=true")
+    assert r_no_auth.status_code == 401, f"Expected 401, got {r_no_auth.status_code}"
+
+    # Invalid key must return 401
+    r_bad_key = client.post("/api/risk/toggle?enabled=true", headers={"X-API-Key": "invalid-key-xyz"})
+    assert r_bad_key.status_code == 401, f"Expected 401, got {r_bad_key.status_code}"
+
+
+# ============================================================================
+# 13. API Role-Based Authorization (P0-001)
+# ============================================================================
+def test_api_rbac_permissions():
+    from fastapi.testclient import TestClient
+    from api import app
+
+    client = TestClient(app)
+    # Read-only key trying to perform mutating admin action must return 403
+    r_readonly = client.post("/api/risk/toggle?enabled=true", headers={"X-API-Key": "dev-alkame-readonly-key"})
+    assert r_readonly.status_code == 403, f"Expected 403, got {r_readonly.status_code}"
+
+    # Admin key must succeed
+    r_admin = client.post("/api/risk/toggle?enabled=true", headers={"X-API-Key": "dev-alkame-admin-key"})
+    assert r_admin.status_code == 200, f"Expected 200, got {r_admin.status_code}"
+    assert r_admin.json().get("status") == "success"
+
+
+# ============================================================================
+# 14. Strict CORS Configuration (P0-002)
+# ============================================================================
+def test_api_cors_no_wildcard_credentials():
+    from config import CORS_ALLOWED_ORIGINS, CORS_ALLOW_CREDENTIALS
+
+    if CORS_ALLOW_CREDENTIALS:
+        assert "*" not in CORS_ALLOWED_ORIGINS, "Wildcard '*' origin is prohibited when CORS credentials are enabled."
+    assert len(CORS_ALLOWED_ORIGINS) > 0
+
+
+# ============================================================================
+# 15. Purged Train/Test Boundary (P0-003)
+# ============================================================================
+def test_no_training_label_reaches_into_test_window():
+    from model_trainer import ModelTrainer
+
+    n_samples = 100
+    horizon_bars = 6
+    dates = pd.date_range("2026-01-01 09:15", periods=n_samples, freq="5min")
+    X = pd.DataFrame({"f1_feat": range(n_samples)}, index=dates)
+    y = pd.Series(["UP"] * n_samples, index=dates)
+
+    X_tr, X_te, y_tr, y_te = ModelTrainer.time_based_split(
+        X, y, test_fraction=0.20, purge_window=horizon_bars
+    )
+
+    test_start_idx = X.index.get_loc(X_te.index[0])
+    train_end_idx = X.index.get_loc(X_tr.index[-1])
+
+    # The gap between last train row and first test row must equal or exceed purge_window
+    purge_gap = test_start_idx - train_end_idx
+    assert purge_gap >= horizon_bars + 1, (
+        f"Purge gap ({purge_gap}) must be >= {horizon_bars + 1} bars to prevent forward label leakage."
+    )
+
+
+# ============================================================================
+# 16. Global Risk Monitor Fail-Closed State (P0-004)
+# ============================================================================
+def test_global_risk_monitor_fails_closed_when_drivers_unavailable():
+    from global_risk_monitor import GlobalRiskMonitor, RISK_LEVEL_UNAVAILABLE
+
+    class MockEmptyFetcher:
+        def fetch_global_tickers(self, **kwargs):
+            return {}  # Zero drivers available
+
+    monitor = GlobalRiskMonitor(data_fetcher=MockEmptyFetcher())
+    reading = monitor.compute_composite_risk()
+
+    assert reading.risk_level == RISK_LEVEL_UNAVAILABLE, f"Expected {RISK_LEVEL_UNAVAILABLE}, got {reading.risk_level}"
+    assert reading.is_available is False
+    assert "unavailable" in reading.banner_message.lower()
+
+
+# ============================================================================
+# 17. Model Artifact Provenance & Lineage (P0-006)
+# ============================================================================
+def test_model_metadata_lineage_fields(tmp_path):
+    from ensemble_manager import EnsembleManager
+    import json
+
+    em = EnsembleManager()
+    dummy_models = {"dummy": None}
+    feature_cols = ["f1_feat", "f2_feat"]
+
+    # Test saving with full lineage
+    em._save_ensemble(
+        symbol="TEST_LINEAGE",
+        fitted_models=dummy_models,
+        feature_columns=feature_cols,
+        per_model_accuracy={"dummy": 0.8},
+        ensemble_accuracy=0.8,
+        mean_agreement=1.0,
+        horizon="INTRADAY",
+        training_sample_count=150,
+        training_data_start="2026-01-01",
+        training_data_end="2026-01-10",
+    )
+
+    meta_path = em._ensemble_metadata_path("TEST_LINEAGE", "INTRADAY")
+    assert meta_path.exists(), "Metadata file was not created"
+
+    with open(meta_path, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+
+    # Invariants for P0-006 model lineage
+    required_lineage_fields = [
+        "model_id", "symbol", "horizon", "model_version", "feature_version",
+        "trained_at", "code_commit_sha", "training_sample_count", "training_seed",
+        "feature_schema_hash", "environment"
+    ]
+    for field in required_lineage_fields:
+        assert field in meta, f"Required lineage field '{field}' missing from metadata"
+
+    assert len(meta["model_id"]) > 10, "model_id must be a non-empty UUID"
+    assert "python_version" in meta["environment"]
+    assert "sklearn_version" in meta["environment"]
+

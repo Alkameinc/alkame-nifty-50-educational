@@ -65,6 +65,38 @@ def configure_logging(log_filename: str = "app.log", level: int = logging.INFO) 
 MARKETAUX_API_KEY = os.environ.get("MARKETAUX_API_KEY", "")
 IMD_API_KEY = os.environ.get("IMD_API_KEY", "")
 
+# API Authentication & Authorization (P0-001 & P0-002)
+API_AUTH_ENABLED = os.environ.get("ALKAME_API_AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
+DEFAULT_DEV_API_KEY = "dev-alkame-key-insecure"
+API_ADMIN_KEY = os.environ.get("ALKAME_ADMIN_KEY", "dev-alkame-admin-key")
+API_READONLY_KEY = os.environ.get("ALKAME_READONLY_KEY", "dev-alkame-readonly-key")
+
+# Recognized keys mapped to roles: ADMIN, READ_ONLY
+API_KEYS_ROLE_MAP = {
+    API_ADMIN_KEY: "ADMIN",
+    API_READONLY_KEY: "READ_ONLY",
+    DEFAULT_DEV_API_KEY: "ADMIN",
+}
+
+_custom_admin_keys = [k.strip() for k in os.environ.get("ALKAME_ADMIN_KEYS", "").split(",") if k.strip()]
+for k in _custom_admin_keys:
+    API_KEYS_ROLE_MAP[k] = "ADMIN"
+
+_custom_readonly_keys = [k.strip() for k in os.environ.get("ALKAME_READONLY_KEYS", "").split(",") if k.strip()]
+for k in _custom_readonly_keys:
+    API_KEYS_ROLE_MAP[k] = "READ_ONLY"
+
+# CORS configuration: explicit allowlist, no wildcard with credentials
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "ALKAME_CORS_ORIGINS",
+        "http://localhost:8501,http://127.0.0.1:8501,http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000"
+    ).split(",")
+    if origin.strip()
+]
+CORS_ALLOW_CREDENTIALS = True
+
 REQUIRED_ENV_VARS = ["MARKETAUX_API_KEY"]   # IMD key is optional (monsoon feature degrades gracefully without it)
 
 
@@ -230,22 +262,22 @@ HORIZON_CONFIG = {
     },
     HORIZON_30D: {
         "bar_interval": "1d", "horizon_bars": 21, "deadband_pct_default": 3.0,
-        "history_period": "5y", "min_training_samples": 500,
+        "history_period": "5y", "min_training_samples": 350,
         "retrain_cadence_days": 14,
     },
     HORIZON_3M: {
         "bar_interval": "1d", "horizon_bars": 63, "deadband_pct_default": 5.0,
-        "history_period": "7y", "min_training_samples": 500,
+        "history_period": "7y", "min_training_samples": 300,
         "retrain_cadence_days": 30,
     },
     HORIZON_6M: {
         "bar_interval": "1d", "horizon_bars": 126, "deadband_pct_default": 8.0,
-        "history_period": "10y", "min_training_samples": 400,
+        "history_period": "10y", "min_training_samples": 250,
         "retrain_cadence_days": 60,
     },
     HORIZON_1Y: {
         "bar_interval": "1d", "horizon_bars": 252, "deadband_pct_default": 12.0,
-        "history_period": "max", "min_training_samples": 300,
+        "history_period": "max", "min_training_samples": 200,
         "retrain_cadence_days": 90,
     },
 }

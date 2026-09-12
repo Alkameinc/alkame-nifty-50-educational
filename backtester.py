@@ -12,6 +12,7 @@ from config import SLIPPAGE_BPS, TRANSACTION_COST_BPS, PREDICTION_HORIZON_BARS, 
 from ensemble_manager import EnsembleManager
 from runtime_validator import RuntimeValidator, CalibrationResult, EdgeCheckResult, LiveGateResult
 from history_manager import HistoryManager
+from execution_simulator import ExecutionSimulator, SimulationReport, STANDARD_COST_SCENARIOS, CostScenario
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -38,6 +39,12 @@ class BacktestResult:
     gate_reasons: List[str] = field(default_factory=list)
     success: bool = True
     error: Optional[str] = None
+    max_drawdown_pct: float = 0.0
+    win_rate_pct: float = 0.0
+    profit_factor: float = 0.0
+    sharpe_ratio: float = 0.0
+    cost_sensitivity: Dict[str, float] = field(default_factory=dict)
+    walk_forward_folds: List[Dict] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -55,10 +62,12 @@ class Backtester:
 
     def __init__(self, ensemble_manager: Optional[EnsembleManager] = None,
                  runtime_validator: Optional[RuntimeValidator] = None,
-                 history_manager: Optional[HistoryManager] = None):
+                 history_manager: Optional[HistoryManager] = None,
+                 execution_simulator: Optional[ExecutionSimulator] = None):
         self.ensemble_manager = ensemble_manager or EnsembleManager()
         self.runtime_validator = runtime_validator or RuntimeValidator()
         self.history_manager = history_manager or HistoryManager()
+        self.execution_simulator = execution_simulator or ExecutionSimulator()
 
     @staticmethod
     def _forward_return_pct(close: pd.Series, horizon_bars: int) -> pd.Series:
@@ -78,7 +87,6 @@ class Backtester:
                     error=f"Ensemble training failed: {train_result.error}",
                 )
 
-            # Recover the exact same chronological test split the ensemble was evaluated on.
             prepared = self.ensemble_manager.model_trainer.prepare_dataset(stock_df, index_df, horizon=horizon)
             if prepared is None:
                 return BacktestResult(
@@ -88,7 +96,8 @@ class Backtester:
                     is_live_worthy=False, success=False, error="Dataset preparation failed for backtest.",
                 )
             X, y, _ = prepared
-            _, X_test, _, y_test = self.ensemble_manager.model_trainer.time_based_split(X, y)
+            horizon_bars = HORIZON_CONFIG.get(horizon, {}).get("horizon_bars", 0)
+            _, X_test, _, y_test = self.ensemble_manager.model_trainer.time_based_split(X, y, purge_window=horizon_bars)
 
             if len(X_test) == 0:
                 return BacktestResult(
@@ -107,29 +116,30 @@ class Backtester:
                     is_live_worthy=False, success=False, error="Ensemble prediction failed on test set.",
                 )
 
-            # Actual forward returns for the stock (for P&L) and the index (for baseline), same horizon.
-            horizon_bars = HORIZON_CONFIG[horizon]["horizon_bars"]
             stock_forward_return = self._forward_return_pct(stock_df["Close"], horizon_bars).reindex(X_test.index)
             index_forward_return = self._forward_return_pct(index_df["Close"], horizon_bars).reindex(X_test.index)
 
-            total_cost_pct = (SLIPPAGE_BPS + TRANSACTION_COST_BPS) / 100.0  # bps -> %
+            total_cost_pct = (SLIPPAGE_BPS + TRANSACTION_COST_BPS) / 100.0
 
             per_trade_net_returns = []
             n_trades_taken = 0
             calibration_rows = []
+            signals_series = pd.Series(0, index=stock_df.index)
 
             for i, ts in enumerate(X_test.index):
                 pred = ensemble_predictions[i]
                 direction = CLASS_TO_DIRECTION.get(pred.predicted_class, 0)
                 raw_fwd_return = stock_forward_return.loc[ts]
 
+                if ts in signals_series.index:
+                    signals_series.loc[ts] = direction
+
                 if direction == 0 or pd.isna(raw_fwd_return):
-                    # FLAT prediction, or no future data to resolve (tail of dataset) -> no trade, no cost.
                     net_return = 0.0
                 else:
                     n_trades_taken += 1
-                    gross_return = direction * raw_fwd_return  # long profits from up moves, short profits from down moves
-                    net_return = gross_return - total_cost_pct  # cost only charged when a trade actually happens
+                    gross_return = direction * raw_fwd_return
+                    net_return = gross_return - total_cost_pct
 
                 per_trade_net_returns.append(net_return)
 
@@ -141,17 +151,18 @@ class Backtester:
 
             strategy_returns = pd.Series(per_trade_net_returns, index=X_test.index)
 
-            # Edge check: costs are already netted in per-trade returns above, so pass zero
-            # additional cost here — otherwise costs would be deducted twice.
             edge_result = self.runtime_validator.compute_edge_vs_baseline(
                 strategy_returns, index_forward_return.fillna(0.0), slippage_bps=0, transaction_cost_bps=0,
             )
 
             calibration_df = pd.DataFrame(calibration_rows)
             calibration_result = self.runtime_validator.compute_calibration(calibration_df)
-
-
             gate = self.runtime_validator.validate_before_live(calibration_result, edge_result)
+
+            # Realistic execution simulation on test period
+            sim_report = self.execution_simulator.simulate(symbol, stock_df, signals_series, horizon=horizon)
+            sensitivity_reports = self.execution_simulator.run_sensitivity_analysis(symbol, stock_df, signals_series, horizon=horizon)
+            cost_sensitivity = {name: rep.cumulative_net_return_pct for name, rep in sensitivity_reports.items()}
 
             if self.history_manager:
                 self.history_manager.save_backtest_result(
@@ -164,7 +175,6 @@ class Backtester:
 
             return BacktestResult(
                 symbol=symbol, horizon=horizon, n_test_predictions=len(X_test), n_trades_taken=n_trades_taken,
-
                 strategy_cumulative_return_pct=edge_result.strategy_cumulative_return_pct,
                 baseline_cumulative_return_pct=edge_result.baseline_cumulative_return_pct,
                 alpha_pct=edge_result.alpha_pct, edge_check_status=edge_result.status,
@@ -172,10 +182,194 @@ class Backtester:
                 calibration_ece=calibration_result.expected_calibration_error,
                 is_live_worthy=(gate.safe_to_show_calibrated_confidence and gate.safe_to_treat_as_live_edge),
                 gate_reasons=gate.reasons, success=True,
+                max_drawdown_pct=sim_report.max_drawdown_pct,
+                win_rate_pct=sim_report.win_rate_pct,
+                profit_factor=sim_report.profit_factor,
+                sharpe_ratio=sim_report.sharpe_ratio,
+                cost_sensitivity=cost_sensitivity,
             )
 
         except Exception as e:
             logger.error(f"Backtest failed for {symbol}: {e}")
+            return BacktestResult(
+                symbol=symbol, horizon=horizon, n_test_predictions=0, n_trades_taken=0,
+                strategy_cumulative_return_pct=0.0, baseline_cumulative_return_pct=0.0, alpha_pct=0.0,
+                edge_check_status="NO_EDGE", calibration_status="INSUFFICIENT_DATA", calibration_ece=None,
+                is_live_worthy=False, success=False, error=str(e),
+            )
+
+    def run_walk_forward_backtest(
+        self,
+        symbol: str,
+        stock_df: pd.DataFrame,
+        index_df: pd.DataFrame,
+        horizon: str = HORIZON_INTRADAY,
+        n_splits: int = 3,
+        purge_window: Optional[int] = None,
+        embargo_window: int = 1,
+        mode: str = "expanding",
+    ) -> BacktestResult:
+        """
+        Executes multi-fold Purged Walk-Forward Backtesting (QNT-001, QNT-002, QNT-003).
+        Enforces purge windows prior to test intervals to eliminate forward label peeking,
+        and embargo windows to prevent autocorrelation leakage.
+        Simulates realistic execution across all folds and produces cross-scenario sensitivity.
+        """
+        try:
+            prepared = self.ensemble_manager.model_trainer.prepare_dataset(stock_df, index_df, horizon=horizon)
+            if prepared is None:
+                return BacktestResult(
+                    symbol=symbol, horizon=horizon, n_test_predictions=0, n_trades_taken=0,
+                    strategy_cumulative_return_pct=0.0, baseline_cumulative_return_pct=0.0, alpha_pct=0.0,
+                    edge_check_status="NO_EDGE", calibration_status="INSUFFICIENT_DATA", calibration_ece=None,
+                    is_live_worthy=False, success=False, error="Dataset preparation failed for walk-forward backtest.",
+                )
+            X, y, feature_columns = prepared
+            horizon_bars = HORIZON_CONFIG.get(horizon, {}).get("horizon_bars", 5)
+            p_win = purge_window if purge_window is not None else horizon_bars
+
+            stock_forward_return = self._forward_return_pct(stock_df["Close"], horizon_bars)
+            index_forward_return = self._forward_return_pct(index_df["Close"], horizon_bars)
+
+            fold_records = []
+            all_calibration_rows = []
+            all_per_trade_returns = []
+            all_index_returns = []
+            total_predictions = 0
+            total_trades = 0
+
+            signals_series = pd.Series(0, index=stock_df.index)
+
+            for fold_idx, X_train, X_test, y_train, y_test in self.ensemble_manager.model_trainer.walk_forward_split(
+                X, y,
+                n_splits=n_splits,
+                purge_window=p_win,
+                embargo_window=embargo_window,
+                mode=mode,
+            ):
+                if len(X_test) == 0 or len(X_train) == 0:
+                    continue
+
+                # Train models for this fold
+                models = {}
+                for m_name in ["gradient_boosting", "random_forest", "logistic_regression"]:
+                    try:
+                        m_instance = self.ensemble_manager._create_model(m_name)
+                        m_instance.fit(X_train, y_train)
+                        models[m_name] = m_instance
+                    except Exception as me:
+                        logger.warning(f"Failed training fold model {m_name}: {me}")
+
+                if not models:
+                    continue
+
+                # Predict on fold test set
+                fold_signals = []
+                fold_confs = []
+                for idx in range(len(X_test)):
+                    x_row = X_test.iloc[[idx]]
+                    preds = [m.predict(x_row)[0] for m in models.values()]
+                    # Plurality vote
+                    vote = max(set(preds), key=preds.count)
+                    agreement = preds.count(vote) / len(preds)
+                    fold_signals.append(vote)
+                    fold_confs.append(agreement)
+
+                    ts = X_test.index[idx]
+                    dir_val = CLASS_TO_DIRECTION.get(vote, 0)
+                    if ts in signals_series.index:
+                        signals_series.loc[ts] = dir_val
+
+                total_cost_pct = (SLIPPAGE_BPS + TRANSACTION_COST_BPS) / 100.0
+                fold_trade_returns = []
+                fold_trades_count = 0
+
+                for i, ts in enumerate(X_test.index):
+                    dir_val = CLASS_TO_DIRECTION.get(fold_signals[i], 0)
+                    raw_ret = stock_forward_return.loc[ts] if ts in stock_forward_return.index else np.nan
+                    if dir_val != 0 and not pd.isna(raw_ret):
+                        fold_trades_count += 1
+                        net_ret = dir_val * raw_ret - total_cost_pct
+                    else:
+                        net_ret = 0.0
+
+                    fold_trade_returns.append(net_ret)
+                    all_per_trade_returns.append(net_ret)
+                    if ts in index_forward_return.index:
+                        all_index_returns.append(index_forward_return.loc[ts])
+                    else:
+                        all_index_returns.append(0.0)
+
+                    actual_class = y_test.iloc[i]
+                    all_calibration_rows.append({
+                        "confidence": fold_confs[i],
+                        "correct": bool(fold_signals[i] == actual_class),
+                    })
+
+                total_predictions += len(X_test)
+                total_trades += fold_trades_count
+
+                fold_cum_strat = float(np.sum(fold_trade_returns))
+                idx_slice = index_forward_return.reindex(X_test.index).fillna(0.0)
+                fold_cum_idx = float(np.sum(idx_slice))
+                fold_records.append({
+                    "fold": fold_idx,
+                    "train_size": len(X_train),
+                    "test_size": len(X_test),
+                    "trades": fold_trades_count,
+                    "strategy_return_pct": round(fold_cum_strat, 2),
+                    "baseline_return_pct": round(fold_cum_idx, 2),
+                    "alpha_pct": round(fold_cum_strat - fold_cum_idx, 2),
+                })
+
+            if not fold_records:
+                return BacktestResult(
+                    symbol=symbol, horizon=horizon, n_test_predictions=0, n_trades_taken=0,
+                    strategy_cumulative_return_pct=0.0, baseline_cumulative_return_pct=0.0, alpha_pct=0.0,
+                    edge_check_status="NO_EDGE", calibration_status="INSUFFICIENT_DATA", calibration_ece=None,
+                    is_live_worthy=False, success=False, error="No valid folds completed.",
+                )
+
+            strategy_series = pd.Series(all_per_trade_returns)
+            baseline_series = pd.Series(all_index_returns).fillna(0.0)
+
+            edge_result = self.runtime_validator.compute_edge_vs_baseline(
+                strategy_series, baseline_series, slippage_bps=0, transaction_cost_bps=0
+            )
+
+            calibration_df = pd.DataFrame(all_calibration_rows)
+            calibration_result = self.runtime_validator.compute_calibration(calibration_df)
+            gate = self.runtime_validator.validate_before_live(calibration_result, edge_result)
+
+            # Realistic execution simulation and multi-tier sensitivity
+            sim_report = self.execution_simulator.simulate(symbol, stock_df, signals_series, horizon=horizon)
+            sensitivity_reports = self.execution_simulator.run_sensitivity_analysis(symbol, stock_df, signals_series, horizon=horizon)
+            cost_sensitivity = {name: rep.cumulative_net_return_pct for name, rep in sensitivity_reports.items()}
+
+            return BacktestResult(
+                symbol=symbol,
+                horizon=horizon,
+                n_test_predictions=total_predictions,
+                n_trades_taken=total_trades,
+                strategy_cumulative_return_pct=edge_result.strategy_cumulative_return_pct,
+                baseline_cumulative_return_pct=edge_result.baseline_cumulative_return_pct,
+                alpha_pct=edge_result.alpha_pct,
+                edge_check_status=edge_result.status,
+                calibration_status=calibration_result.status,
+                calibration_ece=calibration_result.expected_calibration_error,
+                is_live_worthy=(gate.safe_to_show_calibrated_confidence and gate.safe_to_treat_as_live_edge),
+                gate_reasons=gate.reasons,
+                success=True,
+                max_drawdown_pct=sim_report.max_drawdown_pct,
+                win_rate_pct=sim_report.win_rate_pct,
+                profit_factor=sim_report.profit_factor,
+                sharpe_ratio=sim_report.sharpe_ratio,
+                cost_sensitivity=cost_sensitivity,
+                walk_forward_folds=fold_records,
+            )
+
+        except Exception as e:
+            logger.error(f"Walk-forward backtest failed for {symbol}: {e}")
             return BacktestResult(
                 symbol=symbol, horizon=horizon, n_test_predictions=0, n_trades_taken=0,
                 strategy_cumulative_return_pct=0.0, baseline_cumulative_return_pct=0.0, alpha_pct=0.0,

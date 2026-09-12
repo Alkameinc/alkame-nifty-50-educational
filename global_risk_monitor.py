@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 RISK_LEVEL_NORMAL = "NORMAL"
 RISK_LEVEL_ELEVATED = "ELEVATED"
 RISK_LEVEL_CRISIS = "CRISIS"
+RISK_LEVEL_UNAVAILABLE = "UNAVAILABLE"
 
 TOGGLE_STATE_PATH = DATA_DIR / "global_risk_toggle_state.json"
 
@@ -61,6 +62,7 @@ class GlobalRiskReading:
     dominant_driver: Optional[str]
     driver_details: Dict[str, float]
     banner_message: str
+    is_available: bool = True
 
 
 @dataclass
@@ -179,12 +181,13 @@ class GlobalRiskMonitor:
                     logger.warning(f"Could not compute z-score for {name} — excluding from composite.")
 
             if not driver_zscores:
-                logger.error("No global risk drivers available at all — returning NORMAL as a safe default.")
+                logger.error("No global risk drivers available at all — failing closed to UNAVAILABLE.")
                 health_registry.report("global_risk_monitor", ok=False, detail="No global risk drivers available")
                 return GlobalRiskReading(
-                    timestamp=datetime.now(), composite_zscore=0.0, risk_level=RISK_LEVEL_NORMAL,
+                    timestamp=datetime.now(), composite_zscore=0.0, risk_level=RISK_LEVEL_UNAVAILABLE,
                     dominant_driver=None, driver_details={},
-                    banner_message="Global risk data unavailable — monitor could not compute a reading.",
+                    banner_message="Global risk data unavailable — operating in conservative fail-closed mode.",
+                    is_available=False,
                 )
 
             composite = float(np.mean([abs(z) for z in driver_zscores.values()]))
@@ -203,6 +206,7 @@ class GlobalRiskMonitor:
             result = GlobalRiskReading(
                 timestamp=datetime.now(), composite_zscore=composite, risk_level=level,
                 dominant_driver=dominant_driver, driver_details=driver_zscores, banner_message=banner,
+                is_available=True,
             )
             self._cached_reading = result
             self._cached_time = now
@@ -212,9 +216,10 @@ class GlobalRiskMonitor:
             logger.error(f"Failed computing composite global risk: {e}")
             health_registry.report("global_risk_monitor", ok=False, detail="Failed computing composite risk", error=str(e))
             result = GlobalRiskReading(
-                timestamp=datetime.now(), composite_zscore=0.0, risk_level=RISK_LEVEL_NORMAL,
+                timestamp=datetime.now(), composite_zscore=0.0, risk_level=RISK_LEVEL_UNAVAILABLE,
                 dominant_driver=None, driver_details={},
-                banner_message=f"Global risk monitor error — defaulting to NORMAL. ({e})",
+                banner_message=f"Global risk monitor error — risk state UNAVAILABLE ({e}).",
+                is_available=False,
             )
             self._cached_reading = result
             self._cached_time = now
@@ -222,6 +227,8 @@ class GlobalRiskMonitor:
 
     @staticmethod
     def _build_banner_message(level: str, dominant_driver: Optional[str], driver_zscores: Dict[str, float]) -> str:
+        if level == RISK_LEVEL_UNAVAILABLE:
+            return "Global risk data unavailable — operating in conservative fail-closed mode."
         if level == RISK_LEVEL_NORMAL:
             return "Global market conditions normal."
         driver_label = dominant_driver.replace("_", " ").title() if dominant_driver else "market conditions"
@@ -254,7 +261,7 @@ class GlobalRiskMonitor:
 
             if reading.risk_level == RISK_LEVEL_CRISIS:
                 base_multiplier = GLOBAL_RISK_CONFIDENCE_DOWNGRADE_CRISIS
-            elif reading.risk_level == RISK_LEVEL_ELEVATED:
+            elif reading.risk_level in (RISK_LEVEL_ELEVATED, RISK_LEVEL_UNAVAILABLE):
                 base_multiplier = GLOBAL_RISK_CONFIDENCE_DOWNGRADE_ELEVATED
             else:
                 return 1.0

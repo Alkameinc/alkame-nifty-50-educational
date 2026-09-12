@@ -1,10 +1,21 @@
 # 1. Standard library imports
 import json
 import logging
+import uuid
+import hashlib
+import platform
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+def _get_git_commit_sha() -> str:
+    try:
+        sha = subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, timeout=2).decode().strip()
+        return sha
+    except Exception:
+        return "UNKNOWN"
 
 # 2. Third-party imports
 import numpy as np
@@ -156,10 +167,11 @@ class EnsembleManager:
                     ensemble_accuracy=0.0, mean_agreement=0.0, success=False, error=msg,
                 )
 
-            X_train, X_test, y_train, y_test = self.model_trainer.time_based_split(X, y)
+            horizon_bars = HORIZON_CONFIG.get(horizon, {}).get("horizon_bars", 0)
+            X_train, X_test, y_train, y_test = self.model_trainer.time_based_split(X, y, purge_window=horizon_bars)
             if len(X_train) > 0 and len(X_test) > 0:
-                assert X_train.index.max() <= X_test.index.min(), (
-                    "Time-based split violated: a training row is timestamped after a test row!"
+                assert X_train.index.max() < X_test.index.min(), (
+                    "Time-based split violated: a training row is timestamped at or after a test row!"
                 )
 
             estimators = self._build_base_estimators()
@@ -196,8 +208,17 @@ class EnsembleManager:
             agreement_fraction_per_row = agreement_counts / len(model_names)
             mean_agreement = float(np.mean(agreement_fraction_per_row))
 
-            self._save_ensemble(symbol, fitted_models, feature_columns, per_model_accuracy,
-                                 ensemble_accuracy, mean_agreement, horizon=horizon)
+            data_start = str(X_train.index.min()) if len(X_train) > 0 else None
+            data_end = str(X_train.index.max()) if len(X_train) > 0 else None
+
+            self._save_ensemble(
+                symbol=symbol, fitted_models=fitted_models, feature_columns=feature_columns,
+                per_model_accuracy=per_model_accuracy, ensemble_accuracy=ensemble_accuracy,
+                mean_agreement=mean_agreement, horizon=horizon,
+                training_sample_count=len(X_train),
+                training_data_start=data_start,
+                training_data_end=data_end,
+            )
 
             health_registry.report("ensemble_manager", ok=True, detail=f"Trained ensemble for {symbol}")
             return EnsembleTrainingResult(
@@ -216,6 +237,12 @@ class EnsembleManager:
                 mean_agreement=0.0, success=False, error=str(e),
             )
 
+    def _versioned_dir(self, symbol: str, horizon: str, run_id: str) -> Path:
+        return MODELS_DIR / symbol / horizon / run_id
+
+    def _current_pointer_path(self, symbol: str, horizon: str) -> Path:
+        return MODELS_DIR / symbol / horizon / "current.json"
+
     def _ensemble_path(self, symbol: str, horizon: str) -> Path:
         return MODELS_DIR / f"{symbol}_{horizon}{ENSEMBLE_FILE_SUFFIX}"
 
@@ -223,56 +250,213 @@ class EnsembleManager:
         return MODELS_DIR / f"{symbol}_{horizon}{ENSEMBLE_METADATA_SUFFIX}"
 
     def _save_ensemble(
-        self, symbol: str, fitted_models: Dict[str, object], feature_columns: List[str],
-        per_model_accuracy: Dict[str, float], ensemble_accuracy: float, mean_agreement: float,
-        horizon: str = HORIZON_INTRADAY
-    ) -> None:
+        self,
+        symbol: str,
+        fitted_models: Dict[str, object],
+        feature_columns: List[str],
+        per_model_accuracy: Dict[str, float],
+        ensemble_accuracy: float,
+        mean_agreement: float,
+        horizon: str = HORIZON_INTRADAY,
+        training_sample_count: int = 0,
+        training_data_start: Optional[str] = None,
+        training_data_end: Optional[str] = None,
+    ) -> str:
         try:
             ensure_directories()
-            joblib.dump({"models": fitted_models, "classes": LABEL_CLASSES}, self._ensemble_path(symbol, horizon))
+            schema_str = ",".join(sorted(feature_columns))
+            schema_hash = hashlib.sha256(schema_str.encode("utf-8")).hexdigest()
+            model_id = str(uuid.uuid4())
+            commit_sha = _get_git_commit_sha()
+            now_iso = datetime.now().isoformat()
+            ts_compact = datetime.now().strftime("%Y%m%dT%H%M%S")
+            run_id = f"{ts_compact}_{commit_sha[:7]}_{model_id[:8]}"
+
+            # 1. Immutable versioned directory (QNT-008)
+            run_dir = self._versioned_dir(symbol, horizon, run_id)
+            run_dir.mkdir(parents=True, exist_ok=True)
+
+            bundle = {"models": fitted_models, "classes": LABEL_CLASSES}
+            joblib.dump(bundle, run_dir / "ensemble.joblib")
+
+            import sklearn
             metadata = {
+                "model_id": model_id,
+                "run_id": run_id,
                 "symbol": symbol,
                 "horizon": horizon,
-                "model_version": "v1.0",
+                "model_version": "v1.1",
                 "feature_version": "v1.0",
-                "trained_at": datetime.now().isoformat(),
+                "trained_at": now_iso,
+                "code_commit_sha": commit_sha,
+                "training_sample_count": training_sample_count,
+                "training_data_start": training_data_start,
+                "training_data_end": training_data_end,
+                "training_seed": MODEL_RANDOM_SEED,
                 "feature_columns": feature_columns,
+                "feature_schema_hash": schema_hash,
                 "label_classes": LABEL_CLASSES,
                 "per_model_accuracy": per_model_accuracy,
                 "ensemble_accuracy": ensemble_accuracy,
                 "mean_agreement": mean_agreement,
+                "environment": {
+                    "python_version": platform.python_version(),
+                    "sklearn_version": sklearn.__version__,
+                    "joblib_version": joblib.__version__,
+                    "numpy_version": np.__version__,
+                    "pandas_version": pd.__version__,
+                },
             }
-            f = None
-            try:
-                f = open(self._ensemble_metadata_path(symbol, horizon), "w", encoding="utf-8")
+
+            with open(run_dir / "metadata.json", "w", encoding="utf-8") as f:
                 json.dump(metadata, f, indent=2)
-            finally:
-                if f is not None:
-                    f.close()
-            logger.info(f"Saved ensemble + metadata for {symbol} ({horizon}) to {MODELS_DIR}")
+
+            schema_info = {
+                "symbol": symbol,
+                "horizon": horizon,
+                "feature_columns": feature_columns,
+                "feature_schema_hash": schema_hash,
+                "created_at": now_iso,
+            }
+            with open(run_dir / "schema.json", "w", encoding="utf-8") as f:
+                json.dump(schema_info, f, indent=2)
+
+            metrics_info = {
+                "per_model_accuracy": per_model_accuracy,
+                "ensemble_accuracy": ensemble_accuracy,
+                "mean_agreement": mean_agreement,
+                "trained_at": now_iso,
+            }
+            with open(run_dir / "metrics.json", "w", encoding="utf-8") as f:
+                json.dump(metrics_info, f, indent=2)
+
+            # 2. Update atomic current pointer
+            pointer_path = self._current_pointer_path(symbol, horizon)
+            pointer_data = {
+                "symbol": symbol,
+                "horizon": horizon,
+                "current_run_id": run_id,
+                "model_id": model_id,
+                "updated_at": now_iso,
+                "path": str(run_dir),
+            }
+            with open(pointer_path, "w", encoding="utf-8") as f:
+                json.dump(pointer_data, f, indent=2)
+
+            # 3. Synchronize to legacy flat paths for backward compatibility
+            joblib.dump(bundle, self._ensemble_path(symbol, horizon))
+            with open(self._ensemble_metadata_path(symbol, horizon), "w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=2)
+
+            logger.info(f"Saved immutable ensemble version {run_id} for {symbol} ({horizon}) at {run_dir}")
+            return run_id
         except Exception as e:
             logger.error(f"Failed saving ensemble for {symbol}: {e}")
             raise
 
     def load_ensemble(self, symbol: str, horizon: str = HORIZON_INTRADAY) -> Optional[Tuple[Dict[str, object], List[str], Dict]]:
-        ensemble_path = self._ensemble_path(symbol, horizon)
-        metadata_path = self._ensemble_metadata_path(symbol, horizon)
         try:
+            # Check versioned current pointer first (QNT-008)
+            pointer_path = self._current_pointer_path(symbol, horizon)
+            if pointer_path.exists():
+                with open(pointer_path, "r", encoding="utf-8") as pf:
+                    pointer_data = json.load(pf)
+                curr_run_id = pointer_data.get("current_run_id")
+                run_dir = self._versioned_dir(symbol, horizon, curr_run_id)
+                ensemble_file = run_dir / "ensemble.joblib"
+                meta_file = run_dir / "metadata.json"
+                if ensemble_file.exists() and meta_file.exists():
+                    bundle = joblib.load(ensemble_file)
+                    with open(meta_file, "r", encoding="utf-8") as mf:
+                        metadata = json.load(mf)
+                    return bundle["models"], bundle["classes"], metadata
+
+            # Fall back to legacy flat paths
+            ensemble_path = self._ensemble_path(symbol, horizon)
+            metadata_path = self._ensemble_metadata_path(symbol, horizon)
             if not ensemble_path.exists() or not metadata_path.exists():
                 logger.error(f"No saved ensemble found for {symbol} ({horizon}) at {ensemble_path}. Train it first.")
                 return None
             bundle = joblib.load(ensemble_path)
-            f = None
-            try:
-                f = open(metadata_path, "r", encoding="utf-8")
+            with open(metadata_path, "r", encoding="utf-8") as f:
                 metadata = json.load(f)
-            finally:
-                if f is not None:
-                    f.close()
             return bundle["models"], bundle["classes"], metadata
         except Exception as e:
             logger.error(f"Failed loading ensemble for {symbol}: {e}")
             return None
+
+    def rollback_ensemble(self, symbol: str, horizon: str, target_run_id: str) -> bool:
+        """
+        Rolls back the active model pointer to a previous immutable run version (QNT-008).
+        """
+        try:
+            run_dir = self._versioned_dir(symbol, horizon, target_run_id)
+            ensemble_file = run_dir / "ensemble.joblib"
+            meta_file = run_dir / "metadata.json"
+            if not (ensemble_file.exists() and meta_file.exists()):
+                logger.error(f"Cannot rollback to non-existent version {target_run_id} for {symbol} ({horizon})")
+                return False
+
+            with open(meta_file, "r", encoding="utf-8") as mf:
+                metadata = json.load(mf)
+
+            pointer_path = self._current_pointer_path(symbol, horizon)
+            pointer_data = {
+                "symbol": symbol,
+                "horizon": horizon,
+                "current_run_id": target_run_id,
+                "model_id": metadata.get("model_id"),
+                "updated_at": datetime.now().isoformat(),
+                "path": str(run_dir),
+                "rolled_back_at": datetime.now().isoformat(),
+            }
+            with open(pointer_path, "w", encoding="utf-8") as pf:
+                json.dump(pointer_data, pf, indent=2)
+
+            # Sync legacy files
+            bundle = joblib.load(ensemble_file)
+            joblib.dump(bundle, self._ensemble_path(symbol, horizon))
+            with open(self._ensemble_metadata_path(symbol, horizon), "w", encoding="utf-8") as f:
+                json.dump(metadata, f, indent=2)
+
+            logger.info(f"Successfully rolled back {symbol} ({horizon}) to version {target_run_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Rollback failed for {symbol} ({horizon}) to {target_run_id}: {e}")
+            return False
+
+    def list_model_versions(self, symbol: str, horizon: str) -> List[Dict]:
+        """
+        Lists all available immutable model versions for (symbol, horizon) (QNT-008).
+        """
+        horizon_dir = MODELS_DIR / symbol / horizon
+        if not horizon_dir.exists():
+            return []
+
+        curr_run_id = None
+        pointer_path = self._current_pointer_path(symbol, horizon)
+        if pointer_path.exists():
+            try:
+                with open(pointer_path, "r", encoding="utf-8") as pf:
+                    curr_run_id = json.load(pf).get("current_run_id")
+            except Exception:
+                pass
+
+        versions = []
+        for d in horizon_dir.iterdir():
+            if d.is_dir():
+                meta_file = d / "metadata.json"
+                if meta_file.exists():
+                    try:
+                        with open(meta_file, "r", encoding="utf-8") as f:
+                            meta = json.load(f)
+                        meta["is_current"] = (d.name == curr_run_id)
+                        versions.append(meta)
+                    except Exception:
+                        pass
+
+        versions.sort(key=lambda x: x.get("trained_at", ""), reverse=True)
+        return versions
 
     def predict(self, symbol: str, X: pd.DataFrame, horizon: str = HORIZON_INTRADAY) -> Optional[List[EnsemblePrediction]]:
         """Runs the saved ensemble on new feature rows (must already be the
