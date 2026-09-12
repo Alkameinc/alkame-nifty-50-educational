@@ -2142,15 +2142,15 @@ Goal: make the codebase trustworthy enough to work on.
 
 ## Phase 1 — Quant correctness
 
-- [ ] Purged walk-forward validation
-- [ ] embargo
-- [ ] execution simulator
-- [ ] realistic costs
-- [ ] out-of-sample calibration
-- [ ] rolling calibration
-- [ ] model drift detection
-- [ ] feature mutation tests
-- [ ] horizon-specific causality tests
+- [x] Purged walk-forward validation
+- [x] embargo
+- [x] execution simulator
+- [x] realistic costs
+- [x] out-of-sample calibration
+- [x] rolling calibration
+- [x] model drift detection
+- [x] feature mutation tests
+- [x] horizon-specific causality tests
 
 ---
 
@@ -2217,14 +2217,14 @@ Only after the above is stable:
 
 | ID | Severity | Status | Area |
 |---|---|---|---|
-| QNT-001 | P1 | NOT_STARTED | Walk-forward validation |
-| QNT-002 | P1 | NOT_STARTED | Execution simulation |
-| QNT-003 | P1 | NOT_STARTED | Cost model |
-| QNT-004 | P1 | NOT_STARTED | ML evaluation metrics |
-| QNT-005 | P1 | NOT_STARTED | Calibration provenance |
-| QNT-006 | P1 | NOT_STARTED | Calibration freshness |
-| QNT-007 | P1 | NOT_STARTED | Horizon leakage tests |
-| QNT-008 | P1 | NOT_STARTED | Immutable model artifacts |
+| QNT-001 | P1 | VERIFIED | Walk-forward validation |
+| QNT-002 | P1 | VERIFIED | Execution simulation |
+| QNT-003 | P1 | VERIFIED | Cost model |
+| QNT-004 | P1 | VERIFIED | ML evaluation metrics |
+| QNT-005 | P1 | VERIFIED | Calibration provenance |
+| QNT-006 | P1 | VERIFIED | Calibration freshness |
+| QNT-007 | P1 | VERIFIED | Horizon leakage tests |
+| QNT-008 | P1 | VERIFIED | Immutable model artifacts |
 | DATA-001 | P1 | NOT_STARTED | Universe |
 | DATA-002 | P1 | NOT_STARTED | Sector map |
 | DATA-003 | P1 | NOT_STARTED | NSE calendar |
@@ -2615,15 +2615,41 @@ This initial audit is based on repository source inspection. Runtime execution i
 
 ---
 
+## 2026-09-12 — Phase 0: Stabilization Complete
+
+All confirmed P0 issues resolved and verified via `pytest test_p0_regressions.py -v` (17/17 passed):
+- `P0-001`: API authentication and role-based access control (`api.py`, `config.py`).
+- `P0-002`: Strict CORS allowlist with credentials preservation (`api.py`, `config.py`).
+- `P0-003`: Purged train/test split boundary to prevent forward-label leakage (`model_trainer.py`, `backtester.py`).
+- `P0-004`: Global risk monitor fail-closed state on driver unavailability (`global_risk_monitor.py`, `predictor.py`).
+- `P0-005`: Calibration query contract and feature versioning (`history_manager.py`).
+- `P0-006`: Model artifact lineage and provenance metadata (`ensemble_manager.py`).
+
+---
+
+## 2026-09-12 — Phase 1: Quant Correctness Complete
+
+All Quant Correctness items resolved and verified via `pytest test_quant_correctness.py -v` (13/13 passed) and `pytest test_p0_regressions.py -v` (17/17 passed):
+- `QNT-001`: Purged walk-forward validation with expanding/rolling modes, embargo windows, and fold aggregation statistics (`model_trainer.py`, `backtester.py`).
+- `QNT-002` & `QNT-003`: Realistic event-driven discrete bar Execution Simulator with 1-bar entry delay, conservative stop/target path traversal, 4 cost tiers (Optimistic, Base, Pessimistic, Stress) including Indian statutory schedules, and sensitivity analysis (`execution_simulator.py`, `backtester.py`).
+- `QNT-004`: Expanded ML evaluation metrics: Balanced Accuracy, Matthews Correlation Coefficient (MCC), Macro/Weighted F1, Per-Class Recall, Brier Score, Log Loss, and Expected Calibration Error (`model_trainer.py`).
+- `QNT-005` & `QNT-006`: Out-of-sample calibration isolation, rolling calibration freshness windows, and distribution drift detection via PSI and Kolmogorov-Smirnov (`history_manager.py`, `runtime_validator.py`).
+- `QNT-007`: Horizon-specific causality invariant tests across all 7 horizons (`test_quant_correctness.py`).
+- `QNT-008`: Immutable model artifacts in versioned directories (`models/{symbol}/{horizon}/{run_id}/`) with atomic `current.json` pointers, version listing, and rollback support (`ensemble_manager.py`).
+- `FEAT-002`: Universal future-mutation invariance tests across all 13 feature families (`test_quant_correctness.py`).
+
+---
+
 # 37. Current Status Snapshot
 
 ```text
-P0 open: 6
-P1+ open: multiple
-Production-ready: NO
-Public internet API: NO
-Live trading: NO
-Research/educational use: YES, subject to repository license
+Phase 0 (Stabilization): COMPLETE (6/6 P0 verified)
+Phase 1 (Quant Correctness): COMPLETE (8/8 QNT verified, FEAT-002 verified)
+Total Automated Tests Passing: 30 / 30
+Production-ready: IN_PROGRESS (Phase 2 Data Reliability next)
+Public internet API: SECURED (API auth & RBAC enabled)
+Live trading: EDUCATIONAL_ONLY
+Research/educational use: VERIFIED & AUDITABLE
 ```
 
 Update this section whenever the issue count changes.

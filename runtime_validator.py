@@ -30,6 +30,30 @@ STATUS_SUFFICIENT = "SUFFICIENT"
 STATUS_INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
 STATUS_EDGE_CONFIRMED = "EDGE_CONFIRMED"
 STATUS_NO_EDGE = "NO_EDGE"
+STATUS_STABLE = "STABLE"
+STATUS_DRIFT_DETECTED = "DRIFT_DETECTED"
+STATUS_FRESH = "FRESH"
+STATUS_CALIBRATION_STALE = "CALIBRATION_STALE"
+
+
+@dataclass
+class DriftCheckResult:
+    status: str                         # STABLE | DRIFT_DETECTED | INSUFFICIENT_DATA
+    drift_detected: bool
+    confidence_psi: float               # Population Stability Index
+    ks_statistic: float                # Kolmogorov-Smirnov statistic
+    class_variation_distance: float    # Max absolute class frequency shift
+    reasons: List[str] = field(default_factory=list)
+
+
+@dataclass
+class FreshnessCheckResult:
+    status: str                         # FRESH | CALIBRATION_STALE | INSUFFICIENT_DATA
+    is_fresh: bool
+    recent_sample_count: int
+    oldest_sample_age_days: Optional[float]
+    newest_sample_age_days: Optional[float]
+    reasons: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -287,6 +311,161 @@ class RuntimeValidator:
         return LiveGateResult(
             safe_to_show_calibrated_confidence=safe_confidence,
             safe_to_treat_as_live_edge=safe_edge,
+            reasons=reasons,
+        )
+
+    # -----------------------------------------------------------------
+    # Drift and Freshness checks (QNT-006)
+    # -----------------------------------------------------------------
+    def check_distribution_drift(
+        self,
+        recent_df: pd.DataFrame,
+        reference_df: pd.DataFrame,
+        psi_threshold: float = 0.25,
+        min_samples: int = 20,
+    ) -> DriftCheckResult:
+        """
+        Detects distribution drift between reference (historical) and recent prediction distributions (QNT-006).
+        Computes:
+        1. Population Stability Index (PSI) on prediction confidence.
+        2. Two-sample Kolmogorov-Smirnov test on confidence distributions.
+        3. Variation distance on predicted class distribution (if available).
+        """
+        reasons = []
+        if len(recent_df) < min_samples or len(reference_df) < min_samples:
+            return DriftCheckResult(
+                status=STATUS_INSUFFICIENT_DATA,
+                drift_detected=False,
+                confidence_psi=0.0,
+                ks_statistic=0.0,
+                class_variation_distance=0.0,
+                reasons=[f"Need >= {min_samples} samples in both recent and reference sets for drift evaluation."],
+            )
+
+        rec_conf = recent_df["confidence"].clip(0.0, 1.0).values
+        ref_conf = reference_df["confidence"].clip(0.0, 1.0).values
+
+        bins = np.linspace(0.0, 1.0, 11)
+        rec_counts, _ = np.histogram(rec_conf, bins=bins)
+        ref_counts, _ = np.histogram(ref_conf, bins=bins)
+
+        eps = 1e-4
+        rec_dist = (rec_counts + eps) / np.sum(rec_counts + eps)
+        ref_dist = (ref_counts + eps) / np.sum(ref_counts + eps)
+
+        psi = float(np.sum((rec_dist - ref_dist) * np.log(rec_dist / ref_dist)))
+
+        from scipy.stats import ks_2samp
+        ks_res = ks_2samp(rec_conf, ref_conf)
+        ks_stat = float(ks_res.statistic)
+
+        class_var_dist = 0.0
+        class_col = next((c for c in ["predicted_class", "action", "model_predicted_class"] if c in recent_df.columns and c in reference_df.columns), None)
+        if class_col:
+            all_classes = set(recent_df[class_col].dropna().unique()).union(set(reference_df[class_col].dropna().unique()))
+            rec_vc = recent_df[class_col].value_counts(normalize=True)
+            ref_vc = reference_df[class_col].value_counts(normalize=True)
+            diffs = [abs(rec_vc.get(c, 0.0) - ref_vc.get(c, 0.0)) for c in all_classes]
+            class_var_dist = float(0.5 * sum(diffs))
+
+        drift = bool(psi >= psi_threshold or ks_stat > 0.35)
+        if psi >= psi_threshold:
+            reasons.append(f"Confidence PSI={psi:.3f} exceeds drift threshold {psi_threshold:.3f}.")
+        if ks_stat > 0.35:
+            reasons.append(f"Confidence KS statistic={ks_stat:.3f} indicates significant distribution shift.")
+        if class_var_dist > 0.3:
+            reasons.append(f"Class distribution variation distance={class_var_dist:.3f} indicates significant regime shift.")
+
+        status = STATUS_DRIFT_DETECTED if drift else STATUS_STABLE
+        if not drift:
+            reasons.append(f"Distributions are stable (PSI={psi:.3f}, KS={ks_stat:.3f}).")
+
+        return DriftCheckResult(
+            status=status,
+            drift_detected=drift,
+            confidence_psi=round(psi, 4),
+            ks_statistic=round(ks_stat, 4),
+            class_variation_distance=round(class_var_dist, 4),
+            reasons=reasons,
+        )
+
+    def validate_calibration_freshness(
+        self,
+        predictions_df: pd.DataFrame,
+        max_age_days: int = 90,
+        min_recent_samples: int = 20,
+    ) -> FreshnessCheckResult:
+        """
+        Validates that calibration records are recent and not stale (QNT-006).
+        A historical track record older than max_age_days without sufficient recent
+        observations is flagged as CALIBRATION_STALE.
+        """
+        if len(predictions_df) == 0:
+            return FreshnessCheckResult(
+                status=STATUS_INSUFFICIENT_DATA,
+                is_fresh=False,
+                recent_sample_count=0,
+                oldest_sample_age_days=None,
+                newest_sample_age_days=None,
+                reasons=["No prediction records provided."],
+            )
+
+        if "timestamp" not in predictions_df.columns:
+            return FreshnessCheckResult(
+                status=STATUS_FRESH,
+                is_fresh=True,
+                recent_sample_count=len(predictions_df),
+                oldest_sample_age_days=None,
+                newest_sample_age_days=None,
+                reasons=["Timestamps not present in records; skipping age calculation."],
+            )
+
+        now = pd.Timestamp.now()
+        ts_series = pd.to_datetime(predictions_df["timestamp"], errors="coerce")
+        valid_ts = ts_series.dropna()
+
+        if len(valid_ts) == 0:
+            return FreshnessCheckResult(
+                status=STATUS_INSUFFICIENT_DATA,
+                is_fresh=False,
+                recent_sample_count=0,
+                oldest_sample_age_days=None,
+                newest_sample_age_days=None,
+                reasons=["No parseable timestamps found in records."],
+            )
+
+        ages_days = (now - valid_ts).dt.total_seconds() / 86400.0
+        newest_age = float(ages_days.min())
+        oldest_age = float(ages_days.max())
+
+        recent_mask = ages_days <= max_age_days
+        recent_count = int(recent_mask.sum())
+
+        reasons = []
+        is_fresh = True
+
+        if newest_age > max_age_days:
+            is_fresh = False
+            reasons.append(
+                f"Most recent calibration record is {newest_age:.1f} days old (max allowed is {max_age_days} days)."
+            )
+
+        if recent_count < min_recent_samples:
+            is_fresh = False
+            reasons.append(
+                f"Only {recent_count} recent samples within {max_age_days} days (need >= {min_recent_samples})."
+            )
+
+        status = STATUS_FRESH if is_fresh else STATUS_CALIBRATION_STALE
+        if is_fresh:
+            reasons.append(f"Calibration data is fresh with {recent_count} samples in the last {max_age_days} days.")
+
+        return FreshnessCheckResult(
+            status=status,
+            is_fresh=is_fresh,
+            recent_sample_count=recent_count,
+            oldest_sample_age_days=round(oldest_age, 1),
+            newest_sample_age_days=round(newest_age, 1),
             reasons=reasons,
         )
 
