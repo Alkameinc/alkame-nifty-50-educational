@@ -103,8 +103,23 @@ def get_signal(symbol: str):
         return {"error": f"Could not fetch data for {symbol}"}
         
     scheduler.resolve_pending_outcomes(symbol, stock_df)
-    multi_signal = scheduler.run_one_cycle_for_symbol(symbol, stock_df, index_df, macro_events=[], corporate_events=[], news_articles=[])
-    if multi_signal is None or not getattr(multi_signal, 'signals', None):
+    multi_signal = scheduler.run_one_cycle_for_symbol(
+        symbol, stock_df, index_df, macro_events=[]
+    )
+
+    if multi_signal is None:
+        return {"error": f"No signal available for {symbol}"}
+
+    # Scheduler may return either a MultiHorizonSignal  
+    # or a single PredictionSignal.
+    signals = getattr(multi_signal, "signals", None)
+
+    if signals is None:
+        signals = {
+            multi_signal.horizon: multi_signal
+        }
+
+    if not signals:
         return {"error": f"No signal available for {symbol}"}
 
     # We can fetch narrative once
@@ -112,7 +127,7 @@ def get_signal(symbol: str):
     narrative = recent_records[0].narrative if recent_records and getattr(recent_records[0], 'narrative', None) else "No narrative available."
 
     all_horizons_data = {}
-    for hor, sig in multi_signal.signals.items():
+    for hor, sig in signals.items():
         if sig.action == "BUY":
             verdict_text = "Strong opportunity identified. Proceed with entry according to your risk parameters."
         elif sig.action == "SELL":
