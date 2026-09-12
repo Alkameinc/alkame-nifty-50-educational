@@ -31,6 +31,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 # 3. Local imports
+from database import SessionLocal
+from models import ModelRegistry
+from sqlalchemy import update
 from config import (
     ENSEMBLE_LR_MAX_ITER,
     ENSEMBLE_MODEL_TYPES,
@@ -386,7 +389,37 @@ class EnsembleManager:
             with open(self._ensemble_metadata_path(symbol, horizon), "w", encoding="utf-8") as f:
                 json.dump(metadata, f, indent=2)
 
+            # DB-003, REP-003: Add model lineage and artifact compatibility metadata to DB
+            try:
+                with SessionLocal() as db:
+                    # Deactivate previous active models for this symbol and horizon
+                    db.query(ModelRegistry).filter_by(symbol=symbol, horizon=horizon, is_active=True).update(
+                        {"is_active": False}
+                    )
+                    db.commit()
+
+                    registry_entry = ModelRegistry(
+                        model_version=run_id,
+                        symbol=symbol,
+                        horizon=horizon,
+                        created_at=now_iso,
+                        git_commit=commit_sha,
+                        python_version=platform.python_version(),
+                        os_platform=platform.system(),
+                        sklearn_version=sklearn.__version__,
+                        pandas_version=pd.__version__,
+                        joblib_version=joblib.__version__,
+                        features_hash=schema_hash,
+                        artifact_path=str(run_dir),
+                        is_active=True,
+                    )
+                    db.add(registry_entry)
+                    db.commit()
+            except Exception as dbe:
+                logger.error(f"Failed writing model registry to DB for {symbol}: {dbe}")
+
             logger.info(f"Saved immutable ensemble version {run_id} for {symbol} ({horizon}) at {run_dir}")
+
             return run_id
         except Exception as e:
             logger.error(f"Failed saving ensemble for {symbol}: {e}")
@@ -452,6 +485,17 @@ class EnsembleManager:
             }
             with open(pointer_path, "w", encoding="utf-8") as pf:
                 json.dump(pointer_data, pf, indent=2)
+
+            # Update DB registry
+            try:
+                with SessionLocal() as db:
+                    db.query(ModelRegistry).filter_by(symbol=symbol, horizon=horizon, is_active=True).update(
+                        {"is_active": False}
+                    )
+                    db.query(ModelRegistry).filter_by(model_version=target_run_id).update({"is_active": True})
+                    db.commit()
+            except Exception as dbe:
+                logger.error(f"Failed updating model registry DB for rollback on {symbol}: {dbe}")
 
             # Sync legacy files
             bundle = joblib.load(ensemble_file)

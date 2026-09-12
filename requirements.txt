@@ -12,3 +12,5 @@ plotly>=5.18.0
 streamlit-autorefresh>=1.0.1
 fastapi>=0.100.0
 uvicorn>=0.22.0
+sqlalchemy
+alembic
