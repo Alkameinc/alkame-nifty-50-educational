@@ -77,6 +77,11 @@ def require_role(required_role: str):
     return role_checker
 
 
+import uuid
+
+from fastapi import Request
+from prometheus_client import Counter, Gauge, Histogram
+
 # Strict CORS without wildcard credentials (P0-002)
 app.add_middleware(
     CORSMiddleware,
@@ -85,6 +90,40 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    correlation_id = request.headers.get("X-Correlation-ID", str(uuid.uuid4()))
+    request.state.correlation_id = correlation_id
+    response = await call_next(request)
+    response.headers["X-Correlation-ID"] = correlation_id
+    return response
+
+
+# Prometheus custom domain metrics (OBS-002)
+PREDICTIONS_TOTAL = Counter(
+    "nifty50_predictions_total",
+    "Total prediction signals generated",
+    ["symbol", "horizon", "action"],
+)
+SYSTEM_HEALTH_STATUS = Gauge(
+    "nifty50_health_status",
+    "Current health status by component (1=OK, 0=FAIL/DEGRADED)",
+    ["component"],
+)
+MODEL_INFERENCE_SECONDS = Histogram(
+    "nifty50_model_inference_seconds",
+    "Model inference latency in seconds",
+    ["symbol"],
+)
+
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
+
+    Instrumentator().instrument(app).expose(app, endpoint="/metrics")
+except Exception as err:
+    logger.warning(f"Could not initialize prometheus-fastapi-instrumentator: {err}")
 
 scheduler = Scheduler()
 history_manager = HistoryManager()
@@ -150,6 +189,7 @@ def get_health():
     diagnostic = []
     if statuses:
         for s in statuses:
+            SYSTEM_HEALTH_STATUS.labels(component=s.component).set(1.0 if s.status == "OK" else 0.0)
             diagnostic.append(
                 {
                     "component": s.component.replace("_", " ").title(),
@@ -198,6 +238,7 @@ def get_signal(symbol: str):
 
     all_horizons_data = {}
     for hor, sig in multi_signal.signals.items():
+        PREDICTIONS_TOTAL.labels(symbol=symbol, horizon=hor, action=sig.action).inc()
         if sig.action == "BUY":
             verdict_text = "Strong opportunity identified. Proceed with entry according to your risk parameters."
         elif sig.action == "SELL":

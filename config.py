@@ -43,18 +43,46 @@ def ensure_directories() -> None:
 
 # --- Logging setup helper (used by every other module) ------------------
 def configure_logging(log_filename: str = "app.log", level: int = logging.INFO) -> None:
-    """Configure root logging to write to both console and a rotating file."""
+    """Configure root logging to write to both console and a file, supporting JSON format."""
     try:
         ensure_directories()
         log_path = LOGS_DIR / log_filename
-        logging.basicConfig(
-            level=level,
-            format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-            handlers=[
-                logging.FileHandler(log_path, encoding="utf-8"),
-                logging.StreamHandler(),
-            ],
-        )
+        log_format_env = os.environ.get("LOG_FORMAT", "text").lower()
+
+        root_logger = logging.getLogger()
+        root_logger.setLevel(level)
+
+        # Clear existing handlers to allow reconfiguration
+        if root_logger.hasHandlers():
+            root_logger.handlers.clear()
+
+        file_handler = logging.FileHandler(log_path, encoding="utf-8")
+        stream_handler = logging.StreamHandler()
+
+        if log_format_env == "json":
+            try:
+                try:
+                    from pythonjsonlogger import json as jsonlogger
+
+                    formatter = jsonlogger.JsonFormatter(
+                        "%(asctime)s %(levelname)s %(name)s %(message)s %(filename)s %(lineno)d"
+                    )
+                except ImportError:
+                    from pythonjsonlogger import jsonlogger
+
+                    formatter = jsonlogger.JsonFormatter(
+                        "%(asctime)s %(levelname)s %(name)s %(message)s %(filename)s %(lineno)d"
+                    )
+            except ImportError:
+                formatter = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
+        else:
+            formatter = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
+
+        file_handler.setFormatter(formatter)
+        stream_handler.setFormatter(formatter)
+
+        root_logger.addHandler(file_handler)
+        root_logger.addHandler(stream_handler)
     except Exception as e:
         # Fall back to console-only logging so the app doesn't die on a logging bug
         logging.basicConfig(level=level)
