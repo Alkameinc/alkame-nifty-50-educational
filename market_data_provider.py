@@ -52,6 +52,11 @@ class MarketDataResult:
     adjustment_mode: PriceAdjustmentMode = PriceAdjustmentMode.ADJUSTED
     error: str | None = None
 
+    @property
+    def is_stale(self) -> bool:
+        """Whether this result contains data explicitly marked as stale cache."""
+        return self.status == DataStatus.CACHED_STALE
+
 
 @dataclass
 class DataQualityReport:
