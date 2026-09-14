@@ -141,7 +141,12 @@ class DataFetcher:
             "data_fetcher", ok=False, detail=f"No live or cached data for {ticker}", error=str(last_error)
         )
         if return_metadata:
-            return MarketDataResult(data=None, status=DataStatus.UNAVAILABLE, source="none")
+            return MarketDataResult(
+                data=None,
+                status=DataStatus.UNAVAILABLE,
+                source="unavailable",
+                error=str(last_error),
+            )
         return None
 
     def fetch_daily_ohlcv(self, ticker: str, period: str = "5y") -> pd.DataFrame | None:
@@ -221,9 +226,10 @@ class DataFetcher:
         self,
         interval: str = BAR_INTERVAL,
         period: str = BAR_HISTORY_PERIOD,
-    ) -> pd.DataFrame | None:
+        return_metadata: bool = False,
+    ) -> pd.DataFrame | None | MarketDataResult:
         """Fetch the NIFTY 50 index itself — used as the baseline for edge/outperformance checks."""
-        return self.fetch_ohlcv(NIFTY_INDEX_TICKER, interval=interval, period=period)
+        return self.fetch_ohlcv(NIFTY_INDEX_TICKER, interval=interval, period=period, return_metadata=return_metadata)
 
     def fetch_stock_fundamentals(self, ticker: str) -> dict[str, object]:
         """Fetch fundamental metrics (P/E, P/B, Market Cap, EPS, Div Yield, 52W High/Low) with safe fallbacks."""
