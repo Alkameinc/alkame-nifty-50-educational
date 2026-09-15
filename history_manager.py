@@ -1,9 +1,11 @@
+import hashlib
 import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from config import DB_PATH, configure_logging, ensure_directories
@@ -19,6 +21,8 @@ from predictor import PredictionSignal
 
 logger = logging.getLogger(__name__)
 
+LABEL_DEFINITION_VERSION = "direction-adaptive-deadband-v1"
+
 
 from dataclasses import dataclass
 
@@ -30,9 +34,6 @@ class PredictionRecord:
     horizon: str
     model_version: str
     feature_version: str
-    model_id: str | None
-    code_commit: str | None
-    data_snapshot_id: str | None
     narrative: str
     dca_ladder: str
     timestamp: str
@@ -47,6 +48,21 @@ class PredictionRecord:
     outcome_actual_class: str | None
     resolved_at: str | None
     is_out_of_sample: bool = False
+    generation_id: str = "UNKNOWN"
+    data_version: str = "UNKNOWN"
+    label_definition_version: str = "UNKNOWN"
+    entry_timestamp: str | None = None
+    entry_price: float | None = None
+    target_timestamp: str | None = None
+    outcome_entry_price: float | None = None
+    outcome_endpoint_price: float | None = None
+    outcome_resolution_status: str = "PENDING"
+    outcome_resolution_reason: str | None = None
+    outcome_entry_timestamp: str | None = None
+    outcome_target_timestamp: str | None = None
+    delivery_count: int = 1
+    data_stale: bool = False
+    suppressed: bool = False
 
 
 @dataclass
@@ -68,17 +84,101 @@ class EventRecord:
 class HistoryManager:
     def __init__(self, db_path: Path = DB_PATH):
         self.db_path = db_path
+        ensure_directories()
         if db_path and str(db_path) != str(DB_PATH):
             from sqlalchemy import create_engine
-
             from database import Base
-
-            self.engine = create_engine(f"sqlite:///{db_path}")
+            self.engine = create_engine(
+                f"sqlite:///{db_path}",
+                connect_args={"check_same_thread": False, "timeout": 30},
+            )
             Base.metadata.create_all(bind=self.engine)
             self.SessionLocal = sessionmaker(bind=self.engine)
         else:
             self.SessionLocal = SessionLocal
-        ensure_directories()
+            from database import engine
+            self.engine = engine
+        self._configure_sqlite()
+        self._migrate_schema()
+
+    def _configure_sqlite(self) -> None:
+        if self.engine.dialect.name != "sqlite":
+            return
+        try:
+            with self.engine.begin() as conn:
+                conn.execute(text("PRAGMA busy_timeout=30000"))
+                conn.execute(text("PRAGMA journal_mode=WAL"))
+                conn.execute(text("PRAGMA synchronous=NORMAL"))
+        except Exception as exc:
+            logger.error("Failed configuring SQLite storage: %s", exc)
+            raise
+
+    def _migrate_schema(self) -> None:
+        """Upgrade legacy SQLite schemas and fail loudly if verification fails."""
+        if self.engine.dialect.name != "sqlite":
+            return
+        from database import Base
+        Base.metadata.create_all(bind=self.engine)
+        prediction_columns = {
+            "generation_id": "TEXT",
+            "data_version": "TEXT",
+            "label_definition_version": "TEXT",
+            "entry_timestamp": "TEXT",
+            "entry_price": "REAL",
+            "target_timestamp": "TEXT",
+            "outcome_entry_price": "REAL",
+            "outcome_endpoint_price": "REAL",
+            "outcome_resolution_status": "TEXT DEFAULT 'PENDING'",
+            "outcome_resolution_reason": "TEXT",
+            "outcome_entry_timestamp": "TEXT",
+            "outcome_target_timestamp": "TEXT",
+            "delivery_count": "INTEGER NOT NULL DEFAULT 1",
+        }
+        with self.engine.begin() as conn:
+            existing = {row[1] for row in conn.execute(text("PRAGMA table_info(predictions)"))}
+            for name, definition in prediction_columns.items():
+                if name not in existing:
+                    conn.execute(text(f"ALTER TABLE predictions ADD COLUMN {name} {definition}"))
+            conn.execute(text("UPDATE predictions SET generation_id='UNKNOWN' WHERE generation_id IS NULL OR generation_id=''"))
+            conn.execute(text("UPDATE predictions SET data_version='UNKNOWN' WHERE data_version IS NULL OR data_version=''"))
+            conn.execute(text("UPDATE predictions SET label_definition_version='UNKNOWN' WHERE label_definition_version IS NULL OR label_definition_version=''"))
+            conn.execute(text("UPDATE predictions SET outcome_resolution_status=CASE WHEN outcome_resolved=1 THEN 'RESOLVED' ELSE 'PENDING' END"))
+            missing = set(prediction_columns) - {row[1] for row in conn.execute(text("PRAGMA table_info(predictions)"))}
+            if missing:
+                raise RuntimeError(f"Prediction schema migration incomplete: {sorted(missing)}")
+
+            bt_info = list(conn.execute(text("PRAGMA table_info(backtest_metrics)")))
+            if bt_info:
+                bt_cols = {row[1] for row in bt_info}
+                pk_cols = {row[1] for row in bt_info if row[5]}
+                if "run_id" not in bt_cols or pk_cols == {"symbol", "horizon"}:
+                    conn.execute(text("ALTER TABLE backtest_metrics RENAME TO backtest_metrics_legacy"))
+                    conn.execute(text("""CREATE TABLE backtest_metrics (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        run_id TEXT NOT NULL UNIQUE,
+                        symbol TEXT NOT NULL,
+                        horizon TEXT NOT NULL,
+                        strategy_cumulative_return_pct REAL,
+                        baseline_cumulative_return_pct REAL,
+                        alpha_pct REAL,
+                        edge_check_status TEXT,
+                        calibration_status TEXT,
+                        calibration_ece REAL,
+                        is_live_worthy BOOLEAN,
+                        updated_at TEXT
+                    )"""))
+                    conn.execute(text("""INSERT INTO backtest_metrics
+                        (run_id, symbol, horizon, strategy_cumulative_return_pct,
+                         baseline_cumulative_return_pct, alpha_pct, edge_check_status,
+                         calibration_status, calibration_ece, is_live_worthy, updated_at)
+                        SELECT 'legacy-' || symbol || '-' || horizon, symbol, horizon,
+                               strategy_cumulative_return_pct, baseline_cumulative_return_pct,
+                               alpha_pct, edge_check_status, calibration_status,
+                               calibration_ece, is_live_worthy, updated_at
+                        FROM backtest_metrics_legacy"""))
+                    conn.execute(text("DROP TABLE backtest_metrics_legacy"))
+                if "run_id" not in {row[1] for row in conn.execute(text("PRAGMA table_info(backtest_metrics)"))}:
+                    raise RuntimeError("Backtest schema migration incomplete: run_id missing")
 
     def save_prediction(
         self,
@@ -86,12 +186,31 @@ class HistoryManager:
         narrative: str | None = None,
         dca_ladder: dict | None = None,
         is_out_of_sample: bool = False,
+        generation_id: str | None = None,
+        data_version: str | None = None,
+        label_definition_version: str | None = None,
+        entry_timestamp: str | None = None,
+        entry_price: float | None = None,
     ) -> int | None:
         try:
             with self.SessionLocal() as db:
                 dca_ladder_str = (
                     json.dumps(dca_ladder) if isinstance(dca_ladder, dict) else str(dca_ladder) if dca_ladder else None
                 )
+                entry_ts = entry_timestamp or str(signal.timestamp)
+                entry_px = entry_price if entry_price is not None else getattr(signal, "entry_price", None)
+                seed = {"symbol": signal.symbol, "timestamp": str(signal.timestamp), "horizon": signal.horizon,
+                        "model_version": signal.model_version, "feature_version": signal.feature_version,
+                        "action": signal.action, "predicted_class": signal.model_predicted_class,
+                        "entry_timestamp": entry_ts, "entry_price": entry_px}
+                stable_generation_id = generation_id or "forecast-" + hashlib.sha256(
+                    json.dumps(seed, sort_keys=True, default=str).encode("utf-8")
+                ).hexdigest()[:24]
+                existing = db.query(DBPrediction).filter(DBPrediction.generation_id == stable_generation_id).first()
+                if existing:
+                    existing.delivery_count = int(existing.delivery_count or 1) + 1
+                    db.commit()
+                    return int(existing.id)
                 prediction = DBPrediction(
                     symbol=signal.symbol,
                     timestamp=str(signal.timestamp),
@@ -119,10 +238,14 @@ class HistoryManager:
                     dca_ladder=dca_ladder_str,
                     model_version=signal.model_version,
                     feature_version=signal.feature_version,
-                    model_id=signal.model_id,
-                    code_commit=signal.code_commit,
-                    data_snapshot_id=signal.data_snapshot_id,
                     is_out_of_sample=is_out_of_sample,
+                    generation_id=stable_generation_id,
+                    data_version=data_version or getattr(signal, "data_version", None) or "UNKNOWN",
+                    label_definition_version=label_definition_version or getattr(signal, "label_definition_version", None) or LABEL_DEFINITION_VERSION,
+                    entry_timestamp=entry_ts,
+                    entry_price=float(entry_px) if entry_px is not None else None,
+                    outcome_resolution_status="PENDING",
+                    delivery_count=1,
                 )
                 db.add(prediction)
                 db.commit()
@@ -134,16 +257,28 @@ class HistoryManager:
             health_registry.report("history_manager", ok=False, detail="Failed saving prediction", error=str(e))
             return None
 
-    def resolve_outcome(self, prediction_id: int, actual_class: str) -> bool:
+    def resolve_outcome(self, prediction_id: int, actual_class: str, *, entry_price: float | None = None,
+                        endpoint_price: float | None = None, entry_timestamp: str | None = None,
+                        target_timestamp: str | None = None, resolution_reason: str | None = None) -> bool:
         try:
             with self.SessionLocal() as db:
                 prediction = db.query(DBPrediction).filter(DBPrediction.id == prediction_id).first()
-                if prediction:
-                    prediction.outcome_resolved = True  # type: ignore[assignment]
-                    prediction.outcome_correct = prediction.model_predicted_class == actual_class  # type: ignore[assignment]
-                    prediction.outcome_actual_class = actual_class  # type: ignore[assignment]
-                    prediction.resolved_at = datetime.now().isoformat()  # type: ignore[assignment]
-                    db.commit()
+                if not prediction:
+                    return False
+                if bool(prediction.outcome_resolved):
+                    return True
+                prediction.outcome_resolved = True  # type: ignore[assignment]
+                prediction.outcome_correct = prediction.model_predicted_class == actual_class  # type: ignore[assignment]
+                prediction.outcome_actual_class = actual_class  # type: ignore[assignment]
+                prediction.resolved_at = datetime.now().isoformat()  # type: ignore[assignment]
+                prediction.outcome_entry_price = entry_price  # type: ignore[assignment]
+                prediction.outcome_endpoint_price = endpoint_price  # type: ignore[assignment]
+                prediction.outcome_entry_timestamp = entry_timestamp  # type: ignore[assignment]
+                prediction.outcome_target_timestamp = target_timestamp  # type: ignore[assignment]
+                prediction.target_timestamp = target_timestamp  # type: ignore[assignment]
+                prediction.outcome_resolution_status = "RESOLVED"  # type: ignore[assignment]
+                prediction.outcome_resolution_reason = resolution_reason or "verified_market_observations"  # type: ignore[assignment]
+                db.commit()
             health_registry.report("history_manager", ok=True)
             return True
         except Exception as e:
@@ -177,7 +312,8 @@ class HistoryManager:
                 if only_out_of_sample:
                     query = query.filter(DBPrediction.is_out_of_sample.is_(True))
 
-                rows = query.order_by(DBPrediction.id.desc()).limit(limit).all()
+                order = DBPrediction.id.asc() if only_unresolved else DBPrediction.id.desc()
+                rows = query.order_by(order).limit(limit).all()
 
                 records = []
                 for row in rows:
@@ -188,9 +324,6 @@ class HistoryManager:
                             horizon=str(row.horizon),
                             model_version=str(row.model_version),
                             feature_version=str(row.feature_version),
-                            model_id=str(row.model_id) if row.model_id else None,
-                            code_commit=str(row.code_commit) if row.code_commit else None,
-                            data_snapshot_id=str(row.data_snapshot_id) if row.data_snapshot_id else None,
                             narrative=str(row.narrative) if row.narrative else "",
                             dca_ladder=str(row.dca_ladder) if row.dca_ladder else "",
                             timestamp=str(row.timestamp),
@@ -207,6 +340,21 @@ class HistoryManager:
                             outcome_actual_class=str(row.outcome_actual_class) if row.outcome_actual_class else None,
                             resolved_at=str(row.resolved_at) if row.resolved_at else None,
                             is_out_of_sample=bool(row.is_out_of_sample),
+                            generation_id=str(row.generation_id) if row.generation_id else "UNKNOWN",
+                            data_version=str(row.data_version) if row.data_version else "UNKNOWN",
+                            label_definition_version=str(row.label_definition_version) if row.label_definition_version else "UNKNOWN",
+                            entry_timestamp=str(row.entry_timestamp) if row.entry_timestamp else None,
+                            entry_price=float(row.entry_price) if row.entry_price is not None else None,
+                            target_timestamp=str(row.target_timestamp) if row.target_timestamp else None,
+                            outcome_entry_price=float(row.outcome_entry_price) if row.outcome_entry_price is not None else None,
+                            outcome_endpoint_price=float(row.outcome_endpoint_price) if row.outcome_endpoint_price is not None else None,
+                            outcome_resolution_status=str(row.outcome_resolution_status or "PENDING"),
+                            outcome_resolution_reason=str(row.outcome_resolution_reason) if row.outcome_resolution_reason else None,
+                            outcome_entry_timestamp=str(row.outcome_entry_timestamp) if row.outcome_entry_timestamp else None,
+                            outcome_target_timestamp=str(row.outcome_target_timestamp) if row.outcome_target_timestamp else None,
+                            delivery_count=int(row.delivery_count or 1),
+                            data_stale=bool(row.data_stale),
+                            suppressed=bool(row.suppressed),
                         )
                     )
             health_registry.report("history_manager", ok=True)
@@ -243,7 +391,11 @@ class HistoryManager:
             for r in records:
                 if not r.outcome_resolved or r.outcome_correct is None or r.risk_adjusted_confidence is None:
                     continue
-                if r.model_version == "UNKNOWN":
+                if r.model_version == "UNKNOWN" or r.feature_version == "UNKNOWN":
+                    continue
+                if r.generation_id == "UNKNOWN" or r.label_definition_version == "UNKNOWN":
+                    continue
+                if r.data_stale:
                     continue
                 if cutoff_ts and r.resolved_at and r.resolved_at < cutoff_ts:
                     continue
@@ -336,30 +488,18 @@ class HistoryManager:
     ) -> bool:
         try:
             with self.SessionLocal() as db:
-                row = db.query(DBBacktestMetric).filter_by(symbol=symbol, horizon=horizon).first()
-                if row:
-                    row.strategy_cumulative_return_pct = strategy_ret  # type: ignore[assignment]
-                    row.baseline_cumulative_return_pct = base_ret  # type: ignore[assignment]
-                    row.alpha_pct = alpha  # type: ignore[assignment]
-                    row.edge_check_status = edge  # type: ignore[assignment]
-                    row.calibration_status = calib  # type: ignore[assignment]
-                    row.calibration_ece = ece  # type: ignore[assignment]
-                    row.is_live_worthy = live_worthy  # type: ignore[assignment]
-                    row.updated_at = datetime.now().isoformat()  # type: ignore[assignment]
-                else:
-                    metric = DBBacktestMetric(
-                        symbol=symbol,
-                        horizon=horizon,
-                        strategy_cumulative_return_pct=strategy_ret,
-                        baseline_cumulative_return_pct=base_ret,
-                        alpha_pct=alpha,
-                        edge_check_status=edge,
-                        calibration_status=calib,
-                        calibration_ece=ece,
-                        is_live_worthy=live_worthy,
-                        updated_at=datetime.now().isoformat(),
-                    )
-                    db.add(metric)
+                run_id = hashlib.sha256(
+                    f"{symbol}|{horizon}|{strategy_ret}|{base_ret}|{alpha}|{edge}|{calib}|{ece}|{live_worthy}|{datetime.now().isoformat()}".encode()
+                ).hexdigest()[:24]
+                metric = DBBacktestMetric(
+                    run_id=run_id, symbol=symbol, horizon=horizon,
+                    strategy_cumulative_return_pct=strategy_ret,
+                    baseline_cumulative_return_pct=base_ret, alpha_pct=alpha,
+                    edge_check_status=edge, calibration_status=calib,
+                    calibration_ece=ece, is_live_worthy=live_worthy,
+                    updated_at=datetime.now().isoformat(),
+                )
+                db.add(metric)
                 db.commit()
             health_registry.report("history_manager", ok=True, detail=f"Saved backtest metrics for {symbol} {horizon}")
             return True

@@ -55,9 +55,9 @@ class PredictionSignal:
     target_price: float | None = None
     stop_loss: float | None = None
     peak_potential_price: float | None = None
-    model_id: str | None = None
-    code_commit: str | None = None
-    data_snapshot_id: str | None = None
+    entry_price: float | None = None
+    data_version: str = "UNKNOWN"
+    label_definition_version: str = "direction-adaptive-deadband-v1"
 
 
 @dataclass
@@ -545,6 +545,7 @@ class Predictor:
                 target_price=target_price,
                 stop_loss=stop_loss,
                 peak_potential_price=peak_potential_price,
+                entry_price=cmp,
             )
             health_registry.report("predictor", ok=True)
             return sig
