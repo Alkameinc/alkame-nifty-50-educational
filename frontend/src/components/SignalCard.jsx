@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { fetchSignal } from "../api";
+import MiniChart from "./MiniChart";
+import NarrativeSummary from "./NarrativeSummary";
 
 function ConfidenceDisplay({ calibratedConfidence }) {
-  // This mirrors predictor.py's own rule: never show a fake-precise number
-  // until calibration has actually been proven. See Idea 1 in INTERN_ONBOARDING_GUIDE.md.
   if (calibratedConfidence === null || calibratedConfidence === undefined) {
     return (
       <p className="confidence-warning">
@@ -21,50 +21,64 @@ function actionColor(action) {
   return "#57606a"; // HOLD
 }
 
-export default function SignalCard({ symbol }) {
-  const [signal, setSignal] = useState(null);
+export default function SignalCard({ symbol, horizon }) {
+  const [fullData, setFullData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
 
-    fetchSignal(symbol)
-      .then((data) => {
-        if (!cancelled) setSignal(data);
-      })
-      .catch((err) => {
+    const loadData = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await fetchSignal(symbol);
+        if (!cancelled) setFullData(data);
+      } catch (err) {
         if (!cancelled) setError(err.message);
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    };
+    loadData();
 
     return () => {
-      cancelled = true; // avoids setting state on an unmounted component if the user navigates away mid-request
+      cancelled = true;
     };
   }, [symbol]);
 
   if (loading) return <div className="signal-card">Loading signal for {symbol}...</div>;
   if (error) return <div className="signal-card signal-card-error">Error: {error}</div>;
-  if (!signal) return null;
+  if (!fullData || !fullData.signals) return null;
+
+  const signal = fullData.signals[horizon];
+  if (!signal) {
+     return <div className="signal-card">No signal data available for horizon: {horizon}</div>;
+  }
 
   return (
     <div className="signal-card">
       <div className="signal-card-header">
-        <h2>{signal.symbol}</h2>
+        <h2>{fullData.symbol} ({horizon})</h2>
         <span className="action-badge" style={{ backgroundColor: actionColor(signal.action) }}>
           {signal.action}
         </span>
       </div>
 
-      {signal.suppressed && (
-        <p className="suppressed-notice">
-          This signal was suppressed to HOLD. Reasons: {signal.suppression_reasons.join(" ")}
-        </p>
-      )}
+      <div className="price-info" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem', fontSize: '0.9rem' }}>
+         {signal.current_price && <div><strong>Current:</strong> ₹{signal.current_price.toFixed(2)}</div>}
+         {signal.target_price && <div><strong>Target:</strong> ₹{signal.target_price.toFixed(2)}</div>}
+         {signal.stop_loss && <div><strong>Stop Loss:</strong> ₹{signal.stop_loss.toFixed(2)}</div>}
+      </div>
+
+      <MiniChart symbol={fullData.symbol} horizon={horizon} />
+
+      <NarrativeSummary narrative={fullData.narrative} />
+
+      <p className="verdict-text" style={{ fontWeight: 'bold', marginBottom: '1rem' }}>
+        {signal.verdict_text}
+      </p>
 
       <ConfidenceDisplay calibratedConfidence={signal.calibrated_confidence} />
 
@@ -81,23 +95,18 @@ export default function SignalCard({ symbol }) {
         ))}
       </ul>
 
-      {signal.contributing_events.length > 0 && (
+      {signal.events && signal.events.length > 0 && (
         <>
           <h3>Contributing events</h3>
           <ul>
-            {signal.contributing_events.map((e) => (
-              <li key={e.event_id}>
-                [{e.scope}] {e.headline_or_label}
+            {signal.events.map((e, i) => (
+              <li key={i}>
+                [{e.type}] {e.label} {e.sentiment ? `(Score: ${e.sentiment})` : ""}
               </li>
             ))}
           </ul>
         </>
       )}
-
-      <p className="global-risk-line">
-        Global risk level: {signal.global_risk_level}
-        {signal.risk_toggle_enabled ? " (risk toggle ENABLED)" : " (risk toggle off)"}
-      </p>
     </div>
   );
 }
