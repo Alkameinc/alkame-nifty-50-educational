@@ -443,6 +443,8 @@ class EnsembleManager:
                 ensemble_file = run_dir / "ensemble.joblib"
                 meta_file = run_dir / "metadata.json"
                 if ensemble_file.exists() and meta_file.exists():
+                    with open(meta_file, encoding="utf-8") as mf:
+                        metadata = json.load(mf)
                     artifact_sha256 = metadata.get("artifact_sha256")
                     if artifact_sha256:
                         current_hash = hashlib.sha256(open(ensemble_file, "rb").read()).hexdigest()
@@ -450,8 +452,6 @@ class EnsembleManager:
                             logger.error(f"Integrity failure! Model {curr_run_id} checksum mismatch.")
                             raise ValueError(f"Artifact integrity failure for {symbol} ({horizon})")
                     bundle = joblib.load(ensemble_file)
-                    with open(meta_file, encoding="utf-8") as mf:
-                        metadata = json.load(mf)
                     return bundle["models"], bundle["classes"], metadata
 
             # Fall back to legacy flat paths
