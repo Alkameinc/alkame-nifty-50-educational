@@ -1,4 +1,5 @@
 # 1. Standard library imports
+import hashlib
 import logging
 import time as time_module
 from dataclasses import dataclass
@@ -24,6 +25,8 @@ from corporate_events_fetcher import CorporateEventsFetcher
 from data_fetcher import DataFetcher
 from event_classifier import EventClassifier
 from history_manager import HistoryManager
+from market_calendar import market_calendar
+from model_trainer import ModelTrainer
 from macro_calendar import MacroCalendar
 from news_sentiment_fetcher import NewsSentimentFetcher
 from predictor import MultiHorizonSignal, PredictionSignal, Predictor
@@ -180,16 +183,45 @@ class Scheduler:
                 f"Not enough real resolved history for {symbol} ({horizon}) yet — using backtest-derived calibration snapshot."
             )
 
+        cache_key = (symbol, horizon)
+        previous_snapshot = self._live_worthiness_cache.get(cache_key)
+
+        # Do not replace usable evidence with a failed or unavailable refresh.
+        # Keep the previous snapshot so a transient refresh failure cannot
+        # silently destroy the last known valid calibration/edge evidence.
+        refresh_usable = (
+            backtest_result.success
+            and calibration_result.status == "SUFFICIENT"
+            and bool(calibration_result.bins)
+            and edge_result.status == "EDGE_CONFIRMED"
+        )
+        if not refresh_usable and previous_snapshot is not None:
+            logger.warning(
+                f"Keeping previous live-worthiness snapshot for {symbol} ({horizon}); "
+                f"refresh was unavailable or failed."
+            )
+            return previous_snapshot
+
         snapshot = LiveWorthinessSnapshot(
             edge_check_result=edge_result,
             calibration_result=calibration_result,
             refreshed_at=datetime.now(),
         )
-        self._live_worthiness_cache[(symbol, horizon)] = snapshot
+        self._live_worthiness_cache[cache_key] = snapshot
         return snapshot
 
     def get_cached_live_worthiness(self, symbol: str, horizon: str = "INTRADAY") -> LiveWorthinessSnapshot | None:
-        return self._live_worthiness_cache.get((symbol, horizon))
+        snapshot = self._live_worthiness_cache.get((symbol, horizon))
+        if snapshot is None:
+            return None
+
+        from config import LIVE_WORTHINESS_REFRESH_HOURS
+
+        age = datetime.now() - snapshot.refreshed_at
+        if age >= timedelta(hours=LIVE_WORTHINESS_REFRESH_HOURS):
+            return None
+
+        return snapshot
 
     # -----------------------------------------------------------------
     # Event context collection / filtering
@@ -370,6 +402,16 @@ class Scheduler:
         self._event_context_cache[symbol] = context
         return self._filter_events_as_of(context, effective_as_of)
 
+    @staticmethod
+    def _data_version(stock_df: pd.DataFrame, as_of: datetime) -> str:
+        """Stable identity for the market-data snapshot used by a forecast."""
+        if stock_df is None or stock_df.empty:
+            return "UNKNOWN"
+        cols = [c for c in ("Open", "High", "Low", "Close", "Volume") if c in stock_df.columns]
+        tail = stock_df.loc[stock_df.index <= pd.Timestamp(as_of), cols].tail(500)
+        payload = tail.to_csv().encode("utf-8")
+        return "data-" + hashlib.sha256(payload).hexdigest()[:24]
+
     # -----------------------------------------------------------------
     # One cycle for one symbol
     # -----------------------------------------------------------------
@@ -427,7 +469,14 @@ class Scheduler:
             )
 
             for h, sig in multi_signal.signals.items():
-                self.history_manager.save_prediction(sig)
+                data_version = self._data_version(stock_df, sig.timestamp)
+                self.history_manager.save_prediction(
+                    sig,
+                    data_version=data_version,
+                    label_definition_version="direction-adaptive-deadband-v1",
+                    entry_timestamp=str(sig.timestamp),
+                    entry_price=getattr(sig, "entry_price", None),
+                )
                 for event in sig.contributing_events:
                     self.history_manager.save_event(event)
 
@@ -513,53 +562,89 @@ class Scheduler:
     # Outcome resolution — closes the loop that grows real calibration data
     # -----------------------------------------------------------------
     def resolve_pending_outcomes(self, symbol: str, stock_df: pd.DataFrame) -> int:
-        """
-        Finds unresolved predictions for `symbol` old enough that their
-        outcome horizon has definitely elapsed, computes what actually
-        happened from stock_df, and resolves them in history_manager.
-        Returns the number of predictions resolved this call.
+        """Resolve only when the recorded entry and N valid future observations exist.
+
+        Resolution is observation-based, not wall-clock based: weekends, holidays and
+        missing bars do not satisfy a horizon. Unresolved rows are processed oldest-first
+        so a continuous stream of new predictions cannot starve old eligible rows.
         """
         resolved_count = 0
         try:
-            pending = self.history_manager.get_predictions(symbol=symbol, only_unresolved=True, limit=1000)
-            if not pending or stock_df.empty:
+            if stock_df is None or stock_df.empty:
+                return 0
+            pending = self.history_manager.get_predictions(symbol=symbol, only_unresolved=True, limit=250)
+            if not pending:
                 return 0
 
             from config import HORIZON_CONFIG
+            trainer = ModelTrainer()
+            bars = stock_df.copy()
+            bars = bars[~bars.index.duplicated(keep="last")].sort_index()
+            if "Close" not in bars.columns:
+                return 0
+
+            def _aligned(ts: pd.Timestamp) -> pd.Timestamp:
+                if ts.tzinfo is not None and bars.index.tz is None:
+                    return ts.tz_localize(None)
+                if ts.tzinfo is None and bars.index.tz is not None:
+                    return ts.tz_localize(bars.index.tz)
+                return ts
+
+            def _valid_index_after(entry_ts: pd.Timestamp) -> list[pd.Timestamp]:
+                result = []
+                for ts in bars.index:
+                    if ts <= entry_ts:
+                        continue
+                    ts_date = ts.date()
+                    if market_calendar.is_trading_day(ts_date):
+                        result.append(ts)
+                return result
 
             for record in pending:
                 h_config = HORIZON_CONFIG.get(record.horizon)
                 if not h_config:
                     continue
-
-                # Determine how much time to add based on horizon
-                h_bars = cast(int, h_config["horizon_bars"])
-                if h_config["bar_interval"] == "1d":
-                    horizon_delta = pd.Timedelta(days=h_bars)
-                else:
-                    horizon_delta = pd.Timedelta(minutes=h_bars * BAR_INTERVAL_MINUTES)
-
-                pred_time = pd.Timestamp(record.timestamp)
-                if pred_time.tzinfo is not None and stock_df.index.tz is None:
-                    pred_time = pred_time.tz_localize(None)
-                elif pred_time.tzinfo is None and stock_df.index.tz is not None:
-                    pred_time = pred_time.tz_localize(stock_df.index.tz)
-
-                target_time = pred_time + horizon_delta
-                if stock_df.index.max() < target_time:
-                    continue  # not enough time has passed yet to know the outcome
-
-                # Find the closest available bar at/after prediction time, and at/after target time.
-                bars_at_or_after_pred = stock_df.index[stock_df.index >= pred_time]
-                bars_at_or_after_target = stock_df.index[stock_df.index >= target_time]
-                if len(bars_at_or_after_pred) == 0 or len(bars_at_or_after_target) == 0:
+                if record.entry_timestamp is None or record.entry_price is None:
+                    # Legacy/malformed provenance is intentionally left unresolved.
                     continue
 
-                start_close = stock_df.loc[bars_at_or_after_pred[0], "Close"]
-                end_close = stock_df.loc[bars_at_or_after_target[0], "Close"]
-                pct_move = (end_close - start_close) / start_close * 100.0
+                try:
+                    entry_ts = _aligned(pd.Timestamp(record.entry_timestamp))
+                    entry_pos = bars.index.get_indexer([entry_ts])[0]
+                except Exception:
+                    entry_pos = -1
+                if entry_pos < 0:
+                    continue
 
-                deadband = cast(float, PREDICTION_DEADBAND_PCT)
+                entry_close = float(bars.iloc[entry_pos]["Close"])
+                if not pd.notna(entry_close):
+                    continue
+                if abs(entry_close - float(record.entry_price)) > max(1e-8, abs(entry_close) * 1e-6):
+                    # Stored entry and supplied market history disagree: never grade a
+                    # different question using a substituted close.
+                    continue
+
+                horizon_bars = int(h_config["horizon_bars"])
+                future_index = _valid_index_after(entry_ts)
+                if len(future_index) < horizon_bars:
+                    continue
+                target_ts = future_index[horizon_bars - 1]
+                endpoint_close = float(bars.loc[target_ts, "Close"])
+                if not pd.notna(endpoint_close):
+                    continue
+
+                # Use the same adaptive deadband definition as model training. The
+                # threshold is evaluated at the recorded entry, so later volatility
+                # cannot retroactively alter the grade.
+                try:
+                    thresholds = trainer.compute_adaptive_deadband(
+                        bars, horizon_bars, float(h_config["deadband_pct_default"])
+                    )
+                    deadband = float(thresholds.loc[entry_ts])
+                except Exception:
+                    deadband = float(h_config["deadband_pct_default"])
+
+                pct_move = (endpoint_close - entry_close) / entry_close * 100.0
                 if pct_move > deadband:
                     actual_class = "UP"
                 elif pct_move < -deadband:
@@ -567,15 +652,27 @@ class Scheduler:
                 else:
                     actual_class = "FLAT"
 
-                if self.history_manager.resolve_outcome(record.id, actual_class):
+                reason = (
+                    f"{record.horizon}: entry={entry_ts.isoformat()} close={entry_close:.6f}; "
+                    f"endpoint={target_ts.isoformat()} close={endpoint_close:.6f}; "
+                    f"valid_future_bars={horizon_bars}; move={pct_move:.6f}%; deadband={deadband:.6f}%"
+                )
+                if self.history_manager.resolve_outcome(
+                    record.id,
+                    actual_class,
+                    entry_price=entry_close,
+                    endpoint_price=endpoint_close,
+                    entry_timestamp=entry_ts.isoformat(),
+                    target_timestamp=target_ts.isoformat(),
+                    resolution_reason=reason,
+                ):
                     resolved_count += 1
 
             if resolved_count:
-                logger.info(f"Resolved {resolved_count} pending prediction(s) for {symbol}.")
+                logger.info("Resolved %s pending prediction(s) for %s.", resolved_count, symbol)
             return resolved_count
-
         except Exception as e:
-            logger.error(f"Failed resolving pending outcomes for {symbol}: {e}")
+            logger.error("Failed resolving pending outcomes for %s: %s", symbol, e)
             return resolved_count
 
     # -----------------------------------------------------------------

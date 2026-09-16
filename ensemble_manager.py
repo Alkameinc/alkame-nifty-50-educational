@@ -319,6 +319,7 @@ class EnsembleManager:
 
             bundle = {"models": fitted_models, "classes": LABEL_CLASSES}
             joblib.dump(bundle, run_dir / "ensemble.joblib")
+            artifact_sha256 = hashlib.sha256(open(run_dir / "ensemble.joblib", "rb").read()).hexdigest()
 
             import sklearn
 
@@ -337,6 +338,7 @@ class EnsembleManager:
                 "training_seed": MODEL_RANDOM_SEED,
                 "feature_columns": feature_columns,
                 "feature_schema_hash": schema_hash,
+                "artifact_sha256": artifact_sha256,
                 "label_classes": LABEL_CLASSES,
                 "per_model_accuracy": per_model_accuracy,
                 "ensemble_accuracy": ensemble_accuracy,
@@ -358,6 +360,7 @@ class EnsembleManager:
                 "horizon": horizon,
                 "feature_columns": feature_columns,
                 "feature_schema_hash": schema_hash,
+                "artifact_sha256": artifact_sha256,
                 "created_at": now_iso,
             }
             with open(run_dir / "schema.json", "w", encoding="utf-8") as f:
@@ -440,9 +443,15 @@ class EnsembleManager:
                 ensemble_file = run_dir / "ensemble.joblib"
                 meta_file = run_dir / "metadata.json"
                 if ensemble_file.exists() and meta_file.exists():
-                    bundle = joblib.load(ensemble_file)
                     with open(meta_file, encoding="utf-8") as mf:
                         metadata = json.load(mf)
+                    artifact_sha256 = metadata.get("artifact_sha256")
+                    if artifact_sha256:
+                        current_hash = hashlib.sha256(open(ensemble_file, "rb").read()).hexdigest()
+                        if current_hash != artifact_sha256:
+                            logger.error(f"Integrity failure! Model {curr_run_id} checksum mismatch.")
+                            raise ValueError(f"Artifact integrity failure for {symbol} ({horizon})")
+                    bundle = joblib.load(ensemble_file)
                     return bundle["models"], bundle["classes"], metadata
 
             # Fall back to legacy flat paths

@@ -1,7 +1,7 @@
 {
   "enabled": true,
-  "reason": "Toggled by ADMIN (dev-al...) via API",
+  "reason": "test",
   "level_at_activation": null,
-  "activated_at": "2026-09-13T00:53:06.433824",
-  "updated_at": "2026-09-13T00:53:06.433824"
+  "activated_at": "2026-09-15T22:07:03.420288",
+  "updated_at": "2026-09-15T22:07:03.420288"
 }

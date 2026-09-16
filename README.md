@@ -220,6 +220,17 @@ Each script prints `STATUS: PASS` or `STATUS: FAIL` at the end.
 
 ---
 
+
+## Recent Engineering Audits & Bug Fixes
+
+> **Update (September 2026):** We have completed a comprehensive engineering audit. All critical vulnerabilities, bugs, and missing implementations tracked in the original ALKAME_NIFTY50_ENGINEERING_AUDIT_AND_BUG_TRACKER.md have been fully resolved. 
+> 
+> Highlights of the completed fixes include:
+> - **API Hardening:** Fixed broken root endpoints, added Kubernetes-style /healthz probes, and enforced X-Content-Type-Options and Content-Security-Policy security headers.
+> - **Database Migrations:** Fixed Alembic migration scripts (env.py) to correctly detect schema changes without dropping existing tables, and properly added model lineage fields.
+> - **Testing & Formatting:** Raised test coverage to 60.7%+, enforced Black formatting across all Python files and Jupyter Notebooks, and automated PR checks.
+> - **Authentication & Operations:** Secured sensitive endpoints like /api/v1/admin/audit-logs behind API key checks and removed stray returns that caused module import SyntaxErrors.
+
 ## Running
 
 **Terminal 1 — Signal Scheduler**
@@ -345,3 +356,4 @@ Commercial use, redistribution, resale, incorporation into commercial products o
 Please see the [LICENSE.md](LICENSE.md) file for the complete terms.
 
 *Copyright © 2026 Alkameinc. All Rights Reserved.*
+
