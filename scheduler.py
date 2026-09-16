@@ -180,16 +180,45 @@ class Scheduler:
                 f"Not enough real resolved history for {symbol} ({horizon}) yet — using backtest-derived calibration snapshot."
             )
 
+        cache_key = (symbol, horizon)
+        previous_snapshot = self._live_worthiness_cache.get(cache_key)
+
+        # Do not replace usable evidence with a failed or unavailable refresh.
+        # Keep the previous snapshot so a transient refresh failure cannot
+        # silently destroy the last known valid calibration/edge evidence.
+        refresh_usable = (
+            backtest_result.success
+            and calibration_result.status == "SUFFICIENT"
+            and bool(calibration_result.bins)
+            and edge_result.status == "EDGE_CONFIRMED"
+        )
+        if not refresh_usable and previous_snapshot is not None:
+            logger.warning(
+                f"Keeping previous live-worthiness snapshot for {symbol} ({horizon}); "
+                f"refresh was unavailable or failed."
+            )
+            return previous_snapshot
+
         snapshot = LiveWorthinessSnapshot(
             edge_check_result=edge_result,
             calibration_result=calibration_result,
             refreshed_at=datetime.now(),
         )
-        self._live_worthiness_cache[(symbol, horizon)] = snapshot
+        self._live_worthiness_cache[cache_key] = snapshot
         return snapshot
 
     def get_cached_live_worthiness(self, symbol: str, horizon: str = "INTRADAY") -> LiveWorthinessSnapshot | None:
-        return self._live_worthiness_cache.get((symbol, horizon))
+        snapshot = self._live_worthiness_cache.get((symbol, horizon))
+        if snapshot is None:
+            return None
+
+        from config import LIVE_WORTHINESS_REFRESH_HOURS
+
+        age = datetime.now() - snapshot.refreshed_at
+        if age >= timedelta(hours=LIVE_WORTHINESS_REFRESH_HOURS):
+            return None
+
+        return snapshot
 
     # -----------------------------------------------------------------
     # Event context collection / filtering
