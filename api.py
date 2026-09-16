@@ -1,9 +1,12 @@
 import json
 import logging
+from datetime import datetime, timezone
 
 import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException, Response, Security, status
 from fastapi.middleware.cors import CORSMiddleware
+from database import SessionLocal
+from models import AuditLog
 from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 
@@ -84,6 +87,47 @@ from fastapi import Request
 from prometheus_client import Counter, Gauge, Histogram
 
 # Strict CORS without wildcard credentials (P0-002)
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "img-src 'self' data: https://fastapi.tiangolo.com; "
+        "frame-ancestors 'none';"
+    )
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
+def log_audit_event(client: ClientAuth, action: str, resource: str, status: str, details: str, request: Request):
+    ip_address = request.client.host if request and request.client else "unknown"
+    key_prefix = client.key[:6] if client.key else "none"
+    try:
+        with SessionLocal() as db:
+            audit = AuditLog(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                client_key_prefix=key_prefix,
+                client_role=client.role,
+                action=action,
+                resource=resource,
+                status=status,
+                details=details,
+                ip_address=ip_address,
+            )
+            db.add(audit)
+            db.commit()
+    except Exception as e:
+        logger.error(f"Failed to record audit log: {e}")
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOWED_ORIGINS,
@@ -199,6 +243,12 @@ def get_health():
                 }
             )
     return {"overall": overall, "diagnostics": diagnostic}
+
+
+@app.get("/healthz", tags=["Health"], response_model=HealthResponse)
+def healthz():
+    """Kubernetes-style liveness probe - alias for /api/v1/health."""
+    return get_health()
 
 
 @app.get("/api/v1/symbols", response_model=SymbolsResponse)
@@ -359,8 +409,6 @@ def stream_signal(symbol: str):
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
-
 
 import threading
 import time
@@ -378,7 +426,9 @@ def _get_refresh_lock(symbol: str) -> threading.Lock:
 
 
 @app.post("/api/v1/signal/{symbol}/refresh")
-def refresh_backtest(symbol: str, response: Response = Response(), client: ClientAuth = Depends(get_current_client)):
+def refresh_backtest(
+    symbol: str, request: Request, response: Response = Response(), client: ClientAuth = Depends(get_current_client)
+):
     if symbol not in NIFTY50_SYMBOLS:
         raise HTTPException(status_code=404, detail="Invalid symbol")
 
@@ -485,11 +535,12 @@ def get_risk_toggle():
 
 
 @app.post("/api/v1/risk/toggle")
-def set_risk_toggle(enabled: bool, client: ClientAuth = Depends(require_role("ADMIN"))):
+def set_risk_toggle(enabled: bool, request: Request, client: ClientAuth = Depends(require_role("ADMIN"))):
     # In a real app, you might take the reason from the request body.
     # For now, we'll just toggle it with a generic reason.
     reason = f"Toggled by {client.role} ({client.key[:6]}...) via API"
     state = scheduler.predictor.global_risk_monitor.set_toggle(enabled, reason)
+    log_audit_event(client, "TOGGLE_RISK", "global_risk", "SUCCESS", f"Set enabled={enabled}", request)
     return {"status": "success", "enabled": state.enabled}
 
 
@@ -497,3 +548,33 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="127.0.0.1", port=8000)
+
+
+@app.get("/api/v1/admin/audit-logs", tags=["Admin"])
+def get_audit_logs(limit: int = 50, client: ClientAuth = Depends(require_role("ADMIN"))):
+    try:
+        with SessionLocal() as db:
+            logs = db.query(AuditLog).order_by(AuditLog.id.desc()).limit(limit).all()
+            return {
+                "status": "success",
+                "logs": [
+                    {
+                        "id": l.id,
+                        "timestamp": l.timestamp,
+                        "action": l.action,
+                        "resource": l.resource,
+                        "status": l.status,
+                        "client_role": l.client_role,
+                        "ip_address": l.ip_address,
+                    }
+                    for l in logs
+                ],
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to fetch audit logs")
+
+
+@app.get("/", tags=["Root"])
+def read_root():
+    """Welcome endpoint."""
+    return {"message": "Welcome to Nifty50 API. Visit /docs for Swagger UI."}

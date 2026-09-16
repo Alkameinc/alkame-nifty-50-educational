@@ -6,6 +6,9 @@ import re
 import numpy as np
 import pandas as pd
 
+# Suppress pandas future warnings about downcasting
+pd.set_option('future.no_silent_downcasting', True)
+
 # 3. Local imports
 from config import (
     ATR_EXPANSION_MULTIPLIER,
@@ -323,8 +326,8 @@ class FeatureEngineer:
                 logger.warning("Not enough overlapping data for correlation breakdown calc.")
                 return pd.Series(dtype=float), pd.Series(dtype=bool)
 
-            stock_returns = aligned_stock.pct_change()
-            index_returns = aligned_index.pct_change()
+            stock_returns = aligned_stock.pct_change(fill_method=None)
+            index_returns = aligned_index.pct_change(fill_method=None)
             rolling_corr = stock_returns.rolling(window=lookback, min_periods=lookback).corr(index_returns)
             breakdown_flag = rolling_corr < threshold
             return rolling_corr, breakdown_flag.fillna(False)

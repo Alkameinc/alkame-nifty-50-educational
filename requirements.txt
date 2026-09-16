@@ -17,3 +17,5 @@ alembic
 prometheus-client>=0.17.0
 prometheus-fastapi-instrumentator>=6.1.0
 python-json-logger>=2.0.7
+pytest
+

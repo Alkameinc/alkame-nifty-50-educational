@@ -35,6 +35,22 @@ class Prediction(Base):
     feature_version = Column(String, default="UNKNOWN")
     is_out_of_sample = Column(Boolean, default=False)
 
+    # DA-02 lineage/provenance. Nullable fields keep legacy rows readable while
+    # making unknown provenance explicit rather than inventing facts.
+    generation_id = Column(String, index=True)
+    data_version = Column(String)
+    label_definition_version = Column(String)
+    entry_timestamp = Column(String)
+    entry_price = Column(Float)
+    target_timestamp = Column(String)
+    outcome_entry_price = Column(Float)
+    outcome_endpoint_price = Column(Float)
+    outcome_resolution_status = Column(String, default="PENDING")
+    outcome_resolution_reason = Column(String)
+    outcome_entry_timestamp = Column(String)
+    outcome_target_timestamp = Column(String)
+    delivery_count = Column(Integer, default=1, nullable=False)
+
 
 class Event(Base):
     __tablename__ = "events"
@@ -68,8 +84,10 @@ class HealthStatus(Base):
 class BacktestMetric(Base):
     __tablename__ = "backtest_metrics"
 
-    symbol = Column(String, primary_key=True)
-    horizon = Column(String, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String, unique=True, index=True, nullable=False)
+    symbol = Column(String, index=True, nullable=False)
+    horizon = Column(String, index=True, nullable=False)
     strategy_cumulative_return_pct = Column(Float)
     baseline_cumulative_return_pct = Column(Float)
     alpha_pct = Column(Float)
@@ -96,3 +114,20 @@ class ModelRegistry(Base):
     features_hash = Column(String)
     artifact_path = Column(String)
     is_active = Column(Boolean)
+<<<<<<< ours
+=======
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(String, nullable=False)
+    client_key_prefix = Column(String)
+    client_role = Column(String)
+    action = Column(String, nullable=False)
+    resource = Column(String)
+    status = Column(String)  # SUCCESS | FAILED | REJECTED
+    details = Column(String)
+    ip_address = Column(String)
+>>>>>>> theirs

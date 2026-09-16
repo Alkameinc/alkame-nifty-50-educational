@@ -55,6 +55,9 @@ class PredictionSignal:
     target_price: float | None = None
     stop_loss: float | None = None
     peak_potential_price: float | None = None
+    entry_price: float | None = None
+    data_version: str = "UNKNOWN"
+    label_definition_version: str = "direction-adaptive-deadband-v1"
 
 
 @dataclass
@@ -151,7 +154,7 @@ class Predictor:
                     )
 
             # 4. Macro & Event Catalysts
-            negative_events = [e for e in contributing_events if (e.sentiment_score or 0) < 0]
+            negative_events = [e for e in contributing_events if e.sentiment_score is not None and e.sentiment_score < 0]
             if negative_events:
                 labels = "; ".join(f"'{e.headline_or_label}'" for e in negative_events[:2])
                 parts.append(f"Specific headwinds affecting this counter: {labels}.")
@@ -221,7 +224,7 @@ class Predictor:
                 )
 
             # 4. Positive Event Catalysts
-            positive_events = [e for e in contributing_events if (e.sentiment_score or 0) > 0]
+            positive_events = [e for e in contributing_events if e.sentiment_score is not None and e.sentiment_score > 0]
             if positive_events:
                 labels = "; ".join(f"'{e.headline_or_label}'" for e in positive_events[:2])
                 parts.append(f"Tailwinds supporting sentiment: {labels}.")
@@ -418,11 +421,19 @@ class Predictor:
 
             # --- Step 7.5: Calculate Exact Target Price and Stop Loss for ALL Horizons ---
             cmp = float(stock_df["Close"].iloc[-1])
-            atr_val = (
-                float(latest_row["atr"].iloc[0])
-                if "atr" in latest_row.columns and not pd.isna(latest_row["atr"].iloc[0])
-                else (cmp * 0.005)
-            )
+            atr_present = "atr" in latest_row.columns
+            atr_raw = latest_row["atr"].iloc[0] if atr_present else None
+            try:
+                if not atr_present:
+                    atr_val = cmp * 0.005
+                else:
+                    atr_val = float(atr_raw) if atr_raw is not None and not pd.isna(atr_raw) else None
+            except (TypeError, ValueError):
+                atr_val = None
+
+            # Missing ATR uses the documented 0.5% fallback.
+            # A supplied but invalid ATR must not fabricate levels.
+            atr_valid = atr_val is not None and atr_val > 0 and atr_val <= cmp
             rsi_val = (
                 float(latest_row["rsi"].iloc[0])
                 if "rsi" in latest_row.columns and not pd.isna(latest_row["rsi"].iloc[0])
@@ -454,19 +465,22 @@ class Predictor:
                     target_mult += 0.5
 
             peak_potential_price: float | None = None
+            target_price: float | None = None
+            stop_loss: float | None = None
             lean = ensemble_pred.predicted_class
-            if final_action == ACTION_BUY or (final_action == ACTION_HOLD and lean == "UP"):
-                target_price = float(round(cmp + (target_mult * atr_val), 2))
-                stop_loss = float(round(cmp - (stop_mult * atr_val), 2))
-                peak_potential_price = float(round(cmp + ((target_mult + 2.0) * atr_val), 2))
-            elif final_action == ACTION_SELL or (final_action == ACTION_HOLD and lean == "DOWN"):
-                target_price = float(round(cmp - (target_mult * atr_val), 2))
-                stop_loss = float(round(cmp + (stop_mult * atr_val), 2))
-                peak_potential_price = float(round(cmp - ((target_mult + 2.0) * atr_val), 2))
-            else:  # FLAT or neutral consolidation
-                target_price = float(round(cmp + (0.75 * target_mult * atr_val), 2))
-                stop_loss = float(round(cmp - (0.75 * stop_mult * atr_val), 2))
-                peak_potential_price = float(round(stock_df["High"].max(), 2)) if not stock_df.empty else None
+            if atr_valid:
+                if final_action == ACTION_BUY or (final_action == ACTION_HOLD and lean == "UP"):
+                    target_price = _round_to_tick(cmp + (target_mult * atr_val))
+                    stop_loss = _round_to_tick(cmp - (stop_mult * atr_val))
+                    peak_potential_price = _round_to_tick(cmp + ((target_mult + 2.0) * atr_val))
+                elif final_action == ACTION_SELL or (final_action == ACTION_HOLD and lean == "DOWN"):
+                    target_price = _round_to_tick(cmp - (target_mult * atr_val))
+                    stop_loss = _round_to_tick(cmp + (stop_mult * atr_val))
+                    peak_potential_price = _round_to_tick(cmp - ((target_mult + 2.0) * atr_val))
+                else:  # FLAT or neutral consolidation
+                    target_price = _round_to_tick(cmp + (0.75 * target_mult * atr_val))
+                    stop_loss = _round_to_tick(cmp - (0.75 * stop_mult * atr_val))
+                    peak_potential_price = float(round(stock_df["High"].max(), 2)) if not stock_df.empty else None
 
             # --- Step 8: build reasoning, downside/upside (downside always assembled first) ---
             downside_summary = self._build_downside_summary(
@@ -542,6 +556,7 @@ class Predictor:
                 target_price=target_price,
                 stop_loss=stop_loss,
                 peak_potential_price=peak_potential_price,
+                entry_price=cmp,
             )
             health_registry.report("predictor", ok=True)
             return sig
@@ -549,10 +564,35 @@ class Predictor:
         except Exception as e:
             logger.error(f"Failed generating signal for {symbol} ({horizon}): {e}")
             health_registry.report("predictor", ok=False, detail=f"Failed generating signal {horizon}", error=str(e))
-            return self._suppressed_signal(
-                symbol, now, f"Unhandled error generating signal: {e}", horizon=horizon, stock_df=stock_df
-            )
 
+            if "ensemble_pred" in locals():
+                failure_reason = f"Unhandled error generating signal: {e}"
+                return PredictionSignal(
+                    symbol=symbol,
+                    timestamp=datetime.now(),
+                    horizon=horizon,
+                    action=ACTION_HOLD,
+                    model_predicted_class=ensemble_pred.predicted_class,
+                    model_version=ensemble_pred.model_version,
+                    feature_version=ensemble_pred.feature_version,
+                    raw_confidence=ensemble_pred.confidence,
+                    risk_adjusted_confidence=risk_adjusted_confidence if "risk_adjusted_confidence" in locals() else ensemble_pred.confidence,
+                    calibrated_confidence=None,
+                    agreement_fraction=ensemble_pred.agreement_fraction,
+                    downside_summary=f"Signal became non-actionable after a late processing failure: {failure_reason}",
+                    upside_summary="Not available because the prediction pipeline did not complete.",
+                    reasoning=[f"Original model forecast preserved: {ensemble_pred.predicted_class} with raw confidence {ensemble_pred.confidence:.4f}.",f"Forced HOLD because the prediction pipeline failed after inference: {failure_reason}"],
+                    suppressed=True,
+                    suppression_reasons=[failure_reason],
+                    is_safe_to_trade_live=False,
+                    target_price=None,
+                    stop_loss=None,
+                    peak_potential_price=None,
+                )
+
+            return self._suppressed_signal(
+                symbol, now, f"Prediction unavailable: {e}", horizon=horizon, stock_df=stock_df
+            )
     def generate_multi_horizon_stream(
         self,
         symbol: str,
@@ -586,6 +626,11 @@ class Predictor:
                 ):
                     h_stock_df = daily_stock
                     h_index_df = daily_index
+                else:
+                    # Daily data is required for this horizon.
+                    # Never reuse intraday data as a fallback.
+                    h_stock_df = pd.DataFrame()
+                    h_index_df = pd.DataFrame()
 
             h_calib = calibration_results.get(h) if calibration_results else None
             h_edge = edge_check_results.get(h) if edge_check_results else None
