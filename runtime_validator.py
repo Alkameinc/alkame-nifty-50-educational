@@ -1,6 +1,9 @@
 # 1. Standard library imports
 import logging
+import math
 from dataclasses import dataclass, field
+from decimal import Decimal
+from numbers import Real
 
 # 2. Third-party imports
 import numpy as np
@@ -70,6 +73,10 @@ class CalibrationResult:
     expected_calibration_error: float | None
     is_well_calibrated: bool
     bins: list[CalibrationBin] = field(default_factory=list)
+    # None means accounting is unknown for legacy/manually constructed summaries.
+    input_count: int | None = None
+    rejected_count: int | None = None
+    rejection_reasons: dict[str, int] | None = None
 
 
 @dataclass
@@ -94,6 +101,24 @@ class LiveGateResult:
 # ---------------------------------------------------------------------------
 # 6. Classes and functions
 # ---------------------------------------------------------------------------
+def _calibration_rejection_reason(confidence: object, correct: object) -> str | None:
+    """Assign one reason per rejected pair, checking confidence before outcome."""
+    for value, name in ((confidence, "confidence"), (correct, "outcome")):
+        # Do not coerce strings, missing values or complex numbers into evidence.
+        if not isinstance(value, (Real, Decimal, np.bool_)):
+            return f"invalid_{name}"
+        try:
+            if not math.isfinite(value):
+                return f"nonfinite_{name}"
+        except (OverflowError, TypeError, ValueError):
+            return f"invalid_{name}"
+        if name == "confidence" and (value < 0 or not value <= 1):
+            return "out_of_range_confidence"
+        if name == "outcome" and value not in (0, 1):
+            return "nonbinary_outcome"
+    return None
+
+
 class RuntimeValidator:
     """
     Enforces two hard rules before any signal reaches a user:
@@ -130,12 +155,30 @@ class RuntimeValidator:
         Builds a reliability table across n_bins confidence buckets and
         computes the Expected Calibration Error (ECE): the count-weighted
         average gap between predicted confidence and actual empirical accuracy.
+        Only finite, real confidence in [0,1] paired with binary correctness
+        contributes to n_samples, sufficiency, bins and ECE. Rejected pairs
+        receive one reason each; input_count = n_samples + rejected_count.
         """
+        input_count = 0
+        n_samples = 0
+        rejection_reasons: dict[str, int] = {}
         try:
-            n_samples = len(predictions_df)
-            if n_samples < self.min_calibration_samples:
+            input_count = len(predictions_df) if predictions_df is not None else 0
+            accepted_pairs = []
+            if predictions_df is None or not {"confidence", "correct"}.issubset(predictions_df.columns):
+                if input_count:
+                    rejection_reasons["missing_columns"] = input_count
+            else:
+                for confidence, correct in predictions_df[["confidence", "correct"]].itertuples(index=False, name=None):
+                    reason = _calibration_rejection_reason(confidence, correct)
+                    if reason is not None:
+                        rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
+                    else:
+                        accepted_pairs.append((float(confidence), float(correct)))
+            n_samples = len(accepted_pairs)
+            if n_samples == 0 or n_samples < self.min_calibration_samples:
                 logger.warning(
-                    f"Only {n_samples} prediction records available, need >= "
+                    f"Only {n_samples} valid prediction records available out of {input_count}, need >= "
                     f"{self.min_calibration_samples} to trust calibration — confidence scores "
                     "must be treated as unverified until more history accumulates."
                 )
@@ -145,10 +188,12 @@ class RuntimeValidator:
                     expected_calibration_error=None,
                     is_well_calibrated=False,
                     bins=[],
+                    input_count=input_count,
+                    rejected_count=input_count - n_samples,
+                    rejection_reasons=rejection_reasons,
                 )
 
-            df = predictions_df.copy()
-            df["confidence"] = df["confidence"].clip(0.0, 1.0)
+            df = pd.DataFrame(accepted_pairs, columns=["confidence", "correct"])
             bin_edges = np.linspace(0.0, 1.0, self.n_bins + 1)
             df["bin"] = pd.cut(df["confidence"], bins=bin_edges, include_lowest=True)
 
@@ -180,6 +225,8 @@ class RuntimeValidator:
                 )
                 ece += (count / n_samples) * abs(mean_conf - empirical_acc)
 
+            if sum(b.count for b in bins) != n_samples:
+                raise ValueError("Calibration bins do not cover all accepted observations")
             is_well_calibrated = ece <= self.ece_threshold
             health_registry.report("runtime_validator", ok=True, detail="Calibration computed")
             return CalibrationResult(
@@ -188,17 +235,27 @@ class RuntimeValidator:
                 expected_calibration_error=ece,
                 is_well_calibrated=is_well_calibrated,
                 bins=bins,
+                input_count=input_count,
+                rejected_count=input_count - n_samples,
+                rejection_reasons=rejection_reasons,
             )
 
         except Exception as e:
             logger.error(f"Failed computing calibration: {e}")
             health_registry.report("runtime_validator", ok=False, detail="Failed computing calibration", error=str(e))
+            # A malformed table cannot leave partially validated accounting behind.
+            if n_samples + sum(rejection_reasons.values()) != input_count:
+                n_samples = 0
+                rejection_reasons = {"invalid_input": input_count} if input_count else {}
             return CalibrationResult(
                 status=STATUS_INSUFFICIENT_DATA,
-                n_samples=len(predictions_df) if predictions_df is not None else 0,
+                n_samples=n_samples,
                 expected_calibration_error=None,
                 is_well_calibrated=False,
                 bins=[],
+                input_count=input_count,
+                rejected_count=input_count - n_samples,
+                rejection_reasons=rejection_reasons,
             )
 
     def get_calibrated_confidence(self, raw_confidence: float, calibration_result: CalibrationResult) -> float | None:
