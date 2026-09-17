@@ -1,0 +1,60 @@
+effective_from,effective_to,symbol,company,action,notes
+2020-01-01,,ADANIPORTS,Adani Ports and Special Economic Zone Ltd.,BASE,Core index constituent
+2020-01-01,,ASIANPAINT,Asian Paints Ltd.,BASE,Core index constituent
+2020-01-01,,AXISBANK,Axis Bank Ltd.,BASE,Core index constituent
+2020-01-01,,BAJAJ-AUTO,Bajaj Auto Ltd.,BASE,Core index constituent
+2020-01-01,,BAJFINANCE,Bajaj Finance Ltd.,BASE,Core index constituent
+2020-01-01,,BAJAJFINSV,Bajaj Finserv Ltd.,BASE,Core index constituent
+2020-01-01,,BHARTIARTL,Bharti Airtel Ltd.,BASE,Core index constituent
+2020-01-01,,BPCL,Bharat Petroleum Corporation Ltd.,BASE,Core index constituent
+2020-01-01,,BRITANNIA,Britannia Industries Ltd.,BASE,Core index constituent
+2020-01-01,,CIPLA,Cipla Ltd.,BASE,Core index constituent
+2020-01-01,,COALINDIA,Coal India Ltd.,BASE,Core index constituent
+2020-01-01,,DRREDDY,Dr. Reddy's Laboratories Ltd.,BASE,Core index constituent
+2020-01-01,,EICHERMOT,Eicher Motors Ltd.,BASE,Core index constituent
+2020-01-01,,GRASIM,Grasim Industries Ltd.,BASE,Core index constituent
+2020-01-01,,HCLTECH,HCL Technologies Ltd.,BASE,Core index constituent
+2020-01-01,,HDFCBANK,HDFC Bank Ltd.,BASE,Core index constituent
+2020-01-01,,HDFCLIFE,HDFC Life Insurance Company Ltd.,BASE,Core index constituent
+2020-01-01,,HEROMOTOCO,Hero MotoCorp Ltd.,BASE,Core index constituent
+2020-01-01,,HINDALCO,Hindalco Industries Ltd.,BASE,Core index constituent
+2020-01-01,,HINDUNILVR,Hindustan Unilever Ltd.,BASE,Core index constituent
+2020-01-01,,ICICIBANK,ICICI Bank Ltd.,BASE,Core index constituent
+2020-01-01,,INDUSINDBK,IndusInd Bank Ltd.,BASE,Core index constituent
+2020-01-01,,INFY,Infosys Ltd.,BASE,Core index constituent
+2020-01-01,,ITC,ITC Ltd.,BASE,Core index constituent
+2020-01-01,,JSWSTEEL,JSW Steel Ltd.,BASE,Core index constituent
+2020-01-01,,KOTAKBANK,Kotak Mahindra Bank Ltd.,BASE,Core index constituent
+2020-01-01,,LT,Larsen & Toubro Ltd.,BASE,Core index constituent
+2020-01-01,,M&M,Mahindra & Mahindra Ltd.,BASE,Core index constituent
+2020-01-01,,MARUTI,Maruti Suzuki India Ltd.,BASE,Core index constituent
+2020-01-01,,NESTLEIND,Nestle India Ltd.,BASE,Core index constituent
+2020-01-01,,NTPC,NTPC Ltd.,BASE,Core index constituent
+2020-01-01,,ONGC,Oil & Natural Gas Corporation Ltd.,BASE,Core index constituent
+2020-01-01,,POWERGRID,Power Grid Corporation of India Ltd.,BASE,Core index constituent
+2020-01-01,,RELIANCE,Reliance Industries Ltd.,BASE,Core index constituent
+2020-01-01,,SBIN,State Bank of India,BASE,Core index constituent
+2020-01-01,,SUNPHARMA,Sun Pharmaceutical Industries Ltd.,BASE,Core index constituent
+2020-01-01,,TATAMOTORS,Tata Motors Ltd.,BASE,Core index constituent
+2020-01-01,,TATASTEEL,Tata Steel Ltd.,BASE,Core index constituent
+2020-01-01,,TCS,Tata Consultancy Services Ltd.,BASE,Core index constituent
+2020-01-01,,TECHM,Tech Mahindra Ltd.,BASE,Core index constituent
+2020-01-01,,TITAN,Titan Company Ltd.,BASE,Core index constituent
+2020-01-01,,ULTRACEMCO,UltraTech Cement Ltd.,BASE,Core index constituent
+2020-01-01,,WIPRO,Wipro Ltd.,BASE,Core index constituent
+2020-01-01,2020-09-24,ZEEL,Zee Entertainment Enterprises Ltd.,BASE,Excluded on 2020-09-25 semi-annual rebalancing
+2020-09-25,2024-09-29,DIVISLAB,Divi's Laboratories Ltd.,INCLUDED,Included on 2020-09-25; Excluded on 2024-09-30 rebalancing
+2024-09-30,,BEL,Bharat Electronics Ltd.,INCLUDED,Included on 2024-09-30 semi-annual rebalancing
+2020-01-01,2020-09-24,INFRATEL,Bharti Infratel Ltd.,BASE,Excluded on 2020-09-25 semi-annual rebalancing
+2020-09-25,,SBILIFE,SBI Life Insurance Company Ltd.,INCLUDED,Included on 2020-09-25 semi-annual rebalancing
+2020-01-01,2021-03-30,GAIL,GAIL (India) Ltd.,BASE,Excluded on 2021-03-31 semi-annual rebalancing
+2021-03-31,,TATACONSUM,Tata Consumer Products Ltd.,INCLUDED,Included on 2021-03-31 semi-annual rebalancing
+2020-01-01,2022-03-30,IOC,Indian Oil Corporation Ltd.,BASE,Excluded on 2022-03-31 semi-annual rebalancing
+2022-03-31,,APOLLOHOSP,Apollo Hospitals Enterprise Ltd.,INCLUDED,Included on 2022-03-31 semi-annual rebalancing
+2020-01-01,2022-09-29,SHREECEM,Shree Cement Ltd.,BASE,Excluded on 2022-09-30 semi-annual rebalancing
+2022-09-30,,ADANIENT,Adani Enterprises Ltd.,INCLUDED,Included on 2022-09-30 semi-annual rebalancing
+2020-01-01,2023-07-12,HDFC,Housing Development Finance Corporation Ltd.,BASE,Excluded on 2023-07-13 due to merger with HDFC Bank
+2023-07-13,2024-09-29,LTIM,LTIMindtree Ltd.,INCLUDED,Included on 2023-07-13 replacing HDFC; Excluded on 2024-09-30 rebalancing
+2024-09-30,,TRENT,Trent Ltd.,INCLUDED,Included on 2024-09-30 semi-annual rebalancing
+2020-01-01,2024-03-27,UPL,UPL Ltd.,BASE,Excluded on 2024-03-28 semi-annual rebalancing
+2024-03-28,,SHRIRAMFIN,Shriram Finance Ltd.,INCLUDED,Included on 2024-03-28 semi-annual rebalancing

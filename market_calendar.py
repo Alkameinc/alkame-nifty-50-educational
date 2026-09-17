@@ -225,6 +225,27 @@ class MarketCalendar:
         next_open = self.next_market_open(current_dt)
         return datetime.combine(next_open.date(), MARKET_CLOSE_TIME, tzinfo=self.tz)
 
+    def previous_market_close(self, dt: datetime | None = None) -> datetime:
+        """Return the market close timestamp for the most recently completed trading session (IST)."""
+        if dt is None:
+            current_dt = datetime.now(self.tz)
+        else:
+            current_dt = dt.astimezone(self.tz) if dt.tzinfo is not None else dt.replace(tzinfo=self.tz)
+
+        check_date = current_dt.date()
+
+        # If today is a trading day and current time is at or after close, the session closed today
+        if self.is_trading_day(check_date) and current_dt.time() >= MARKET_CLOSE_TIME:
+            return datetime.combine(check_date, MARKET_CLOSE_TIME, tzinfo=self.tz)
+
+        # Otherwise (today is before close, or today is a weekend/holiday), look backward
+        for offset in range(1, 30):
+            prev_date = check_date - timedelta(days=offset)
+            if self.is_trading_day(prev_date):
+                return datetime.combine(prev_date, MARKET_CLOSE_TIME, tzinfo=self.tz)
+
+        raise RuntimeError("No trading day found in previous 30 days.")
+
 
 # Global default instance
 market_calendar = MarketCalendar()
@@ -249,6 +270,10 @@ def next_market_open(dt: datetime | None = None) -> datetime:
 
 def next_market_close(dt: datetime | None = None) -> datetime:
     return market_calendar.next_market_close(dt)
+
+
+def previous_market_close(dt: datetime | None = None) -> datetime:
+    return market_calendar.previous_market_close(dt)
 
 
 # ---------------------------------------------------------------------------

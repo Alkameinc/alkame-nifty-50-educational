@@ -1,7 +1,7 @@
 # 1. Standard library imports
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 # 2. Third-party imports
 import pandas as pd
@@ -14,7 +14,10 @@ from event_classifier import Event, EventClassifier
 from feature_engineer import FeatureEngineer
 from global_risk_monitor import GlobalRiskMonitor, GlobalRiskReading
 from health_monitor import registry as health_registry
+from model_lineage import compute_feature_schema_hash
+from prediction_concurrency import compute_prediction_key
 from runtime_validator import CalibrationResult, EdgeCheckResult, LiveGateResult, RuntimeValidator
+from sector_provider import sector_map_provider
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -58,6 +61,13 @@ class PredictionSignal:
     model_id: str | None = None
     code_commit: str | None = None
     data_snapshot_id: str | None = None
+    prediction_key: str | None = None
+    feature_schema_hash: str | None = None
+
+    def __post_init__(self):
+        # DATA-004: Standardize internal timestamps on timezone-aware UTC
+        if self.timestamp is not None and self.timestamp.tzinfo is None:
+            self.timestamp = self.timestamp.replace(tzinfo=timezone.utc)
 
 
 @dataclass
@@ -68,6 +78,42 @@ class MultiHorizonSignal:
     primary_action: str
     primary_horizon: str
     reasoning: list[str]
+    prediction_key: str | None = None
+
+    def __post_init__(self):
+        # DATA-004: Standardize internal timestamps on timezone-aware UTC
+        if self.timestamp is not None and self.timestamp.tzinfo is None:
+            self.timestamp = self.timestamp.replace(tzinfo=timezone.utc)
+
+
+@dataclass
+class PredictionContext:
+    """API-002: Canonical unified prediction context for API, scheduler, scanner, and replay paths."""
+
+    symbol: str
+    timestamp: datetime
+    market_data: pd.DataFrame
+    index_data: pd.DataFrame | None = None
+    macro_events: list | None = None
+    corporate_events: list[dict] | None = None
+    news_events: list[dict] | None = None
+    data_status: str = "LIVE"
+    event_status: str = "EVENTS_AVAILABLE"
+    calibration_results: dict[str, "CalibrationResult"] | None = None
+    edge_check_results: dict[str, "EdgeCheckResult"] | None = None
+    as_of: datetime | None = None
+
+    def __post_init__(self):
+        # DATA-004: Standardize internal timestamps on timezone-aware UTC
+        if self.timestamp is not None and self.timestamp.tzinfo is None:
+            raise ValueError(
+                f"Naive datetime rejected in PredictionContext.timestamp: {self.timestamp}. Must be timezone-aware UTC."
+            )
+        if self.as_of is not None and self.as_of.tzinfo is None:
+            raise ValueError(
+                f"Naive datetime rejected in PredictionContext.as_of: {self.as_of}. Must be timezone-aware UTC."
+            )
+
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +296,7 @@ class Predictor:
         calibration_result: CalibrationResult | None = None,
         edge_check_result: EdgeCheckResult | None = None,
         horizon: str = HORIZON_INTRADAY,
+        as_of: datetime | None = None,
     ) -> PredictionSignal:
         """
         Produces one final PredictionSignal for `symbol`. calibration_result
@@ -257,11 +304,15 @@ class Predictor:
         history_manager.py / backtester.py (later phases) — until those exist,
         callers must supply them (e.g. from a self-test or a manual check).
         """
-        now = datetime.now()
+        now = as_of or datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
 
         try:
             data_stale = self.data_fetcher.check_staleness(stock_df, symbol)
             if data_stale:
+                fsh_stale = compute_feature_schema_hash([])
+                pred_key_stale = compute_prediction_key(symbol, now, "STALE_DATA", fsh_stale)
                 return PredictionSignal(
                     symbol=symbol,
                     timestamp=now,
@@ -280,6 +331,8 @@ class Predictor:
                     data_stale=True,
                     suppressed=True,
                     suppression_reasons=["Data staleness check failed."],
+                    prediction_key=pred_key_stale,
+                    feature_schema_hash=fsh_stale,
                 )
 
             # --- Step 2: engineer features and get the latest row ---
@@ -369,7 +422,19 @@ class Predictor:
 
             # --- Step 5: global risk adjustment ---
             risk_reading = self.global_risk_monitor.compute_composite_risk()
-            sector = SECTOR_MAP.get(symbol)
+            as_of_dt = None
+            if stock_df is not None and not stock_df.empty:
+                last_idx = stock_df.index[-1]
+                if isinstance(last_idx, (pd.Timestamp, datetime)):
+                    as_of_dt = last_idx
+            if as_of_dt is None:
+                as_of_dt = now
+
+            if as_of_dt:
+                sec = sector_map_provider.get_sector(symbol, as_of=as_of_dt)
+                sector = sec if sec and sec != "Unknown" else None
+            else:
+                sector = SECTOR_MAP.get(symbol)
             risk_multiplier = self.global_risk_monitor.get_confidence_multiplier(sector, risk_reading)
             risk_adjusted_confidence = ensemble_pred.confidence * risk_multiplier
 
@@ -438,6 +503,7 @@ class Predictor:
 
             # Horizon-specific scaling multiplier for targets and risk boundaries
             horizon_multipliers = {
+                "SCALP": 1.0,
                 "INTRADAY": 1.5,
                 "3D": 2.5,
                 "7D": 4.0,
@@ -520,6 +586,10 @@ class Predictor:
             reasoning.extend(gate.reasons)
             reasoning.extend(suppression_reasons)
 
+            feature_cols = [c for c in engineered.columns if c.endswith("_feat")]
+            fsh = compute_feature_schema_hash(feature_cols)
+            pred_key = compute_prediction_key(symbol, now, ensemble_pred.model_version, fsh)
+
             sig = PredictionSignal(
                 symbol=symbol,
                 timestamp=now,
@@ -545,6 +615,8 @@ class Predictor:
                 target_price=target_price,
                 stop_loss=stop_loss,
                 peak_potential_price=peak_potential_price,
+                prediction_key=pred_key,
+                feature_schema_hash=fsh,
             )
             health_registry.report("predictor", ok=True)
             return sig
@@ -617,8 +689,13 @@ class Predictor:
         news_articles: list[dict] | None = None,
         calibration_results: dict[str, "CalibrationResult"] | None = None,
         edge_check_results: dict[str, "EdgeCheckResult"] | None = None,
+        as_of: datetime | None = None,
     ) -> MultiHorizonSignal:
         signals = {}
+        effective_ts = as_of or datetime.now(timezone.utc)
+        if effective_ts.tzinfo is None:
+            effective_ts = effective_ts.replace(tzinfo=timezone.utc)
+
         for h in horizons:
             # If horizon uses daily data, fetch it on the fly
             h_stock_df = stock_df
@@ -654,11 +731,12 @@ class Predictor:
                 calibration_result=h_calib,
                 edge_check_result=h_edge,
                 horizon=h,
+                as_of=effective_ts,
             )
             signals[h] = sig
 
         if not signals:
-            return MultiHorizonSignal(symbol, datetime.now(), {}, ACTION_HOLD, "NONE", ["No horizons requested."])
+            return MultiHorizonSignal(symbol, effective_ts, {}, ACTION_HOLD, "NONE", ["No horizons requested."])
 
         # Synthesize primary action (prefer longest unsuppressed safe horizon, fallback to first)
         primary_horizon = horizons[0]
@@ -669,14 +747,98 @@ class Predictor:
                 primary_action = signals[h].action
                 break
 
+        primary_key = signals[primary_horizon].prediction_key if primary_horizon in signals else None
         reasoning = [f"Synthesized from {len(horizons)} horizons. Primary driver: {primary_horizon}."]
         return MultiHorizonSignal(
             symbol=symbol,
-            timestamp=datetime.now(),
+            timestamp=effective_ts,
             signals=signals,
             primary_action=primary_action,
             primary_horizon=primary_horizon,
             reasoning=reasoning,
+            prediction_key=primary_key,
+        )
+
+    def build_prediction_context(
+        self,
+        symbol: str,
+        market_data: pd.DataFrame,
+        index_data: pd.DataFrame | None = None,
+        macro_events: list | None = None,
+        corporate_events: list[dict] | None = None,
+        news_events: list[dict] | None = None,
+        data_status: str = "LIVE",
+        event_status: str = "EVENTS_AVAILABLE",
+        calibration_results: dict[str, "CalibrationResult"] | None = None,
+        edge_check_results: dict[str, "EdgeCheckResult"] | None = None,
+        as_of: datetime | None = None,
+    ) -> PredictionContext:
+        """API-002: Build a canonical prediction context."""
+        ts = as_of or datetime.now(timezone.utc)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if as_of is not None and as_of.tzinfo is None:
+            as_of = as_of.replace(tzinfo=timezone.utc)
+        return PredictionContext(
+            symbol=symbol,
+            timestamp=ts,
+            market_data=market_data,
+            index_data=index_data,
+            macro_events=macro_events,
+            corporate_events=corporate_events,
+            news_events=news_events,
+            data_status=data_status,
+            event_status=event_status,
+            calibration_results=calibration_results,
+            edge_check_results=edge_check_results,
+            as_of=as_of,
+        )
+
+    def predict_context(
+        self,
+        context: PredictionContext,
+        horizons: list[str] | None = None,
+    ) -> MultiHorizonSignal:
+        """API-002: Canonical prediction entrypoint across API, scheduler, scanner, and replay paths."""
+        if horizons is None:
+            from config import ALL_HORIZONS
+
+            horizons = ALL_HORIZONS
+
+        return self.generate_multi_horizon_signal(
+            symbol=context.symbol,
+            horizons=horizons,
+            stock_df=context.market_data,
+            index_df=context.index_data,
+            macro_events=context.macro_events,
+            corporate_events=context.corporate_events,
+            news_articles=context.news_events,
+            calibration_results=context.calibration_results,
+            edge_check_results=context.edge_check_results,
+            as_of=context.as_of or context.timestamp,
+        )
+
+    def predict_stream_context(
+        self,
+        context: PredictionContext,
+        horizons: list[str] | None = None,
+    ):
+        """API-002: Canonical streaming prediction entrypoint."""
+        if horizons is None:
+            from config import ALL_HORIZONS
+
+            horizons = ALL_HORIZONS
+
+        return self.generate_multi_horizon_stream(
+            symbol=context.symbol,
+            horizons=horizons,
+            stock_df=context.market_data,
+            index_df=context.index_data,
+            macro_events=context.macro_events,
+            corporate_events=context.corporate_events,
+            news_articles=context.news_events,
+            calibration_results=context.calibration_results,
+            edge_check_results=context.edge_check_results,
         )
 
     @staticmethod
@@ -735,6 +897,8 @@ class Predictor:
             target_price=target_price,
             stop_loss=stop_loss,
             peak_potential_price=peak_potential_price,
+            prediction_key=compute_prediction_key(symbol, timestamp, "BASELINE", compute_feature_schema_hash([])),
+            feature_schema_hash=compute_feature_schema_hash([]),
         )
 
 
@@ -844,6 +1008,7 @@ if __name__ == "__main__":
             "symbol": "RELIANCE",
             "category": "CORPORATE_ANNOUNCEMENT",
             "raw": {"subject": "Board Meeting Intimation"},
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
         }
 
         signal_proven = predictor.generate_signal(

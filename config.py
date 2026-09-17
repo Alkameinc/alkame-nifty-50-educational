@@ -88,22 +88,38 @@ def configure_logging(log_filename: str = "app.log", level: int = logging.INFO) 
         logger.error(f"Failed to configure file logging, falling back to console only: {e}")
 
 
+# --- Environment & Deployment Mode (SEC-001, SEC-002) -------------------
+ENVIRONMENT = os.environ.get("ENVIRONMENT", os.environ.get("ALKAME_ENV", "development")).lower()
+IS_PRODUCTION = ENVIRONMENT in ("production", "prod")
+
 # --- API keys / secrets (never hardcode actual key values) --------------
 MARKETAUX_API_KEY = os.environ.get("MARKETAUX_API_KEY", "")
 IMD_API_KEY = os.environ.get("IMD_API_KEY", "")
 
-# API Authentication & Authorization (P0-001 & P0-002)
+# API Authentication & Authorization (P0-001, SEC-001, SEC-002)
 API_AUTH_ENABLED = os.environ.get("ALKAME_API_AUTH_ENABLED", "true").lower() in ("true", "1", "yes")
-DEFAULT_DEV_API_KEY = "dev-alkame-key-insecure"
-API_ADMIN_KEY = os.environ.get("ALKAME_ADMIN_KEY", "dev-alkame-admin-key")
-API_READONLY_KEY = os.environ.get("ALKAME_READONLY_KEY", "dev-alkame-readonly-key")
+
+DEFAULT_DEV_ADMIN_KEY = "dev-alkame-admin-key"
+DEFAULT_DEV_READONLY_KEY = "dev-alkame-readonly-key"
+
+if IS_PRODUCTION:
+    if not API_AUTH_ENABLED:
+        raise RuntimeError("CRITICAL SECURITY ERROR (SEC-001): ALKAME_API_AUTH_ENABLED cannot be disabled in production!")
+    _admin_env = os.environ.get("ALKAME_ADMIN_KEY", "")
+    if not _admin_env or _admin_env == DEFAULT_DEV_ADMIN_KEY:
+        raise RuntimeError("CRITICAL SECURITY ERROR (SEC-002): Production requires an explicit, non-default ALKAME_ADMIN_KEY secret!")
+    API_ADMIN_KEY = _admin_env
+    API_READONLY_KEY = os.environ.get("ALKAME_READONLY_KEY", "")
+else:
+    API_ADMIN_KEY = os.environ.get("ALKAME_ADMIN_KEY", DEFAULT_DEV_ADMIN_KEY)
+    API_READONLY_KEY = os.environ.get("ALKAME_READONLY_KEY", DEFAULT_DEV_READONLY_KEY)
 
 # Recognized keys mapped to roles: ADMIN, READ_ONLY
-API_KEYS_ROLE_MAP = {
-    API_ADMIN_KEY: "ADMIN",
-    API_READONLY_KEY: "READ_ONLY",
-    DEFAULT_DEV_API_KEY: "ADMIN",
-}
+API_KEYS_ROLE_MAP = {}
+if API_ADMIN_KEY:
+    API_KEYS_ROLE_MAP[API_ADMIN_KEY] = "ADMIN"
+if API_READONLY_KEY:
+    API_KEYS_ROLE_MAP[API_READONLY_KEY] = "READ_ONLY"
 
 _custom_admin_keys = [k.strip() for k in os.environ.get("ALKAME_ADMIN_KEYS", "").split(",") if k.strip()]
 for k in _custom_admin_keys:
@@ -113,7 +129,7 @@ _custom_readonly_keys = [k.strip() for k in os.environ.get("ALKAME_READONLY_KEYS
 for k in _custom_readonly_keys:
     API_KEYS_ROLE_MAP[k] = "READ_ONLY"
 
-# CORS configuration: explicit allowlist, no wildcard with credentials
+# CORS configuration: explicit allowlist, no wildcard with credentials (SEC-008)
 CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.environ.get(
@@ -123,6 +139,11 @@ CORS_ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 CORS_ALLOW_CREDENTIALS = True
+if CORS_ALLOW_CREDENTIALS and "*" in CORS_ALLOWED_ORIGINS:
+    raise RuntimeError("CRITICAL SECURITY ERROR (SEC-008): Wildcard '*' origin is prohibited when CORS credentials are enabled!")
+
+CORS_ALLOWED_METHODS = ["GET", "POST", "OPTIONS"]
+CORS_ALLOWED_HEADERS = ["Content-Type", "Authorization", "X-API-Key", "X-Correlation-ID"]
 
 REQUIRED_ENV_VARS = ["MARKETAUX_API_KEY"]  # IMD key is optional (monsoon feature degrades gracefully without it)
 
@@ -260,6 +281,15 @@ _DEFAULT_SECTOR_MAP = {
     "TATASTEEL": "Metals",
     "HINDALCO": "Metals",
     "BEL": "CapitalGoods",
+    "TRENT": "Retail",
+    "LTIM": "IT",
+    "UPL": "Chemicals",
+    "HDFC": "NBFC",
+    "IOC": "Energy",
+    "GAIL": "Utilities",
+    "SHREECEM": "Cement",
+    "ZEEL": "Media",
+    "INFRATEL": "Telecom",
 }
 
 try:
@@ -356,6 +386,7 @@ EDGE_CHECK_MIN_ALPHA_PCT = 0.0  # signal must show >0 edge vs NIFTY baseline in 
 
 # --- Multi-Horizon parameters (Phase 2) ---------------------------------------
 HORIZON_INTRADAY = "INTRADAY"
+HORIZON_SCALP = "SCALP"  # SCALP-001: Independent micro-horizon for high-frequency scalping
 HORIZON_3D = "3D"
 HORIZON_7D = "7D"
 HORIZON_30D = "30D"
@@ -372,6 +403,14 @@ HORIZON_CONFIG = {
         "deadband_pct_default": 0.15,
         "history_period": "60d",
         "min_training_samples": 500,
+        "retrain_cadence_days": 1,
+    },
+    HORIZON_SCALP: {
+        "bar_interval": "1m",
+        "horizon_bars": 2,
+        "deadband_pct_default": 0.05,
+        "history_period": "15d",
+        "min_training_samples": 250,
         "retrain_cadence_days": 1,
     },
     HORIZON_3D: {
@@ -439,9 +478,11 @@ EVENT_IMPACT_HORIZON = {
     "NEWS_HEADLINE": HORIZON_3D,
     "MACRO_OTHER": HORIZON_30D,
     "CLASSIFICATION_ERROR": HORIZON_INTRADAY,
+    "ORDER_FLOW_IMBALANCE": HORIZON_SCALP,
 }
 
 HORIZON_TO_MA_PERIOD = {
+    HORIZON_SCALP: 5,
     HORIZON_INTRADAY: 9,
     HORIZON_3D: 9,
     HORIZON_7D: 9,
@@ -452,6 +493,7 @@ HORIZON_TO_MA_PERIOD = {
 }
 
 HORIZON_TO_SR_METHOD = {
+    HORIZON_SCALP: "bollinger",
     HORIZON_INTRADAY: "bollinger",
     HORIZON_3D: "bollinger",
     HORIZON_7D: "bollinger",
@@ -461,7 +503,10 @@ HORIZON_TO_SR_METHOD = {
     HORIZON_1Y: "swing_levels",
 }
 
-# --- Model training parameters (Phase 9) --------------------------------------
+# --- Model training parameters (Phase 9 / Phase 7 Model Lineage) --------------
+MODEL_VERSION = "v1.0"
+UNIVERSE_VERSION = "NIFTY50_v1"
+FEATURE_VERSION = "v1.0"
 PREDICTION_HORIZON_BARS = HORIZON_CONFIG[HORIZON_INTRADAY]["horizon_bars"]
 PREDICTION_DEADBAND_PCT = HORIZON_CONFIG[HORIZON_INTRADAY]["deadband_pct_default"]
 LABEL_CLASSES = ["DOWN", "FLAT", "UP"]
@@ -486,14 +531,19 @@ ENSEMBLE_LR_MAX_ITER = 500
 SLIPPAGE_BPS = 5  # 0.05% slippage per trade
 TRANSACTION_COST_BPS = 3  # 0.03% brokerage + STT + other charges approximation
 
-# --- Scheduler parameters (Phase 16) -------------------------------------------
+# --- Scheduler parameters (Phase 15/16) -------------------------------------------
 SCHEDULER_INTERVAL_MINUTES = 5  # how often the live pipeline cycles during market hours (matches BAR_INTERVAL)
 LIVE_WORTHINESS_REFRESH_HOURS = 24  # how often the backtest-derived live/edge status is refreshed per symbol
+SCHEDULER_CIRCUIT_BREAKER_MAX_FAILURES = 5  # N consecutive failures to trip circuit breaker into HALTED
+SCHEDULER_CIRCUIT_BREAKER_DEGRADED_FAILURES = 2  # consecutive failures to transition into DEGRADED
 
 # --- Health Monitor parameters (Phase 1) -------------------------------------------
 HEALTH_DEGRADED_THRESHOLD = 2
 HEALTH_DOWN_THRESHOLD = 5
-HEALTH_THRESHOLD_OVERRIDES = {"data_fetcher": {"degraded": 1, "down": 3}}
+HEALTH_THRESHOLD_OVERRIDES = {
+    "data_fetcher": {"degraded": 1, "down": 3},
+    "scheduler": {"degraded": 2, "down": 5},
+}
 
 # ---------------------------------------------------------------------------
 # 6. Functions

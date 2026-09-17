@@ -1,8 +1,9 @@
 # 1. Standard library imports
 import logging
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 # 2. Third-party imports
 import pandas as pd
@@ -70,13 +71,9 @@ class DataFetcher:
         try:
             if path.exists():
                 df = pd.read_csv(path, index_col=0, parse_dates=True)
+                # DATA-004: Standardize internal timestamps on timezone-aware UTC
                 df.index = pd.to_datetime(df.index, utc=True)
-                if df.index.tz is not None:
-                    try:
-                        df.index = df.index.tz_convert("Asia/Kolkata")
-                    except Exception:
-                        pass
-                logger.warning(f"Loaded stale CACHED data for {ticker} ({interval}) from {path}")
+                logger.warning(f"Loaded CACHED data for {ticker} ({interval}) from {path}")
                 return df
         except Exception as e:
             logger.error(f"Failed to load cache for {ticker} ({interval}): {e}")
@@ -88,18 +85,34 @@ class DataFetcher:
         interval: str = BAR_INTERVAL,
         period: str = BAR_HISTORY_PERIOD,
         return_metadata: bool = False,
+        allow_stale: bool = False,
     ) -> pd.DataFrame | None | MarketDataResult:
         """
-        Fetch OHLCV bars for a single ticker with retry logic. Returns None
-        only if both live fetch and cache fallback fail — callers must handle
-        that case (e.g. by suppressing signals for that ticker).
+        Fetch OHLCV bars for a single ticker with retry logic.
+        DATA-001: Returns MarketDataResult if return_metadata=True, or DataFrame/None.
+        If return_metadata=False and cache is stale, returns None unless allow_stale=True.
         """
+        now_utc = datetime.now(timezone.utc)
+
         # FIRST: Check if we have a fresh cache
         cached = self._load_cache(ticker, interval=interval)
         if cached is not None and not self.check_staleness(cached, ticker):
             logger.info(f"Using fresh cache for {ticker}")
+            age_sec = 0.0
+            if len(cached) > 0 and hasattr(cached.index[-1], "to_pydatetime"):
+                last_dt = cached.index[-1].to_pydatetime()
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                age_sec = max(0.0, (now_utc - last_dt).total_seconds())
+
             if return_metadata:
-                return MarketDataResult(data=cached, status=DataStatus.CACHED_FRESH, source="cache")
+                return MarketDataResult(
+                    data=cached,
+                    status=DataStatus.CACHED_FRESH,
+                    source="cache",
+                    fetched_at=now_utc,
+                    age_seconds=age_sec,
+                )
             return cached
 
         last_error = None
@@ -114,10 +127,22 @@ class DataFetcher:
                     raise ValueError(f"Missing expected columns {missing_cols} for {ticker}")
 
                 df = df[REQUIRED_COLUMNS].copy()
+                # DATA-004: Standardize internal timestamps on timezone-aware UTC
+                if df.index.tz is None:
+                    df.index = df.index.tz_localize("UTC")
+                else:
+                    df.index = df.index.tz_convert("UTC")
+
                 self._save_cache(ticker, df, interval=interval)
                 health_registry.report("data_fetcher", ok=True, detail=f"Fetched live data for {ticker}")
                 if return_metadata:
-                    return MarketDataResult(data=df, status=DataStatus.LIVE, source="yahoo")
+                    return MarketDataResult(
+                        data=df,
+                        status=DataStatus.LIVE,
+                        source="yahoo",
+                        fetched_at=now_utc,
+                        age_seconds=0.0,
+                    )
                 return df
 
             except Exception as e:
@@ -132,8 +157,29 @@ class DataFetcher:
         logger.error(f"All {MAX_RETRIES} live fetch attempts failed for {ticker}: {last_error}")
         cached = self._load_cache(ticker, interval=interval)
         if cached is not None:
+            is_stale = self.check_staleness(cached, ticker)
+            status = DataStatus.CACHED_STALE if is_stale else DataStatus.CACHED_FRESH
+            age_sec = 0.0
+            if len(cached) > 0 and hasattr(cached.index[-1], "to_pydatetime"):
+                last_dt = cached.index[-1].to_pydatetime()
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                age_sec = max(0.0, (now_utc - last_dt).total_seconds())
+
             if return_metadata:
-                return MarketDataResult(data=cached, status=DataStatus.CACHED_STALE, source="cache")
+                return MarketDataResult(
+                    data=cached,
+                    status=status,
+                    source="cache",
+                    fetched_at=now_utc,
+                    age_seconds=age_sec,
+                    error=str(last_error) if last_error else None,
+                )
+            if is_stale and not allow_stale:
+                logger.warning(
+                    f"DATA-001: Rejecting stale cache for {ticker} in plain DataFrame path (allow_stale=False)."
+                )
+                return None
             return cached
 
         logger.error(f"No cache available for {ticker} ({interval}) either — returning None.")
@@ -141,7 +187,13 @@ class DataFetcher:
             "data_fetcher", ok=False, detail=f"No live or cached data for {ticker}", error=str(last_error)
         )
         if return_metadata:
-            return MarketDataResult(data=None, status=DataStatus.UNAVAILABLE, source="none")
+            return MarketDataResult(
+                data=None,
+                status=DataStatus.UNAVAILABLE,
+                source="none",
+                fetched_at=now_utc,
+                error=str(last_error) if last_error else "Data unavailable",
+            )
         return None
 
     def fetch_daily_ohlcv(self, ticker: str, period: str = "5y") -> pd.DataFrame | None:
@@ -352,78 +404,151 @@ class DataFetcher:
                 "raw_range_pct": None,
             }
 
-    def is_market_open(self) -> bool:
+    def is_market_open(self, now: datetime | None = None) -> bool:
         from market_calendar import is_market_open as _is_open
 
-        return _is_open()
+        return _is_open(now)
 
-    def check_staleness(self, df: pd.DataFrame, ticker: str) -> bool:
+    def check_staleness(
+        self,
+        df: pd.DataFrame,
+        ticker: str,
+        now: datetime | None = None,
+        max_age_minutes: float = DATA_STALENESS_THRESHOLD_MINUTES,
+    ) -> bool:
         """
-        Returns True if the data is STALE (last bar older than the configured
-        threshold). Callers should suppress signals for a ticker when this is True.
+        DATA-002: Session-aware staleness checking.
+        Returns True if the data is STALE:
+        - Market is open: last bar is not from today or older than threshold.
+        - Market is closed: data does not reach the close of the most recently
+          completed trading session.
         """
         try:
-            if not self.is_market_open():
-                return False  # Market is closed, so data from last close is valid, not stale
-
             if df is None or df.empty:
                 logger.warning(f"Staleness check: {ticker} has no data at all — treating as stale.")
                 return True
 
-            last_ts = df.index[-1]
-            if last_ts.tzinfo is not None:
-                now = pd.Timestamp.now(tz=last_ts.tzinfo)
+            from config import MARKET_TIMEZONE
+            from market_calendar import previous_market_close
+
+            tz_ist = ZoneInfo(MARKET_TIMEZONE)
+            if now is None:
+                now_ist = datetime.now(tz_ist)
             else:
-                now = pd.Timestamp.now()
+                now_ist = now.astimezone(tz_ist) if now.tzinfo is not None else now.replace(tzinfo=tz_ist)
 
-            age_minutes = (now - last_ts).total_seconds() / 60.0
-            is_stale = age_minutes > DATA_STALENESS_THRESHOLD_MINUTES
-            if is_stale:
+            last_ts = df.index[-1]
+            if hasattr(last_ts, "to_pydatetime"):
+                last_ts = last_ts.to_pydatetime()
+            if last_ts.tzinfo is None:
+                last_bar_ist = last_ts.replace(tzinfo=tz_ist)
+            else:
+                last_bar_ist = last_ts.astimezone(tz_ist)
+
+            # 1. During market open:
+            if self.is_market_open(now_ist):
+                if last_bar_ist.date() != now_ist.date():
+                    logger.warning(
+                        f"{ticker} data is STALE: market is open today ({now_ist.date()}), "
+                        f"but last bar is from {last_bar_ist.date()}"
+                    )
+                    return True
+
+                age_minutes = (now_ist - last_bar_ist).total_seconds() / 60.0
+                is_stale = age_minutes > max_age_minutes
+                if is_stale:
+                    logger.warning(
+                        f"{ticker} data is STALE: last bar is {age_minutes:.1f} minutes old "
+                        f"(threshold={max_age_minutes}m)"
+                    )
+                return bool(is_stale)
+
+            # 2. When market is closed (pre-market, post-market, weekend, holiday):
+            last_close = previous_market_close(now_ist)
+            if last_bar_ist.date() < last_close.date():
                 logger.warning(
-                    f"{ticker} data is STALE: last bar is {age_minutes:.1f} minutes old "
-                    f"(threshold={DATA_STALENESS_THRESHOLD_MINUTES}m)"
+                    f"{ticker} data is STALE: market is closed, expected latest session date {last_close.date()}, "
+                    f"but last bar is from {last_bar_ist.date()}"
                 )
-            return bool(is_stale)
-        except Exception as e:
-            logger.error(f"Failed staleness check for {ticker}: {e}")
-            return True  # fail safe: treat unknown state as stale/unsafe
+                return True
 
-    def check_staleness_daily(self, df: pd.DataFrame, ticker: str) -> bool:
+            # If on the date of last_close, check that it didn't terminate prematurely
+            close_age_minutes = (last_close - last_bar_ist).total_seconds() / 60.0
+            allowed_gap = max(max_age_minutes, 35.0)
+            if close_age_minutes > allowed_gap:
+                logger.warning(
+                    f"{ticker} data is STALE: session ended at {last_close.time()}, "
+                    f"but last bar is from {last_bar_ist.time()} ({close_age_minutes:.1f}m gap)"
+                )
+                return True
+
+            return False
+        except Exception as e:
+            logger.error(f"Failed session-aware staleness check for {ticker}: {e}")
+            return True
+
+    def check_staleness_daily(
+        self,
+        df: pd.DataFrame,
+        ticker: str,
+        now: datetime | None = None,
+        max_trading_days: int = DATA_STALENESS_THRESHOLD_TRADING_DAYS,
+    ) -> bool:
         """
-        Returns True if the daily data is STALE (last bar older than configured trading days).
+        DATA-002: Session-aware daily staleness check.
+        Counts elapsed trading days (excluding weekends and official holidays).
         """
         try:
             if df is None or df.empty:
                 logger.warning(f"Staleness check daily: {ticker} has no data at all — treating as stale.")
                 return True
 
-            last_ts = df.index[-1]
-            if last_ts.tzinfo is not None:
-                now = pd.Timestamp.now(tz=last_ts.tzinfo)
+            from config import MARKET_TIMEZONE
+            from market_calendar import is_trading_day, previous_market_close
+
+            tz_ist = ZoneInfo(MARKET_TIMEZONE)
+            if now is None:
+                now_ist = datetime.now(tz_ist)
             else:
-                now = pd.Timestamp.now()
+                now_ist = now.astimezone(tz_ist) if now.tzinfo is not None else now.replace(tzinfo=tz_ist)
 
-            # Count trading days between last_ts and now
+            last_ts = df.index[-1]
+            if hasattr(last_ts, "to_pydatetime"):
+                last_ts = last_ts.to_pydatetime()
+            if last_ts.tzinfo is None:
+                last_bar_ist = last_ts.replace(tzinfo=tz_ist)
+            else:
+                last_bar_ist = last_ts.astimezone(tz_ist)
+
+            last_close = previous_market_close(now_ist)
+
             trading_days = 0
-            current = last_ts.normalize() + timedelta(days=1)
-            now_norm = now.normalize()
+            curr_date = last_bar_ist.date() + timedelta(days=1)
+            target_date = last_close.date()
 
-            while current <= now_norm:
-                if current.weekday() < 5:  # Monday to Friday
+            while curr_date <= target_date:
+                if is_trading_day(curr_date):
                     trading_days += 1
-                current += timedelta(days=1)
+                curr_date += timedelta(days=1)
 
-            is_stale = trading_days > DATA_STALENESS_THRESHOLD_TRADING_DAYS
-
+            is_stale = trading_days > max_trading_days
             if is_stale:
                 logger.warning(
                     f"{ticker} daily data is STALE: last bar is {trading_days} trading days old "
-                    f"(threshold={DATA_STALENESS_THRESHOLD_TRADING_DAYS})"
+                    f"(threshold={max_trading_days})"
                 )
             return bool(is_stale)
         except Exception as e:
             logger.error(f"Failed daily staleness check for {ticker}: {e}")
             return True
+
+    def check_alignment(
+        self, stock_df: pd.DataFrame, index_df: pd.DataFrame, min_ratio: float = 0.95
+    ):
+        """DATA-003: Check stock-to-index timestamp alignment coverage."""
+        from feature_engineer import FeatureEngineer
+
+        return FeatureEngineer.check_alignment(stock_df, index_df, min_ratio=min_ratio)
 
 
 # ---------------------------------------------------------------------------

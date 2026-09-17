@@ -25,6 +25,7 @@ from sklearn.metrics import (
 )
 
 # 3. Local imports
+import config
 from config import (
     HORIZON_CONFIG,
     HORIZON_INTRADAY,
@@ -38,7 +39,13 @@ from config import (
     configure_logging,
     ensure_directories,
 )
-from feature_engineer import ML_SAFE_SUFFIX, FeatureEngineer
+from feature_engineer import (
+    CANONICAL_FEATURE_CATALOG,
+    ML_SAFE_SUFFIX,
+    FeatureEngineer,
+    FeatureSpec,
+    validate_feature_contract,
+)
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -52,6 +59,56 @@ LEVEL_MODEL_FILE_SUFFIX = "_level_model.joblib"
 LEVEL_METADATA_FILE_SUFFIX = "_level_metadata.json"
 
 LEVEL_LABEL_CLASSES = ["MA", "SUPPORT", "RESISTANCE", "USER_COST", "NONE"]
+
+
+@dataclass(frozen=True)
+class TemporalInformationInterval:
+    """
+    FEAT-005: Temporal information interval for an observation.
+    Tracks the historical lookback interval consumed by features [feature_start, timestamp]
+    and the forward evaluation interval consumed by labels [timestamp, label_end].
+    """
+
+    timestamp: pd.Timestamp
+    feature_start: pd.Timestamp
+    feature_end: pd.Timestamp
+    label_start: pd.Timestamp
+    label_end: pd.Timestamp
+
+    def overlaps_with(self, start: pd.Timestamp, end: pd.Timestamp) -> bool:
+        """Checks if the forward label window overlaps with [start, end]."""
+        return (self.label_start <= end) and (self.label_end >= start)
+
+
+@dataclass
+class FourWaySplitResult:
+    """
+    CAL-003: 4-way chronological split result holding disjoint datasets:
+    TRAIN -> CALIBRATION -> EDGE VALIDATION -> FINAL HOLDOUT.
+    """
+
+    X_train: pd.DataFrame
+    y_train: pd.Series
+    X_cal: pd.DataFrame
+    y_cal: pd.Series
+    X_edge: pd.DataFrame
+    y_edge: pd.Series
+    X_holdout: pd.DataFrame
+    y_holdout: pd.Series
+
+    def __iter__(self):
+        return iter(
+            (
+                self.X_train,
+                self.y_train,
+                self.X_cal,
+                self.y_cal,
+                self.X_edge,
+                self.y_edge,
+                self.X_holdout,
+                self.y_holdout,
+            )
+        )
 
 
 @dataclass
@@ -93,7 +150,7 @@ class ModelTrainer:
         Caps this adaptive deadband at a minimum of deadband_pct_default.
         """
         backward_returns = (df["Close"] - df["Close"].shift(horizon_bars)) / df["Close"].shift(horizon_bars) * 100.0
-        rolling_std = backward_returns.rolling(window=500, min_periods=50).std()
+        rolling_std = backward_returns.rolling(window=500, min_periods=50, center=False).std()
 
         adaptive_deadband = rolling_std * 0.5
         adaptive_deadband = adaptive_deadband.clip(lower=deadband_pct_default)
@@ -238,6 +295,12 @@ class ModelTrainer:
                 logger.error("No ML-safe ('_feat') columns found — refusing to train on raw columns.")
                 return None
 
+            # FEAT-002: Enforce causal feature contracts
+            contract_errors = validate_feature_contract(feature_columns)
+            if contract_errors:
+                logger.error(f"FEAT-002: Feature contract violation in prepare_dataset: {contract_errors}")
+                raise ValueError(f"Feature contract violation: {contract_errors}")
+
             if label_type == "level":
                 labels = self.build_price_level_labels(engineered, horizon=horizon)
             else:
@@ -259,6 +322,8 @@ class ModelTrainer:
             y_clean = combined["label"]
             return X_clean, y_clean, feature_columns
 
+        except ValueError:
+            raise
         except Exception as e:
             logger.error(f"Failed preparing dataset: {e}")
             return None
@@ -272,19 +337,182 @@ class ModelTrainer:
         y: pd.Series,
         test_fraction: float = TIME_SERIES_SPLIT_TEST_FRACTION,
         purge_window: int = 0,
+        horizon_bars: int | None = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series, pd.Series]:
         """
-        Strictly chronological split with boundary purging (P0-003):
+        Strictly chronological split with boundary purging (P0-003 / FEAT-005):
         The most recent test_fraction rows become the test set (from split_idx to end).
         To eliminate forward-label leakage where training labels peek into test-interval prices,
-        the training set ends at (split_idx - purge_window), discarding the purge window rows.
+        the training set ends at (split_idx - eff_purge), discarding the purge window rows.
+        If purge_window is 0 and horizon_bars is provided, purge_window defaults to horizon_bars.
         """
         n = len(X)
         split_idx = int(n * (1 - test_fraction))
-        train_end_idx = max(0, split_idx - purge_window) if purge_window > 0 else split_idx
+        eff_purge = purge_window
+        if eff_purge <= 0 and horizon_bars is not None and horizon_bars > 0:
+            eff_purge = horizon_bars
+        train_end_idx = max(0, split_idx - eff_purge) if eff_purge > 0 else split_idx
         X_train, X_test = X.iloc[:train_end_idx], X.iloc[split_idx:]
         y_train, y_test = y.iloc[:train_end_idx], y.iloc[split_idx:]
         return X_train, X_test, y_train, y_test
+
+    @staticmethod
+    def compute_information_intervals(
+        df_or_index: pd.DataFrame | pd.DatetimeIndex,
+        horizon_bars: int,
+        max_lookback_bars: int = 50,
+    ) -> list[TemporalInformationInterval]:
+        """
+        FEAT-005: Constructs temporal information intervals for each observation.
+        """
+        idx = df_or_index.index if isinstance(df_or_index, pd.DataFrame) else df_or_index
+        n = len(idx)
+        intervals = []
+        for i, ts in enumerate(idx):
+            feat_start = idx[max(0, i - max_lookback_bars)]
+            feat_end = ts
+            label_start = ts
+            label_end = idx[min(n - 1, i + horizon_bars)]
+            intervals.append(
+                TemporalInformationInterval(
+                    timestamp=ts,
+                    feature_start=feat_start,
+                    feature_end=feat_end,
+                    label_start=label_start,
+                    label_end=label_end,
+                )
+            )
+        return intervals
+
+    @staticmethod
+    def validate_split_isolation(
+        X_train: pd.DataFrame,
+        X_test: pd.DataFrame,
+        horizon_bars: int,
+    ) -> tuple[bool, str]:
+        """
+        FEAT-005: Validates that train set and test set have strict temporal separation
+        accounting for the label forward horizon.
+        """
+        if X_train.empty or X_test.empty:
+            return True, "Empty train or test set"
+
+        train_idx = X_train.index
+        test_idx = X_test.index
+
+        if train_idx[-1] >= test_idx[0]:
+            return False, f"Chronological ordering violated: train_end {train_idx[-1]} >= test_start {test_idx[0]}"
+
+        return True, "Valid temporal isolation"
+
+    @staticmethod
+    def chronological_4way_split(
+        X: pd.DataFrame,
+        y: pd.Series,
+        train_frac: float = 0.50,
+        cal_frac: float = 0.20,
+        edge_frac: float = 0.15,
+        holdout_frac: float = 0.15,
+        purge_window: int = 0,
+        horizon_bars: int | None = None,
+    ) -> FourWaySplitResult:
+        """
+        CAL-003: Strictly chronological multi-stage dataset split:
+        TRAIN -> CALIBRATION -> EDGE VALIDATION -> FINAL HOLDOUT.
+
+        Eliminates forward-label contamination and circular evaluation:
+        1. Train: Model estimation on historical data.
+        2. Calibration: Reliability and probability calibration evaluation.
+        3. Edge Validation: Strategy performance / alpha vs baseline verification.
+        4. Final Holdout: Pristine forward period untouched until evaluation.
+
+        Each stage boundary is isolated by dropping a purge window >= horizon_bars.
+        """
+        if len(X) != len(y):
+            raise ValueError(f"X and y must have equal length: {len(X)} vs {len(y)}")
+
+        total_frac = train_frac + cal_frac + edge_frac + holdout_frac
+        if abs(total_frac - 1.0) > 1e-4:
+            raise ValueError(f"Split fractions must sum to 1.0, got {total_frac:.4f}")
+
+        if min(train_frac, cal_frac, edge_frac, holdout_frac) <= 0.0:
+            raise ValueError("All split fractions must be strictly positive.")
+
+        eff_purge = purge_window
+        if eff_purge <= 0 and horizon_bars is not None and horizon_bars > 0:
+            eff_purge = horizon_bars
+
+        n = len(X)
+        min_required = max(50, 4 * (eff_purge + 5))
+        if n < min_required:
+            raise ValueError(
+                f"Insufficient samples ({n}) for 4-way chronological split (need >= {min_required} with purge={eff_purge})."
+            )
+
+        i1 = int(n * train_frac)
+        i2 = int(n * (train_frac + cal_frac))
+        i3 = int(n * (train_frac + cal_frac + edge_frac))
+        i4 = n
+
+        train_end = max(0, i1 - eff_purge) if eff_purge > 0 else i1
+        cal_start = i1
+        cal_end = max(cal_start, i2 - eff_purge) if eff_purge > 0 else i2
+        edge_start = i2
+        edge_end = max(edge_start, i3 - eff_purge) if eff_purge > 0 else i3
+        holdout_start = i3
+        holdout_end = i4
+
+        X_train, y_train = X.iloc[:train_end], y.iloc[:train_end]
+        X_cal, y_cal = X.iloc[cal_start:cal_end], y.iloc[cal_start:cal_end]
+        X_edge, y_edge = X.iloc[edge_start:edge_end], y.iloc[edge_start:edge_end]
+        X_holdout, y_holdout = X.iloc[holdout_start:holdout_end], y.iloc[holdout_start:holdout_end]
+
+        return FourWaySplitResult(
+            X_train=X_train,
+            y_train=y_train,
+            X_cal=X_cal,
+            y_cal=y_cal,
+            X_edge=X_edge,
+            y_edge=y_edge,
+            X_holdout=X_holdout,
+            y_holdout=y_holdout,
+        )
+
+    @staticmethod
+    def validate_4way_split_isolation(
+        split_result: FourWaySplitResult,
+        horizon_bars: int = 0,
+    ) -> tuple[bool, str]:
+        """
+        CAL-003: Validates strict chronological ordering and non-overlapping isolation across the 4 stages:
+        TRAIN -> CALIBRATION -> EDGE VALIDATION -> FINAL HOLDOUT.
+        """
+        partitions = [
+            ("train", split_result.X_train),
+            ("calibration", split_result.X_cal),
+            ("edge_validation", split_result.X_edge),
+            ("final_holdout", split_result.X_holdout),
+        ]
+        for name, part in partitions:
+            if len(part) == 0:
+                return False, f"Partition '{name}' is empty."
+
+        for i in range(len(partitions) - 1):
+            curr_name, curr_df = partitions[i]
+            next_name, next_df = partitions[i + 1]
+
+            if hasattr(curr_df.index, "__sub__") and curr_df.index[-1] >= next_df.index[0]:
+                return (
+                    False,
+                    f"Chronological ordering violated between {curr_name} (end: {curr_df.index[-1]}) and {next_name} (start: {next_df.index[0]}).",
+                )
+
+            # Check for shared index labels
+            overlap = set(curr_df.index).intersection(set(next_df.index))
+            if overlap:
+                return False, f"Overlap detected between {curr_name} and {next_name}: {len(overlap)} shared indices."
+
+        return True, "Valid 4-way chronological isolation."
 
     @staticmethod
     def walk_forward_split(
@@ -547,40 +775,56 @@ class ModelTrainer:
         metrics: dict,
         horizon: str = HORIZON_INTRADAY,
         is_level: bool = False,
-    ) -> None:
+        dataset_start: str | None = None,
+        dataset_end: str | None = None,
+        sample_count: int = 0,
+    ) -> dict:
         try:
             ensure_directories()
-            joblib.dump(model, self._model_path(symbol, horizon, is_level))
+            model_path = self._model_path(symbol, horizon, is_level)
+            joblib.dump(model, model_path)
 
             lbl_classes = LEVEL_LABEL_CLASSES if is_level else LABEL_CLASSES
 
-            metadata = {
-                "symbol": symbol,
-                "horizon": horizon,
+            extra_meta = {
                 "is_level_model": is_level,
-                "trained_at": datetime.now().isoformat(),
-                "feature_columns": feature_columns,
                 "label_classes": lbl_classes,
                 "prediction_horizon_bars": HORIZON_CONFIG[horizon]["horizon_bars"],
                 "deadband_pct": HORIZON_CONFIG[horizon]["deadband_pct_default"],
-                "test_accuracy": metrics["accuracy"],
+                "test_accuracy": metrics.get("accuracy", 0.0),
                 "price_adjustment_mode": "adjusted",  # DATA-004: Corporate action adjusted strategy
             }
-            f = None
-            try:
-                f = open(self._metadata_path(symbol, horizon, is_level), "w", encoding="utf-8")
+
+            from model_lineage import build_lineage_metadata
+
+            metadata = build_lineage_metadata(
+                symbol=symbol,
+                horizon=horizon,
+                feature_columns=feature_columns,
+                artifact_path_or_hash=model_path,
+                dataset_start=dataset_start,
+                dataset_end=dataset_end,
+                sample_count=sample_count,
+                model_version=config.MODEL_VERSION,
+                universe_version=config.UNIVERSE_VERSION,
+                extra_metadata=extra_meta,
+            )
+
+            meta_path = self._metadata_path(symbol, horizon, is_level)
+            with open(meta_path, "w", encoding="utf-8") as f:
                 json.dump(metadata, f, indent=2)
-            finally:
-                if f is not None:
-                    f.close()
+
             mdl_type = "level model" if is_level else "direction model"
-            logger.info(f"Saved {mdl_type} + metadata for {symbol} ({horizon}) to {MODELS_DIR}")
+            logger.info(
+                f"Saved {mdl_type} + lineage metadata for {symbol} ({horizon}) to {MODELS_DIR} (model_hash={metadata['model_hash'][:8]})"
+            )
+            return metadata
         except Exception as e:
             logger.error(f"Failed saving model for {symbol} ({horizon}): {e}")
             raise
 
     def load_model(
-        self, symbol: str, horizon: str = HORIZON_INTRADAY, is_level: bool = False
+        self, symbol: str, horizon: str = HORIZON_INTRADAY, is_level: bool = False, verify_integrity: bool = True
     ) -> tuple[GradientBoostingClassifier, dict] | None:
         model_path = self._model_path(symbol, horizon, is_level)
         metadata_path = self._metadata_path(symbol, horizon, is_level)
@@ -588,18 +832,23 @@ class ModelTrainer:
             if not model_path.exists() or not metadata_path.exists():
                 logger.error(f"No saved model found for {symbol} ({horizon}) at {model_path}. Run training first.")
                 return None
-            model = joblib.load(model_path)
-            f = None
-            try:
-                f = open(metadata_path, encoding="utf-8")
+
+            with open(metadata_path, encoding="utf-8") as f:
                 metadata = json.load(f)
-            finally:
-                if f is not None:
-                    f.close()
+
+            if verify_integrity:
+                from model_lineage import verify_lineage_integrity
+
+                ok, reason = verify_lineage_integrity(metadata, model_path)
+                if not ok:
+                    logger.error(f"Model integrity verification failed for {symbol} ({horizon}): {reason}")
+                    raise ValueError(f"Artifact integrity failure for {symbol} ({horizon}): {reason}")
+
+            model = joblib.load(model_path)
             return model, metadata
         except Exception as e:
             logger.error(f"Failed loading model for {symbol} ({horizon}): {e}")
-            return None
+            raise
 
     # -----------------------------------------------------------------
     # Orchestration
@@ -659,7 +908,19 @@ class ModelTrainer:
             model = self.train(X_train, y_train)
             lbl_classes = LEVEL_LABEL_CLASSES if is_level else LABEL_CLASSES
             metrics = self.evaluate(model, X_test, y_test, label_classes=lbl_classes)
-            self.save_model(symbol, model, feature_columns, metrics, horizon=horizon, is_level=is_level)
+            ds_start = str(stock_df.index.min()) if hasattr(stock_df.index, "min") else None
+            ds_end = str(stock_df.index.max()) if hasattr(stock_df.index, "max") else None
+            self.save_model(
+                symbol,
+                model,
+                feature_columns,
+                metrics,
+                horizon=horizon,
+                is_level=is_level,
+                dataset_start=ds_start,
+                dataset_end=ds_end,
+                sample_count=len(X_train),
+            )
 
             return TrainingResult(
                 symbol=symbol,

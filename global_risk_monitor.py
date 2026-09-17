@@ -70,6 +70,8 @@ class ToggleState:
     level_at_activation: str | None
     activated_at: str | None
     updated_at: str
+    changed_by: str = "system"
+    version: int = 1
 
 
 class GlobalRiskMonitor:
@@ -78,32 +80,88 @@ class GlobalRiskMonitor:
     moves every cycle and classifies risk level. Never changes prediction
     behavior by itself — only surfaces a banner. The actual risk-adjustment
     only applies once a human explicitly enables the toggle via set_toggle().
+    Persists risk state to shared database (SEC-004, SEC-005) with optimistic versioning.
     """
 
     def __init__(self, data_fetcher: DataFetcher | None = None):
         self.data_fetcher = data_fetcher or DataFetcher()
         ensure_directories()
+        self._ensure_db_table()
         self._toggle_state = self._load_toggle_state()
         self._cached_reading: GlobalRiskReading | None = None
         self._cached_time: datetime | None = None
 
+    def _ensure_db_table(self) -> None:
+        try:
+            from database import engine
+            from models import Base
+
+            Base.metadata.create_all(bind=engine)
+        except Exception as e:
+            logger.warning(f"Could not auto-create database tables: {e}")
+
     # -----------------------------------------------------------------
-    # Toggle state persistence
+    # Toggle state persistence (SEC-004, SEC-005)
     # -----------------------------------------------------------------
     def _load_toggle_state(self) -> ToggleState:
+        # 1. Try DB first for multi-worker shared state
+        try:
+            from database import SessionLocal
+            from models import RiskState
+
+            with SessionLocal() as db:
+                row = db.query(RiskState).filter(RiskState.id == 1).first()
+                if row:
+                    return ToggleState(
+                        enabled=row.enabled,
+                        reason=row.reason or "",
+                        level_at_activation=row.level_at_activation,
+                        activated_at=row.activated_at,
+                        updated_at=row.updated_at,
+                        changed_by=row.changed_by or "system",
+                        version=row.version or 1,
+                    )
+                # Seed row if missing
+                initial_row = RiskState(
+                    id=1,
+                    enabled=False,
+                    reason="",
+                    level_at_activation=None,
+                    activated_at=None,
+                    updated_at=datetime.now().isoformat(),
+                    changed_by="system",
+                    version=1,
+                )
+                db.add(initial_row)
+                db.commit()
+                return ToggleState(
+                    enabled=False,
+                    reason="",
+                    level_at_activation=None,
+                    activated_at=None,
+                    updated_at=initial_row.updated_at,
+                    changed_by="system",
+                    version=1,
+                )
+        except Exception as e:
+            logger.warning(f"DB load for toggle state failed ({e}), falling back to file cache")
+
+        # 2. File fallback
         try:
             if TOGGLE_STATE_PATH.exists():
                 with open(TOGGLE_STATE_PATH, encoding="utf-8") as f:
                     data = json.load(f)
                 return ToggleState(**data)
         except Exception as e:
-            logger.error(f"Failed loading toggle state, defaulting to OFF: {e}")
+            logger.error(f"Failed loading toggle state file, defaulting to OFF: {e}")
         return ToggleState(
             enabled=False,
             reason="",
             level_at_activation=None,
             activated_at=None,
             updated_at=datetime.now().isoformat(),
+            changed_by="system",
+            version=1,
         )
 
     def _save_toggle_state(self) -> None:
@@ -112,29 +170,81 @@ class GlobalRiskMonitor:
             f = open(TOGGLE_STATE_PATH, "w", encoding="utf-8")
             json.dump(asdict(self._toggle_state), f, indent=2)
         except Exception as e:
-            logger.error(f"Failed saving toggle state: {e}")
+            logger.error(f"Failed saving toggle state file: {e}")
         finally:
             if f is not None:
                 f.close()
 
-    def set_toggle(self, enabled: bool, reason: str = "", current_level: str | None = None) -> ToggleState:
-        """Human-gated override switch. Nothing in this system flips this automatically."""
+    def set_toggle(
+        self,
+        enabled: bool,
+        reason: str = "",
+        current_level: str | None = None,
+        changed_by: str = "system",
+        expected_version: int | None = None,
+    ) -> ToggleState:
+        """Human-gated override switch. Persists to shared DB with optimistic versioning."""
+        now_iso = datetime.now().isoformat()
+        new_version = (self._toggle_state.version + 1) if self._toggle_state else 1
+
+        # 1. Update shared DB
         try:
-            now_iso = datetime.now().isoformat()
-            self._toggle_state = ToggleState(
-                enabled=enabled,
-                reason=reason,
-                level_at_activation=current_level if enabled else self._toggle_state.level_at_activation,
-                activated_at=now_iso if enabled else self._toggle_state.activated_at,
-                updated_at=now_iso,
-            )
-            self._save_toggle_state()
-            logger.info(f"Global risk toggle set to {enabled} by human. Reason: {reason or '(none given)'}")
+            from database import SessionLocal
+            from models import RiskState
+
+            with SessionLocal() as db:
+                row = db.query(RiskState).filter(RiskState.id == 1).first()
+                if row:
+                    if expected_version is not None and row.version != expected_version:
+                        raise ValueError(
+                            f"Concurrent update conflict: expected version {expected_version}, found {row.version}"
+                        )
+                    row.enabled = enabled
+                    row.reason = reason
+                    if enabled:
+                        row.level_at_activation = current_level
+                        row.activated_at = now_iso
+                    row.updated_at = now_iso
+                    row.changed_by = changed_by
+                    row.version = (row.version or 1) + 1
+                    new_version = row.version
+                    db.commit()
+                else:
+                    new_row = RiskState(
+                        id=1,
+                        enabled=enabled,
+                        reason=reason,
+                        level_at_activation=current_level if enabled else None,
+                        activated_at=now_iso if enabled else None,
+                        updated_at=now_iso,
+                        changed_by=changed_by,
+                        version=1,
+                    )
+                    db.add(new_row)
+                    db.commit()
+                    new_version = 1
+        except ValueError:
+            raise
         except Exception as e:
-            logger.error(f"Failed setting toggle state: {e}")
+            logger.error(f"Failed setting toggle state in DB: {e}")
+
+        # 2. Update memory and file backup
+        self._toggle_state = ToggleState(
+            enabled=enabled,
+            reason=reason,
+            level_at_activation=current_level if enabled else self._toggle_state.level_at_activation,
+            activated_at=now_iso if enabled else self._toggle_state.activated_at,
+            updated_at=now_iso,
+            changed_by=changed_by,
+            version=new_version,
+        )
+        self._save_toggle_state()
+        logger.info(f"Global risk toggle set to {enabled} by {changed_by}. Reason: {reason or '(none given)'}")
         return self._toggle_state
 
-    def get_toggle_state(self) -> ToggleState:
+    def get_toggle_state(self, force_refresh: bool = True) -> ToggleState:
+        if force_refresh:
+            self._toggle_state = self._load_toggle_state()
         return self._toggle_state
 
     # -----------------------------------------------------------------

@@ -70,6 +70,7 @@ class CalibrationResult:
     expected_calibration_error: float | None
     is_well_calibrated: bool
     bins: list[CalibrationBin] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -130,9 +131,40 @@ class RuntimeValidator:
         Builds a reliability table across n_bins confidence buckets and
         computes the Expected Calibration Error (ECE): the count-weighted
         average gap between predicted confidence and actual empirical accuracy.
+
+        CAL-002 Adversarial Safeguards:
+        - Rejects small samples (< min_calibration_samples) with INSUFFICIENT_DATA.
+        - Detects inverted confidence (higher confidence -> lower empirical accuracy).
+        - Detects zero resolution (predictions have zero/negligible confidence variance).
+        - Flags excessive ECE (overconfidence or underconfidence).
+        - Identifies single-class target degeneracy.
         """
         try:
-            n_samples = len(predictions_df)
+            if predictions_df is None or len(predictions_df) == 0:
+                return CalibrationResult(
+                    status=STATUS_INSUFFICIENT_DATA,
+                    n_samples=0,
+                    expected_calibration_error=None,
+                    is_well_calibrated=False,
+                    bins=[],
+                    reasons=["No prediction records provided."],
+                )
+
+            if "confidence" not in predictions_df.columns or "correct" not in predictions_df.columns:
+                return CalibrationResult(
+                    status=STATUS_INSUFFICIENT_DATA,
+                    n_samples=0,
+                    expected_calibration_error=None,
+                    is_well_calibrated=False,
+                    bins=[],
+                    reasons=["Missing required columns 'confidence' or 'correct'."],
+                )
+
+            # Drop missing values and non-finite confidence values
+            df = predictions_df.dropna(subset=["confidence", "correct"]).copy()
+            df = df[np.isfinite(df["confidence"])].copy()
+
+            n_samples = len(df)
             if n_samples < self.min_calibration_samples:
                 logger.warning(
                     f"Only {n_samples} prediction records available, need >= "
@@ -145,9 +177,11 @@ class RuntimeValidator:
                     expected_calibration_error=None,
                     is_well_calibrated=False,
                     bins=[],
+                    reasons=[
+                        f"Only {n_samples} prediction records available, need >= {self.min_calibration_samples}."
+                    ],
                 )
 
-            df = predictions_df.copy()
             df["confidence"] = df["confidence"].clip(0.0, 1.0)
             bin_edges = np.linspace(0.0, 1.0, self.n_bins + 1)
             df["bin"] = pd.cut(df["confidence"], bins=bin_edges, include_lowest=True)
@@ -156,11 +190,13 @@ class RuntimeValidator:
             ece = 0.0
             for bin_range, group in df.groupby("bin", observed=False):
                 count = len(group)
+                lower_b = max(0.0, float(bin_range.left))
+                upper_b = float(bin_range.right)
                 if count == 0:
                     bins.append(
                         CalibrationBin(
-                            lower_bound=float(bin_range.left),
-                            upper_bound=float(bin_range.right),
+                            lower_bound=lower_b,
+                            upper_bound=upper_b,
                             count=0,
                             mean_predicted_confidence=0.0,
                             empirical_accuracy=0.0,
@@ -171,8 +207,8 @@ class RuntimeValidator:
                 empirical_acc = float(group["correct"].mean())
                 bins.append(
                     CalibrationBin(
-                        lower_bound=float(bin_range.left),
-                        upper_bound=float(bin_range.right),
+                        lower_bound=lower_b,
+                        upper_bound=upper_b,
                         count=count,
                         mean_predicted_confidence=mean_conf,
                         empirical_accuracy=empirical_acc,
@@ -180,7 +216,48 @@ class RuntimeValidator:
                 )
                 ece += (count / n_samples) * abs(mean_conf - empirical_acc)
 
-            is_well_calibrated = ece <= self.ece_threshold
+            reasons: list[str] = []
+            adversarial_miscalibrated = False
+
+            # 1. Zero Resolution: confidence lacks variance (e.g. constant 0.5 or constant 0.9)
+            conf_std = float(df["confidence"].std()) if n_samples > 1 else 0.0
+            if conf_std < 1e-5 or df["confidence"].nunique() <= 1:
+                reasons.append("Zero resolution: confidence scores lack variance (constant confidence).")
+                adversarial_miscalibrated = True
+
+            # 2. Inverted Confidence: higher predicted confidence yields lower accuracy
+            populated_bins = [b for b in bins if b.count > 0]
+            if len(populated_bins) >= 2:
+                from scipy.stats import spearmanr
+
+                pred_confs = [b.mean_predicted_confidence for b in populated_bins]
+                emp_accs = [b.empirical_accuracy for b in populated_bins]
+                if len(set(emp_accs)) > 1:
+                    corr, _ = spearmanr(pred_confs, emp_accs)
+                    if not np.isnan(corr) and corr < 0.0:
+                        reasons.append(
+                            f"Inverted confidence: higher predicted confidence yields lower empirical accuracy (rank correlation={corr:.3f} < 0)."
+                        )
+                        adversarial_miscalibrated = True
+
+            # 3. Severe class imbalance: target label has zero variance
+            if df["correct"].nunique() <= 1:
+                reasons.append("Severe class imbalance: target label has zero variance in calibration dataset.")
+                adversarial_miscalibrated = True
+
+            # 4. Excessive ECE (Overconfident / Underconfident)
+            if ece > self.ece_threshold:
+                overall_mean_conf = float(df["confidence"].mean())
+                overall_accuracy = float(df["correct"].mean())
+                direction = "Overconfident" if overall_mean_conf > overall_accuracy else "Underconfident"
+                reasons.append(
+                    f"Excessive calibration error: ECE {ece:.4f} exceeds threshold {self.ece_threshold:.4f} ({direction})."
+                )
+
+            is_well_calibrated = (ece <= self.ece_threshold) and not adversarial_miscalibrated
+            if is_well_calibrated:
+                reasons.append(f"Model is well-calibrated (ECE={ece:.4f} <= {self.ece_threshold:.4f}).")
+
             health_registry.report("runtime_validator", ok=True, detail="Calibration computed")
             return CalibrationResult(
                 status=STATUS_SUFFICIENT,
@@ -188,6 +265,7 @@ class RuntimeValidator:
                 expected_calibration_error=ece,
                 is_well_calibrated=is_well_calibrated,
                 bins=bins,
+                reasons=reasons,
             )
 
         except Exception as e:
@@ -199,32 +277,79 @@ class RuntimeValidator:
                 expected_calibration_error=None,
                 is_well_calibrated=False,
                 bins=[],
+                reasons=[f"Calibration calculation failed with error: {e}"],
             )
 
-    def get_calibrated_confidence(self, raw_confidence: float, calibration_result: CalibrationResult) -> float | None:
+    def get_calibrated_confidence(
+        self,
+        raw_confidence: float,
+        calibration_result: CalibrationResult,
+        min_bin_samples: int = 1,
+    ) -> float | None:
         """
         Returns the historically-observed empirical accuracy for the bin that
         raw_confidence falls into — i.e. what confidence SHOULD actually be
         shown, based on real track record — or None if calibration isn't
         trustworthy yet (caller must suppress the confidence display entirely).
+
+        CAL-001 requirements:
+        - Strict lookup by numeric interval, independent of array ordering.
+        - Strict validation: rejects NaN, Inf, None, and out-of-range (<0.0 or >1.0) with None.
+        - Sparse bin protection: bins with count < min_bin_samples (or count == 0) return None.
+        - Returns None if calibration_result is unverified or invalid.
         """
         try:
-            if calibration_result.status != STATUS_SUFFICIENT or not calibration_result.bins:
+            if (
+                calibration_result is None
+                or calibration_result.status != STATUS_SUFFICIENT
+                or not calibration_result.bins
+            ):
                 return None
-            raw_confidence = max(0.0, min(1.0, raw_confidence))
+
+            if not calibration_result.is_well_calibrated:
+                return None
+
+            if raw_confidence is None:
+                return None
+
+            try:
+                raw_confidence = float(raw_confidence)
+            except (TypeError, ValueError):
+                return None
+
+            if np.isnan(raw_confidence) or np.isinf(raw_confidence):
+                return None
+
+            if raw_confidence < 0.0 or raw_confidence > 1.0:
+                return None
+
             health_registry.report("runtime_validator", ok=True)
 
+            # Sort bins by (lower_bound, upper_bound) to guarantee array-position independence
+            sorted_bins = sorted(calibration_result.bins, key=lambda b: (b.lower_bound, b.upper_bound))
+
             target_bin = None
-            for b in calibration_result.bins:
-                if (raw_confidence > b.lower_bound and raw_confidence <= b.upper_bound) or (
-                    raw_confidence == 0.0 and b.lower_bound == 0.0
-                ):
+            for idx, b in enumerate(sorted_bins):
+                # Standard half-open (lower, upper] interval
+                # First bin or lowest bin includes lower bound [lower, upper]
+                if idx == 0 or b.lower_bound == 0.0:
+                    in_bin = b.lower_bound <= raw_confidence <= b.upper_bound
+                else:
+                    prev_upper = sorted_bins[idx - 1].upper_bound
+                    # If there is a disconnected gap from the previous bin, include the lower bound
+                    if b.lower_bound > prev_upper:
+                        in_bin = b.lower_bound <= raw_confidence <= b.upper_bound
+                    else:
+                        in_bin = b.lower_bound < raw_confidence <= b.upper_bound
+
+                if in_bin:
                     target_bin = b
                     break
 
-            if target_bin is None or target_bin.count == 0:
+            if target_bin is None or target_bin.count < max(1, min_bin_samples):
                 return None
-            return target_bin.empirical_accuracy
+
+            return float(target_bin.empirical_accuracy)
         except Exception as e:
             logger.error(f"Failed getting calibrated confidence for raw={raw_confidence}: {e}")
             health_registry.report(

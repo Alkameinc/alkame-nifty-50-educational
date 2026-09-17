@@ -90,6 +90,68 @@ STANDARD_COST_SCENARIOS = {
 }
 
 
+def create_scaled_cost_scenario(
+    base: CostScenario, cost_multiplier: float, name: str, slippage_bps: float | None = None
+) -> CostScenario:
+    """Scale brokerage and statutory transaction costs while keeping tax percentages intact."""
+    slip = slippage_bps if slippage_bps is not None else base.slippage_bps
+    return CostScenario(
+        name=name,
+        slippage_bps=slip,
+        brokerage_bps=base.brokerage_bps * cost_multiplier,
+        stt_bps=base.stt_bps * cost_multiplier,
+        exchange_charges_bps=base.exchange_charges_bps * cost_multiplier,
+        gst_pct=base.gst_pct,
+        stamp_duty_bps=base.stamp_duty_bps * cost_multiplier,
+        sebi_turnover_bps=base.sebi_turnover_bps * cost_multiplier,
+    )
+
+
+# BACK-003: Phase 12 Configurable Cost and Slippage Stress Scenarios
+_BASE_REF = STANDARD_COST_SCENARIOS["BASE"]
+
+PHASE12_COST_SCENARIOS: dict[str, CostScenario] = {
+    "BASE": _BASE_REF,
+    "+25% cost": create_scaled_cost_scenario(_BASE_REF, 1.25, "+25% cost"),
+    "+50% cost": create_scaled_cost_scenario(_BASE_REF, 1.50, "+50% cost"),
+    "+100% cost": create_scaled_cost_scenario(_BASE_REF, 2.00, "+100% cost"),
+    "HIGH_SLIPPAGE": CostScenario(
+        name="HIGH_SLIPPAGE",
+        slippage_bps=25.0,  # 5x base slippage (50.0 bps round trip)
+        brokerage_bps=_BASE_REF.brokerage_bps,
+        stt_bps=_BASE_REF.stt_bps,
+        exchange_charges_bps=_BASE_REF.exchange_charges_bps,
+        gst_pct=_BASE_REF.gst_pct,
+        stamp_duty_bps=_BASE_REF.stamp_duty_bps,
+        sebi_turnover_bps=_BASE_REF.sebi_turnover_bps,
+    ),
+    "LOW_LIQUIDITY": CostScenario(
+        name="LOW_LIQUIDITY",
+        slippage_bps=35.0,  # 7x base slippage (70.0 bps round trip) + elevated friction
+        brokerage_bps=_BASE_REF.brokerage_bps * 1.5,
+        stt_bps=_BASE_REF.stt_bps,
+        exchange_charges_bps=_BASE_REF.exchange_charges_bps * 1.5,
+        gst_pct=_BASE_REF.gst_pct,
+        stamp_duty_bps=_BASE_REF.stamp_duty_bps,
+        sebi_turnover_bps=_BASE_REF.sebi_turnover_bps,
+    ),
+}
+
+# Aliases for convenient programmatic access
+PHASE12_COST_SCENARIOS["COST_PLUS_25"] = PHASE12_COST_SCENARIOS["+25% cost"]
+PHASE12_COST_SCENARIOS["COST_PLUS_50"] = PHASE12_COST_SCENARIOS["+50% cost"]
+PHASE12_COST_SCENARIOS["COST_PLUS_100"] = PHASE12_COST_SCENARIOS["+100% cost"]
+
+PHASE12_MANDATORY_SCENARIOS = [
+    "BASE",
+    "+25% cost",
+    "+50% cost",
+    "+100% cost",
+    "HIGH_SLIPPAGE",
+    "LOW_LIQUIDITY",
+]
+
+
 @dataclass
 class SimulatedTrade:
     symbol: str
@@ -121,10 +183,32 @@ class SimulationReport:
     cumulative_gross_return_pct: float
     cumulative_net_return_pct: float
     total_costs_paid_pct: float
-    max_drawdown_pct: float
-    sharpe_ratio: float
-    sortino_ratio: float
+    total_slippage_paid_pct: float = 0.0
+    total_transaction_costs_paid_pct: float = 0.0
+    max_drawdown_pct: float = 0.0
+    sharpe_ratio: float = 0.0
+    sortino_ratio: float = 0.0
     trades: list[SimulatedTrade] = field(default_factory=list)
+
+    @property
+    def pnl_breakdown(self) -> dict[str, float]:
+        """BACK-003: Explicit P&L decomposition separating gross, transaction costs, slippage, and net."""
+        return {
+            "gross_pnl_pct": self.cumulative_gross_return_pct,
+            "transaction_costs_pct": self.total_transaction_costs_paid_pct,
+            "slippage_pct": self.total_slippage_paid_pct,
+            "net_pnl_pct": self.cumulative_net_return_pct,
+        }
+
+    @property
+    def is_viable(self) -> bool:
+        """
+        BACK-003: Evaluate strategy viability after all friction.
+        Never report only gross performance when evaluating strategy viability.
+        """
+        if self.n_trades == 0:
+            return False
+        return self.cumulative_net_return_pct > 0.0 and self.profit_factor > 1.0
 
 
 class ExecutionSimulator:
@@ -311,6 +395,8 @@ class ExecutionSimulator:
                 cumulative_gross_return_pct=0.0,
                 cumulative_net_return_pct=0.0,
                 total_costs_paid_pct=0.0,
+                total_slippage_paid_pct=0.0,
+                total_transaction_costs_paid_pct=0.0,
                 max_drawdown_pct=0.0,
                 sharpe_ratio=0.0,
                 sortino_ratio=0.0,
@@ -320,6 +406,8 @@ class ExecutionSimulator:
         net_returns = np.array([t.net_return_pct for t in trades])
         gross_returns = np.array([t.gross_return_pct for t in trades])
         costs = np.array([t.total_cost_pct for t in trades])
+        slippage_costs = np.array([t.slippage_cost_pct for t in trades])
+        statutory_costs = np.array([t.statutory_cost_pct for t in trades])
 
         wins = net_returns[net_returns > 0]
         losses = net_returns[net_returns < 0]
@@ -334,6 +422,8 @@ class ExecutionSimulator:
         cum_net = float(np.sum(net_returns))
         cum_gross = float(np.sum(gross_returns))
         total_costs = float(np.sum(costs))
+        total_slippage = float(np.sum(slippage_costs))
+        total_tx_costs = float(np.sum(statutory_costs))
 
         # Max Drawdown
         equity_curve = np.cumsum(net_returns)
@@ -360,6 +450,8 @@ class ExecutionSimulator:
             cumulative_gross_return_pct=round(cum_gross, 2),
             cumulative_net_return_pct=round(cum_net, 2),
             total_costs_paid_pct=round(total_costs, 2),
+            total_slippage_paid_pct=round(total_slippage, 2),
+            total_transaction_costs_paid_pct=round(total_tx_costs, 2),
             max_drawdown_pct=round(max_dd, 2),
             sharpe_ratio=sharpe,
             sortino_ratio=sortino,
@@ -388,6 +480,37 @@ class ExecutionSimulator:
             )
         return results
 
+    def run_stress_test_analysis(
+        self,
+        symbol: str,
+        df: pd.DataFrame,
+        signals: pd.Series,
+        horizon: str = HORIZON_INTRADAY,
+        scenarios: list[str] | None = None,
+    ) -> dict[str, SimulationReport]:
+        """
+        BACK-003: Runs the simulation across Phase 12 mandated stress scenarios:
+        BASE, +25% cost, +50% cost, +100% cost, HIGH_SLIPPAGE, LOW_LIQUIDITY.
+        """
+        scenario_names = scenarios or PHASE12_MANDATORY_SCENARIOS
+        results = {}
+        for name in scenario_names:
+            if name in PHASE12_COST_SCENARIOS:
+                scenario = PHASE12_COST_SCENARIOS[name]
+            elif name in STANDARD_COST_SCENARIOS:
+                scenario = STANDARD_COST_SCENARIOS[name]
+            else:
+                raise ValueError(f"Unknown cost scenario: {name}")
+
+            results[name] = self.simulate(
+                symbol=symbol,
+                df=df,
+                signals=signals,
+                horizon=horizon,
+                cost_scenario=scenario,
+            )
+        return results
+
 
 if __name__ == "__main__":
     configure_logging(log_filename="execution_simulator_selftest.log")
@@ -407,8 +530,26 @@ if __name__ == "__main__":
 
     sim = ExecutionSimulator()
     sensitivity = sim.run_sensitivity_analysis("TEST", df, signals)
+    assert len(sensitivity) == 4, "run_sensitivity_analysis should retain exactly 4 tiers"
     for name, report in sensitivity.items():
         print(
             f"Scenario: {name} | Trades: {report.n_trades} | Net: {report.cumulative_net_return_pct:.2f}% | DD: {report.max_drawdown_pct:.2f}%"
         )
+
+    # BACK-003: Verify Phase 12 Stress Test Analysis
+    stress_reports = sim.run_stress_test_analysis("TEST", df, signals)
+    assert len(stress_reports) == 6, f"Expected 6 Phase 12 stress scenarios, got {len(stress_reports)}"
+    for s_name in PHASE12_MANDATORY_SCENARIOS:
+        assert s_name in stress_reports
+        rep = stress_reports[s_name]
+        bd = rep.pnl_breakdown
+        assert "gross_pnl_pct" in bd and "transaction_costs_pct" in bd and "slippage_pct" in bd and "net_pnl_pct" in bd
+        # Invariant: gross - tx_cost - slippage == net (within rounding)
+        diff = abs((bd["gross_pnl_pct"] - bd["transaction_costs_pct"] - bd["slippage_pct"]) - bd["net_pnl_pct"])
+        assert diff <= 0.05, f"P&L decomposition failed for {s_name}: {bd}"
+        print(
+            f"Stress: {s_name:<14} | Gross: {bd['gross_pnl_pct']:>6.2f}% | TxCost: {bd['transaction_costs_pct']:>5.2f}% | "
+            f"Slippage: {bd['slippage_pct']:>5.2f}% | Net: {bd['net_pnl_pct']:>6.2f}% | Viable: {rep.is_viable}"
+        )
+
     print("ExecutionSimulator self-test PASSED")

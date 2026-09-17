@@ -1,7 +1,7 @@
 # 1. Standard library imports
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 # 2. Third-party imports
 # (none required)
@@ -21,6 +21,7 @@ from config import (
 )
 from health_monitor import registry as health_registry
 from macro_calendar import MacroCalendar, MacroEvent
+from sector_provider import sector_map_provider
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -72,6 +73,9 @@ NEWS_KEYWORD_SECTOR_HINTS = {
 }
 
 
+INVALID_EVENT_TIMESTAMP = datetime(1970, 1, 1, 0, 0, tzinfo=timezone.utc)
+
+
 @dataclass
 class Event:
     """Unified event schema used across the whole system, regardless of
@@ -90,6 +94,13 @@ class Event:
     magnitude_estimate: str = "MEDIUM"  # "LOW" | "MEDIUM" | "HIGH"
     impact_horizon: str = HORIZON_INTRADAY
     raw: dict | None = field(default=None, repr=False)
+
+    def __post_init__(self):
+        # DATA-004: Standardize internal timestamps on timezone-aware UTC
+        if self.timestamp.tzinfo is None:
+            raise ValueError(
+                f"Naive datetime rejected in Event.timestamp: {self.timestamp}. Must be timezone-aware UTC."
+            )
 
     def needs_human_review(self, low_confidence_threshold: float = 0.5) -> bool:
         return self.confidence_in_scope < low_confidence_threshold
@@ -117,15 +128,18 @@ class EventClassifier:
         self._event_counter += 1
         return f"{prefix}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{self._event_counter}"
 
-    def _sectors_to_tickers(self, sectors: list[str]) -> list[str]:
-        """Expand a list of sector names (or ['ALL']) into a flat ticker list."""
+    def _sectors_to_tickers(self, sectors: list[str], as_of: datetime | date | str | None = None) -> list[str]:
+        """Expand a list of sector names (or ['ALL']) into a flat ticker list (DATA-007: optionally point-in-time)."""
         if not sectors:
             return []
         if "ALL" in sectors:
             return list(NIFTY50_SYMBOLS)
         tickers: list[str] = []
         for sector in sectors:
-            tickers.extend(SECTOR_TO_SYMBOLS.get(sector, []))
+            sec_tickers = sector_map_provider.get_symbols_for_sector(sector, as_of=as_of)
+            if not sec_tickers:
+                sec_tickers = SECTOR_TO_SYMBOLS.get(sector, [])
+            tickers.extend(sec_tickers)
         return sorted(set(tickers))
 
     # -----------------------------------------------------------------
@@ -142,7 +156,7 @@ class EventClassifier:
             if scope == SCOPE_STOCK:
                 tickers = sectors
             else:
-                tickers = self._sectors_to_tickers(sectors)
+                tickers = self._sectors_to_tickers(sectors, as_of=macro_event.event_date)
                 # If expansion only touches a subset (not literally ALL), this is really SECTOR scope
                 if "ALL" not in sectors and scope == SCOPE_MARKET:
                     scope = SCOPE_SECTOR
@@ -151,7 +165,7 @@ class EventClassifier:
                 event_id=self._next_event_id("MACRO"),
                 source="MACRO",
                 event_type=macro_event.event_type,
-                timestamp=datetime.combine(macro_event.event_date, datetime.min.time()),
+                timestamp=datetime.combine(macro_event.event_date, datetime.min.time(), tzinfo=timezone.utc),
                 scope=scope,
                 affected_tickers=tickers,
                 sector=sectors[0] if scope == SCOPE_SECTOR and sectors and sectors[0] != "ALL" else None,
@@ -189,7 +203,7 @@ class EventClassifier:
     # -----------------------------------------------------------------
     # Corporate events -> Event objects (always STOCK scope, single symbol)
     # -----------------------------------------------------------------
-    def classify_corporate_event(self, corporate_event: dict) -> Event:
+    def classify_corporate_event(self, corporate_event: dict, allow_invalid: bool = False) -> Event:
         try:
             symbol = corporate_event.get("symbol")
             category = corporate_event.get("category", "CORPORATE_ANNOUNCEMENT")
@@ -202,11 +216,30 @@ class EventClassifier:
                     source_timestamp = datetime.fromisoformat(source_timestamp.replace("Z", "+00:00"))
                 except ValueError:
                     source_timestamp = None
+
             if not isinstance(source_timestamp, datetime):
-                source_timestamp = datetime.now()
+                # DATA-005: Never fallback to datetime.now()! Reject the event
+                logger.warning(
+                    f"DATA-005: Invalid/missing timestamp in corporate event {corporate_event}. Rejecting event."
+                )
+                if allow_invalid:
+                    source_timestamp = INVALID_EVENT_TIMESTAMP
+                else:
+                    raise ValueError(f"Invalid or missing corporate event timestamp for {symbol or 'UNKNOWN'}")
+
+            if source_timestamp.tzinfo is None:
+                source_timestamp = source_timestamp.replace(tzinfo=timezone.utc)
+            else:
+                source_timestamp = source_timestamp.astimezone(timezone.utc)
 
             affected = [symbol] if symbol else []
             scope = SCOPE_STOCK if symbol else SCOPE_MARKET  # market-wide block deals have no single symbol
+
+            if source_timestamp:
+                sec = sector_map_provider.get_sector(symbol, as_of=source_timestamp) if symbol else None
+                sector_val = sec if sec and sec != "Unknown" else None
+            else:
+                sector_val = SECTOR_MAP.get(symbol) if symbol else None
 
             evt = Event(
                 event_id=self._next_event_id("CORP"),
@@ -215,7 +248,7 @@ class EventClassifier:
                 timestamp=source_timestamp,
                 scope=scope,
                 affected_tickers=affected,
-                sector=SECTOR_MAP.get(symbol) if symbol else None,
+                sector=sector_val,
                 confidence_in_scope=1.0,  # sourced directly from NSE, high confidence
                 headline_or_label=str(label),
                 sentiment_score=None,
@@ -238,11 +271,33 @@ class EventClassifier:
     # News events -> Event objects (STOCK by default, escalated to SECTOR/MARKET
     # only when the headline text matches a known keyword hint)
     # -----------------------------------------------------------------
-    def classify_news_event(self, news_article: dict) -> Event:
+    def classify_news_event(self, news_article: dict, allow_invalid: bool = False) -> Event:
         try:
             symbol = news_article.get("symbol")
             title = news_article.get("title", "")
             title_lower = title.lower()
+
+            pub_at = news_article.get("published_at")
+            if isinstance(pub_at, str):
+                try:
+                    pub_at = datetime.fromisoformat(pub_at.replace("Z", "+00:00"))
+                except ValueError:
+                    pub_at = None
+
+            if not isinstance(pub_at, datetime):
+                # DATA-005: Never fallback to datetime.now()! Reject the event
+                logger.warning(
+                    f"DATA-005: Invalid/missing published_at in news article {title}. Rejecting event."
+                )
+                if allow_invalid:
+                    pub_at = INVALID_EVENT_TIMESTAMP
+                else:
+                    raise ValueError(f"Invalid or missing published_at in news article: {title}")
+
+            if pub_at.tzinfo is None:
+                pub_at = pub_at.replace(tzinfo=timezone.utc)
+            else:
+                pub_at = pub_at.astimezone(timezone.utc)
 
             matched_sectors: list[str] | None = None
             for keyword, sectors in NEWS_KEYWORD_SECTOR_HINTS.items():
@@ -255,7 +310,7 @@ class EventClassifier:
 
             if matched_sectors:
                 scope = SCOPE_MARKET if "ALL" in matched_sectors else SCOPE_SECTOR
-                tickers = self._sectors_to_tickers(matched_sectors)
+                tickers = self._sectors_to_tickers(matched_sectors, as_of=pub_at)
                 confidence = 0.6  # keyword-matched macro-relevance is inherently less certain than a direct tag
                 sector_val = None if scope == SCOPE_MARKET else matched_sectors[0]
             else:
@@ -263,13 +318,17 @@ class EventClassifier:
                 scope = SCOPE_STOCK
                 tickers = [symbol] if symbol else []
                 confidence = 1.0 if symbol else 0.3
-                sector_val = SECTOR_MAP.get(symbol) if symbol else None
+                if pub_at:
+                    sec = sector_map_provider.get_sector(symbol, as_of=pub_at) if symbol else None
+                    sector_val = sec if sec and sec != "Unknown" else None
+                else:
+                    sector_val = SECTOR_MAP.get(symbol) if symbol else None
 
             evt = Event(
                 event_id=self._next_event_id("NEWS"),
                 source="NEWS",
                 event_type="NEWS_HEADLINE",
-                timestamp=news_article.get("published_at") or datetime.now(),
+                timestamp=pub_at,
                 scope=scope,
                 affected_tickers=tickers,
                 sector=sector_val,
@@ -284,7 +343,9 @@ class EventClassifier:
             return evt
         except Exception as e:
             logger.error(f"Failed classifying news event {news_article}: {e}")
-            health_registry.report("event_classifier", ok=False, detail="Failed classifying news event", error=str(e))
+            health_registry.report(
+                "event_classifier", ok=False, detail="Failed classifying news event", error=str(e)
+            )
             return self._fallback_event("NEWS", news_article.get("title", ""))
 
     @staticmethod
@@ -301,12 +362,13 @@ class EventClassifier:
 
     def _fallback_event(self, source: str, label: str) -> Event:
         """Used only when classification itself throws — produces a safe,
-        low-confidence, STOCK-scoped-to-nothing event that human review will catch."""
+        low-confidence, STOCK-scoped-to-nothing event that human review will catch.
+        DATA-005: Uses INVALID_EVENT_TIMESTAMP, never datetime.now()."""
         return Event(
             event_id=self._next_event_id(f"{source}_FALLBACK"),
             source=source,
             event_type="CLASSIFICATION_ERROR",
-            timestamp=datetime.now(),
+            timestamp=INVALID_EVENT_TIMESTAMP,
             scope=SCOPE_STOCK,
             affected_tickers=[],
             sector=None,
@@ -340,7 +402,11 @@ class EventClassifier:
         else:
             for m in macro_events:
                 try:
-                    results.append(self.classify_macro_event(m))
+                    evt = self.classify_macro_event(m)
+                    if evt.timestamp != INVALID_EVENT_TIMESTAMP and evt.event_type != "CLASSIFICATION_ERROR":
+                        results.append(evt)
+                    else:
+                        errors.append(f"Rejected macro event with invalid timestamp: {m.label}")
                 except Exception as e:
                     errors.append(f"Error classifying macro event: {e}")
 
@@ -350,7 +416,13 @@ class EventClassifier:
         else:
             for c in corporate_events:
                 try:
-                    results.append(self.classify_corporate_event(c))
+                    evt = self.classify_corporate_event(c)
+                    if evt.timestamp != INVALID_EVENT_TIMESTAMP and evt.event_type != "CLASSIFICATION_ERROR":
+                        results.append(evt)
+                    else:
+                        errors.append(
+                            f"Rejected corporate event with invalid timestamp or classification error: {c.get('symbol', 'UNKNOWN')}"
+                        )
                 except Exception as e:
                     errors.append(f"Error classifying corporate event: {e}")
 
@@ -360,7 +432,13 @@ class EventClassifier:
         else:
             for n in news_articles:
                 try:
-                    results.append(self.classify_news_event(n))
+                    evt = self.classify_news_event(n)
+                    if evt.timestamp != INVALID_EVENT_TIMESTAMP and evt.event_type != "CLASSIFICATION_ERROR":
+                        results.append(evt)
+                    else:
+                        errors.append(
+                            f"Rejected news event with invalid timestamp or classification error: {n.get('title', '')}"
+                        )
                 except Exception as e:
                     errors.append(f"Error classifying news event: {e}")
 

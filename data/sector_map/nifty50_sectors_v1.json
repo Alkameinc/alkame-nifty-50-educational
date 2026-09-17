@@ -1,4 +1,4 @@
-﻿{
+{
   "version": "1.0",
   "effective_date": "2024-03-28",
   "source": "NSE Industry Classification & Sectoral Mapping",
@@ -53,6 +53,15 @@
     "JSWSTEEL": {"sector": "Metals", "industry": "Steel Manufacturing"},
     "TATASTEEL": {"sector": "Metals", "industry": "Steel & Iron Products"},
     "HINDALCO": {"sector": "Metals", "industry": "Aluminum & Copper"},
-    "BEL": {"sector": "CapitalGoods", "industry": "Defense & Aerospace Electronics"}
+    "BEL": {"sector": "CapitalGoods", "industry": "Defense & Aerospace Electronics"},
+    "TRENT": {"sector": "Retail", "industry": "Apparel & Departmental Stores"},
+    "LTIM": {"sector": "IT", "industry": "IT Services & Consulting"},
+    "UPL": {"sector": "Chemicals", "industry": "Agrochemicals & Crop Protection"},
+    "HDFC": {"sector": "NBFC", "industry": "Housing Finance"},
+    "IOC": {"sector": "Energy", "industry": "Oil & Gas - Refining & Marketing"},
+    "GAIL": {"sector": "Utilities", "industry": "Natural Gas Transmission & Distribution"},
+    "SHREECEM": {"sector": "Cement", "industry": "Cement & Building Materials"},
+    "ZEEL": {"sector": "Media", "industry": "Broadcasting & Media Entertainment"},
+    "INFRATEL": {"sector": "Telecom", "industry": "Telecom Infrastructure & Towers"}
   }
 }

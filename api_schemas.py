@@ -1,3 +1,4 @@
+from typing import Any
 from pydantic import BaseModel, Field
 
 
@@ -24,12 +25,14 @@ class HorizonSignalOut(BaseModel):
     upside_summary: str
     events: list[EventOut]
     reasoning: list[str]
+    prediction_key: str | None = None
 
 
 class MultiHorizonSignalResponse(BaseModel):
     symbol: str
     narrative: str
     signals: dict[str, HorizonSignalOut]
+    prediction_key: str | None = None
 
 
 class HealthDiagnosticOut(BaseModel):
@@ -41,6 +44,22 @@ class HealthDiagnosticOut(BaseModel):
 class HealthResponse(BaseModel):
     overall: str
     diagnostics: list[HealthDiagnosticOut]
+    engine_health: str = "HEALTHY"
+    checks: dict[str, str] = {}
+
+
+class ModelValidityOut(BaseModel):
+    symbol: str
+    horizon: str
+    validity_status: str
+    is_live_eligible: bool
+    model_version: str | None = None
+    trained_at: str | None = None
+    age_days: float | None = None
+    calibration_status: str
+    edge_status: str
+    reasons: list[str] = []
+    metadata: dict[str, Any] = {}
 
 
 class SymbolsResponse(BaseModel):
@@ -64,6 +83,7 @@ class PredictionRecordOut(BaseModel):
     horizon: str = "INTRADAY"
     narrative: str | None = None
     dca_ladder: str | None = None
+    prediction_key: str | None = None
 
 
 class HistoryResponse(BaseModel):

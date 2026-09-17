@@ -2,8 +2,8 @@
 import logging
 import time as time_module
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from typing import Optional, cast
+from datetime import UTC, datetime, timedelta, timezone
+from typing import Any, Optional, cast
 from zoneinfo import ZoneInfo
 
 # 2. Third-party imports
@@ -23,11 +23,27 @@ from config import (
 from corporate_events_fetcher import CorporateEventsFetcher
 from data_fetcher import DataFetcher
 from event_classifier import EventClassifier
+from health_monitor import registry as health_registry
 from history_manager import HistoryManager
 from macro_calendar import MacroCalendar
 from news_sentiment_fetcher import NewsSentimentFetcher
-from predictor import MultiHorizonSignal, PredictionSignal, Predictor
+from model_lineage import compute_feature_schema_hash
+from prediction_concurrency import (
+    PredictionConcurrencyCoordinator,
+    compute_prediction_key,
+    normalize_timestamp_for_key,
+)
+from predictor import MultiHorizonSignal, PredictionContext, PredictionSignal, Predictor
 from runtime_validator import CalibrationResult, EdgeCheckResult
+from scheduler_circuit_breaker import (
+    SCHEDULER_STATE_DEGRADED,
+    SCHEDULER_STATE_FAILED,
+    SCHEDULER_STATE_HALTED,
+    SCHEDULER_STATE_HEALTHY,
+    SCHEDULER_STATE_STARTING,
+    SchedulerCircuitBreaker,
+    SchedulerMetrics,
+)
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -108,6 +124,8 @@ class Scheduler:
         corporate_events_fetcher: CorporateEventsFetcher | None = None,
         macro_calendar: MacroCalendar | None = None,
         news_sentiment_fetcher: NewsSentimentFetcher | None = None,
+        circuit_breaker: SchedulerCircuitBreaker | None = None,
+        concurrency_coordinator: PredictionConcurrencyCoordinator | None = None,
     ):
         self.data_fetcher = data_fetcher or DataFetcher()
         self.predictor = predictor or Predictor(data_fetcher=self.data_fetcher)
@@ -118,9 +136,76 @@ class Scheduler:
         self.corporate_events_fetcher = corporate_events_fetcher or CorporateEventsFetcher()
         self.macro_calendar = macro_calendar or MacroCalendar()
         self.news_sentiment_fetcher = news_sentiment_fetcher or NewsSentimentFetcher()
+        self.circuit_breaker = circuit_breaker or SchedulerCircuitBreaker()
+        self.concurrency_coordinator = (
+            concurrency_coordinator or PredictionConcurrencyCoordinator(history_manager=self.history_manager)
+        )
 
         self._live_worthiness_cache: dict[tuple[str, str], LiveWorthinessSnapshot] = {}
         self._event_context_cache: dict[str, EventContext] = {}
+
+        # SCHED-003: Startup storage recovery & integrity audit
+        self.storage_recovery_report = None
+        try:
+            if hasattr(self.history_manager, "run_recovery"):
+                self.storage_recovery_report = self.history_manager.run_recovery()
+            else:
+                from storage_reliability import run_storage_recovery
+
+                self.storage_recovery_report = run_storage_recovery(getattr(self.history_manager, "engine", None))
+            logger.info(
+                f"[SCHED-003] Storage recovery completed: WAL={self.storage_recovery_report.wal_checkpointed}, "
+                f"integrity={self.storage_recovery_report.integrity_ok}, "
+                f"predictions={self.storage_recovery_report.prediction_count} "
+                f"(unresolved={self.storage_recovery_report.unresolved_prediction_count})"
+            )
+        except Exception as sr_err:
+            logger.warning(f"[SCHED-003] Startup storage recovery warning: {sr_err}")
+
+        # SCHED-001 / OPS-001: Register initial state in health registry
+        try:
+            health_registry.report(
+                "scheduler",
+                ok=True,
+                detail=f"Scheduler initialized in {self.circuit_breaker.state} state.",
+            )
+        except Exception:
+            pass
+
+    def compute_cycle_key(
+        self,
+        symbol: str,
+        stock_df: pd.DataFrame | None = None,
+        timestamp: Any | None = None,
+    ) -> str:
+        """SCHED-002: Computes a deterministic idempotency key for this symbol's prediction cycle."""
+        if timestamp is not None:
+            bar_ts = timestamp
+        elif stock_df is not None and not stock_df.empty:
+            bar_ts = stock_df.index[-1]
+        else:
+            bar_ts = datetime.now(timezone.utc)
+
+        model_ver = "v1.0"
+        schema_hash = ""
+        try:
+            if hasattr(self.predictor, "ensemble_manager"):
+                loaded = self.predictor.ensemble_manager.load_ensemble(symbol, horizon="INTRADAY")
+                if loaded:
+                    _, _, meta = loaded
+                    model_ver = meta.get("model_version", "v1.0")
+                    schema_hash = meta.get("feature_schema_hash", "")
+        except Exception:
+            pass
+
+        if not schema_hash:
+            if stock_df is not None and not stock_df.empty:
+                feat_cols = [c for c in stock_df.columns if c.endswith("_feat")]
+                schema_hash = compute_feature_schema_hash(feat_cols)
+            else:
+                schema_hash = compute_feature_schema_hash([])
+
+        return compute_prediction_key(symbol, bar_ts, model_ver, schema_hash)
 
     # -----------------------------------------------------------------
     # Market hours
@@ -371,6 +456,81 @@ class Scheduler:
         return self._filter_events_as_of(context, effective_as_of)
 
     # -----------------------------------------------------------------
+    # Canonical Prediction Context Builder (API-002)
+    # -----------------------------------------------------------------
+    def build_prediction_context(
+        self,
+        symbol: str,
+        stock_df: pd.DataFrame | None = None,
+        index_df: pd.DataFrame | None = None,
+        as_of: datetime | None = None,
+        macro_events: list | None = None,
+        corporate_events: list[dict] | None = None,
+        news_articles: list[dict] | None = None,
+    ) -> PredictionContext:
+        """API-002: Build canonical unified prediction context for symbol."""
+        data_status = "DATA_UNAVAILABLE"
+        if stock_df is None:
+            from config import to_yfinance_ticker
+
+            raw_stock = self.data_fetcher.fetch_ohlcv(to_yfinance_ticker(symbol), return_metadata=True)
+            stock_df = getattr(raw_stock, "data", getattr(raw_stock, "df", raw_stock))
+            if hasattr(raw_stock, "status") and hasattr(raw_stock.status, "value"):
+                data_status = raw_stock.status.value
+            elif stock_df is not None and not stock_df.empty:
+                data_status = "LIVE"
+        else:
+            data_status = "LIVE" if not stock_df.empty else "DATA_UNAVAILABLE"
+
+        if index_df is None:
+            raw_index = self.data_fetcher.fetch_nifty_index()
+            index_df = getattr(raw_index, "data", getattr(raw_index, "df", raw_index))
+
+        # Collect event context if not explicitly passed
+        event_status = "EVENTS_AVAILABLE"
+        if macro_events is None and corporate_events is None and news_articles is None:
+            try:
+                event_context = self.get_event_context(symbol, as_of=as_of) if as_of is not None else self.get_event_context(symbol)
+            except TypeError:
+                event_context = self.get_event_context(symbol)
+            macro_events = event_context.macro_events
+            corporate_events = event_context.corporate_events
+            news_articles = event_context.news_articles
+            event_status = event_context.status
+
+        from config import HORIZON_CONFIG
+
+        horizons = list(HORIZON_CONFIG.keys())
+        calib_results = {}
+        edge_results = {}
+        for h in horizons:
+            snapshot = self.get_cached_live_worthiness(symbol, horizon=h)
+            if snapshot:
+                calib_results[h] = snapshot.calibration_result
+                edge_results[h] = snapshot.edge_check_result
+
+        ts = as_of or datetime.now(timezone.utc)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        if as_of is not None and as_of.tzinfo is None:
+            as_of = as_of.replace(tzinfo=timezone.utc)
+
+        return PredictionContext(
+            symbol=symbol,
+            timestamp=ts,
+            market_data=stock_df,
+            index_data=index_df,
+            macro_events=macro_events,
+            corporate_events=corporate_events,
+            news_events=news_articles,
+            data_status=data_status,
+            event_status=event_status,
+            calibration_results=calib_results,
+            edge_check_results=edge_results,
+            as_of=as_of,
+        )
+
+    # -----------------------------------------------------------------
     # One cycle for one symbol
     # -----------------------------------------------------------------
     def run_one_cycle_for_symbol(
@@ -383,6 +543,22 @@ class Scheduler:
         news_articles: list[dict] | None = None,
         return_structured: bool = False,
     ) -> Optional["MultiHorizonSignal"] | CycleResult:
+        if not self.circuit_breaker.can_execute():
+            msg = (
+                f"Scheduler cycle suppressed for {symbol}: circuit breaker is HALTED. "
+                f"Reason: {self.circuit_breaker.metrics.trip_reason}"
+            )
+            logger.warning(msg)
+            if return_structured:
+                return CycleResult(
+                    success=False,
+                    status="CIRCUIT_BREAKER_HALTED",
+                    symbol=symbol,
+                    signal=None,
+                    error=msg,
+                )
+            return None
+
         if stock_df is None or stock_df.empty or index_df is None or index_df.empty:
             logger.warning(f"Data unavailable for {symbol} in cycle run.")
             if return_structured:
@@ -395,42 +571,75 @@ class Scheduler:
                 )
             return None
 
-        try:
-            if macro_events is None and corporate_events is None and news_articles is None:
-                event_context = self.get_event_context(symbol)
-                macro_events = event_context.macro_events
-                corporate_events = event_context.corporate_events
-                news_articles = event_context.news_articles
+        cycle_key = self.compute_cycle_key(symbol, stock_df)
+
+        def _execute_cycle() -> MultiHorizonSignal:
+            # Auto-collect event context if omitted
+            m_events = macro_events
+            c_events = corporate_events
+            n_articles = news_articles
+            if m_events is None and c_events is None and n_articles is None:
+                try:
+                    event_context = self.get_event_context(symbol)
+                    m_events = event_context.macro_events
+                    c_events = event_context.corporate_events
+                    n_articles = event_context.news_articles
+                except Exception:
+                    pass
+
+            bar_ts = (
+                stock_df.index[-1]
+                if (stock_df is not None and not stock_df.empty and isinstance(stock_df.index[-1], (pd.Timestamp, datetime)))
+                else None
+            )
+
+            # Build canonical prediction context
+            context = self.build_prediction_context(
+                symbol=symbol,
+                stock_df=stock_df,
+                index_df=index_df,
+                as_of=bar_ts,
+                macro_events=m_events,
+                corporate_events=c_events,
+                news_articles=n_articles,
+            )
 
             from config import HORIZON_CONFIG
 
             horizons = list(HORIZON_CONFIG.keys())
 
-            calib_results = {}
-            edge_results = {}
-            for h in horizons:
-                snapshot = self.get_cached_live_worthiness(symbol, horizon=h)
-                if snapshot:
-                    calib_results[h] = snapshot.calibration_result
-                    edge_results[h] = snapshot.edge_check_result
+            if hasattr(self.predictor, "predict_context"):
+                multi_sig = self.predictor.predict_context(context, horizons=horizons)
+            else:
+                multi_sig = self.predictor.generate_multi_horizon_signal(
+                    symbol=context.symbol,
+                    horizons=horizons,
+                    stock_df=context.market_data,
+                    index_df=context.index_data,
+                    macro_events=context.macro_events,
+                    corporate_events=context.corporate_events,
+                    news_articles=context.news_events,
+                    calibration_results=context.calibration_results,
+                    edge_check_results=context.edge_check_results,
+                    as_of=context.as_of or context.timestamp,
+                )
 
-            multi_signal = self.predictor.generate_multi_horizon_signal(
-                symbol,
-                horizons,
-                stock_df,
-                index_df,
-                macro_events=macro_events,
-                corporate_events=corporate_events,
-                news_articles=news_articles,
-                calibration_results=calib_results,
-                edge_check_results=edge_results,
-            )
+            for h, sig in multi_sig.signals.items():
+                if hasattr(self.history_manager, "save_prediction_bundle"):
+                    self.history_manager.save_prediction_bundle(
+                        sig,
+                        events=sig.contributing_events,
+                        prediction_key=getattr(sig, "prediction_key", None),
+                    )
+                else:
+                    self.history_manager.save_prediction(sig)
+                    for event in sig.contributing_events:
+                        self.history_manager.save_event(event)
 
-            for h, sig in multi_signal.signals.items():
-                self.history_manager.save_prediction(sig)
-                for event in sig.contributing_events:
-                    self.history_manager.save_event(event)
+            return multi_sig
 
+        try:
+            multi_signal = self.concurrency_coordinator.execute_or_wait(cycle_key, _execute_cycle)
             if return_structured:
                 return CycleResult(success=True, status="SUCCESS", symbol=symbol, signal=multi_signal)
             return multi_signal
@@ -451,35 +660,20 @@ class Scheduler:
         news_articles: list[dict] | None = None,
     ):
         try:
-            if macro_events is None and corporate_events is None and news_articles is None:
-                event_context = self.get_event_context(symbol)
-                macro_events = event_context.macro_events
-                corporate_events = event_context.corporate_events
-                news_articles = event_context.news_articles
+            context = self.build_prediction_context(
+                symbol=symbol,
+                stock_df=stock_df,
+                index_df=index_df,
+                as_of=None,
+                macro_events=macro_events,
+                corporate_events=corporate_events,
+                news_articles=news_articles,
+            )
 
             from config import HORIZON_CONFIG
 
             horizons = list(HORIZON_CONFIG.keys())
-
-            calib_results = {}
-            edge_results = {}
-            for h in horizons:
-                snapshot = self.get_cached_live_worthiness(symbol, horizon=h)
-                if snapshot:
-                    calib_results[h] = snapshot.calibration_result
-                    edge_results[h] = snapshot.edge_check_result
-
-            stream = self.predictor.generate_multi_horizon_stream(
-                symbol,
-                horizons,
-                stock_df,
-                index_df,
-                macro_events=macro_events,
-                corporate_events=corporate_events,
-                news_articles=news_articles,
-                calibration_results=calib_results,
-                edge_check_results=edge_results,
-            )
+            stream = self.predictor.predict_stream_context(context, horizons=horizons)
             yield from stream
         except Exception as e:
             logger.error(f"Stream cycle failed for {symbol}: {e}")
@@ -579,6 +773,157 @@ class Scheduler:
             return resolved_count
 
     # -----------------------------------------------------------------
+    # Full Cycle Orchestration (SCHED-001, OPS-001)
+    # -----------------------------------------------------------------
+    def run_cycle(
+        self,
+        symbol_data_provider=None,
+        symbols: list[str] | None = None,
+        ignore_market_hours: bool = False,
+    ) -> dict[str, Any]:
+        """
+        SCHED-001 & OPS-001: Orchestrates one full pipeline cycle with strict
+        circuit breaker enforcement, operational timestamp tracking, and alertable
+        health state reporting.
+        """
+        # 1. Circuit breaker gate
+        if not self.circuit_breaker.can_execute():
+            logger.warning(
+                f"Skipping cycle execution: circuit breaker is HALTED ({self.circuit_breaker.metrics.trip_reason})"
+            )
+            return {
+                "success": False,
+                "status": "CIRCUIT_BREAKER_HALTED",
+                "state": self.circuit_breaker.state,
+                "error": self.circuit_breaker.metrics.trip_reason,
+                "cycle_results": {},
+            }
+
+        # 2. Market hours check
+        if not ignore_market_hours and not self.is_market_open():
+            logger.info("Market closed — skipping cycle execution.")
+            return {
+                "success": True,
+                "status": "MARKET_CLOSED",
+                "state": self.circuit_breaker.state,
+                "cycle_results": {},
+            }
+
+        try:
+            # 3. Market data collection
+            self.circuit_breaker.metrics.last_data_fetch = datetime.now(timezone.utc)
+            if symbol_data_provider is not None:
+                symbol_data = symbol_data_provider()
+            else:
+                from config import NIFTY50_SYMBOLS, to_yfinance_ticker
+
+                target_symbols = symbols or NIFTY50_SYMBOLS
+                symbol_data = {}
+                index_raw = self.data_fetcher.fetch_nifty_index()
+                index_df = index_raw if isinstance(index_raw, pd.DataFrame) else pd.DataFrame()
+                for sym in target_symbols:
+                    ticker = to_yfinance_ticker(sym)
+                    stock_raw = self.data_fetcher.fetch_ohlcv(ticker)
+                    stock_df = stock_raw if isinstance(stock_raw, pd.DataFrame) else pd.DataFrame()
+                    symbol_data[sym] = (stock_df, index_df)
+
+            if not symbol_data:
+                raise ValueError("No market data returned by provider")
+
+            # 4. Symbol processing
+            cycle_results: dict[str, CycleResult] = {}
+            for symbol, (stock_df, index_df) in symbol_data.items():
+                self.resolve_pending_outcomes(symbol, stock_df)
+                event_context = self.get_event_context(symbol)
+                self.circuit_breaker.metrics.last_event_fetch = datetime.now(timezone.utc)
+
+                res = self.run_one_cycle_for_symbol(
+                    symbol,
+                    stock_df,
+                    index_df,
+                    macro_events=event_context.macro_events,
+                    corporate_events=event_context.corporate_events,
+                    news_articles=event_context.news_articles,
+                    return_structured=True,
+                )
+                if isinstance(res, CycleResult):
+                    cycle_results[symbol] = res
+                    if res.success:
+                        self.circuit_breaker.metrics.last_prediction = datetime.now(timezone.utc)
+
+            # Evaluate cycle success: at least one symbol succeeded and no circuit breaker halts
+            successful_symbols = [s for s, r in cycle_results.items() if r.success]
+            if not successful_symbols and cycle_results:
+                raise RuntimeError(
+                    f"All {len(cycle_results)} symbol cycle runs failed or had unavailable data."
+                )
+
+            self.circuit_breaker.record_success()
+            try:
+                health_registry.report(
+                    "scheduler",
+                    ok=True,
+                    detail=f"Completed cycle for {len(successful_symbols)}/{len(cycle_results)} symbols. State: {self.circuit_breaker.state}",
+                )
+            except Exception:
+                pass
+
+            return {
+                "success": True,
+                "status": "SUCCESS",
+                "state": self.circuit_breaker.state,
+                "symbols_processed": len(cycle_results),
+                "successful_symbols": len(successful_symbols),
+                "cycle_results": cycle_results,
+            }
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Scheduler cycle execution failed: {error_msg}")
+            self.circuit_breaker.record_failure(error_msg)
+            try:
+                health_registry.report(
+                    "scheduler",
+                    ok=(self.circuit_breaker.state in (SCHEDULER_STATE_HEALTHY, SCHEDULER_STATE_STARTING)),
+                    detail=f"Scheduler cycle failed: {error_msg}. State: {self.circuit_breaker.state}",
+                    error=error_msg,
+                )
+            except Exception:
+                pass
+            return {
+                "success": False,
+                "status": "FAILED",
+                "state": self.circuit_breaker.state,
+                "error": error_msg,
+                "cycle_results": {},
+            }
+
+    def get_status(self) -> dict[str, Any]:
+        """Returns the current state and operational metrics of the scheduler."""
+        status = self.circuit_breaker.get_status()
+        status["concurrency"] = self.concurrency_coordinator.get_metrics()
+        if self.storage_recovery_report:
+            from dataclasses import asdict
+
+            status["storage"] = asdict(self.storage_recovery_report)
+        else:
+            status["storage"] = {"integrity_ok": True, "wal_checkpointed": True}
+        return status
+
+    def reset_circuit_breaker(self) -> dict[str, Any]:
+        """Administratively resets the circuit breaker and clears failure counters."""
+        self.circuit_breaker.reset()
+        try:
+            health_registry.report(
+                "scheduler",
+                ok=True,
+                detail=f"Circuit breaker administratively reset. State: {self.circuit_breaker.state}",
+            )
+        except Exception:
+            pass
+        return self.get_status()
+
+    # -----------------------------------------------------------------
     # Continuous loop (real deployment entry point)
     # -----------------------------------------------------------------
     def run_forever(self, symbol_data_provider, max_iterations: int | None = None) -> None:
@@ -591,27 +936,13 @@ class Scheduler:
         """
         iterations = 0
         while max_iterations is None or iterations < max_iterations:
-            if not self.is_market_open():
-                logger.info("Market closed — sleeping until next check.")
+            if not self.circuit_breaker.can_execute():
+                logger.warning("Scheduler circuit breaker is HALTED — sleeping.")
                 time_module.sleep(60 if max_iterations is None else 0)
                 iterations += 1
                 continue
 
-            try:
-                symbol_data = symbol_data_provider()
-                for symbol, (stock_df, index_df) in symbol_data.items():
-                    self.resolve_pending_outcomes(symbol, stock_df)
-                    event_context = self.get_event_context(symbol)
-                    self.run_one_cycle_for_symbol(
-                        symbol,
-                        stock_df,
-                        index_df,
-                        macro_events=event_context.macro_events,
-                        corporate_events=event_context.corporate_events,
-                        news_articles=event_context.news_articles,
-                    )
-            except Exception as e:
-                logger.error(f"Error during scheduler cycle: {e}")
+            self.run_cycle(symbol_data_provider=symbol_data_provider)
 
             iterations += 1
             if max_iterations is None:

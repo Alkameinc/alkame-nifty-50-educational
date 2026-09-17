@@ -1,6 +1,8 @@
 # 1. Standard library imports
+from dataclasses import dataclass
 import logging
 import re
+from typing import Any
 
 # 2. Third-party imports
 import numpy as np
@@ -20,6 +22,7 @@ from config import (
     CORRELATION_LOOKBACK_BARS,
     GAP_THRESHOLD_PCT,
     HORIZON_INTRADAY,
+    HORIZON_SCALP,
     LOW_LIQUIDITY_VOLUME_FLOOR,
     MA_FAST_PERIOD,
     MA_SLOW_PERIOD,
@@ -51,6 +54,263 @@ REQUIRED_COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
 # for live dashboard alerting on the current bar, but must NEVER be passed
 # to model_trainer.py.
 ML_SAFE_SUFFIX = "_feat"
+
+
+@dataclass
+class AlignmentCoverageReport:
+    """DATA-003 / FEAT-003: Timestamp alignment coverage between series."""
+
+    source_count: int
+    matched_count: int
+    coverage_ratio: float
+    status: str  # "HEALTHY" | "DEGRADED" | "UNAVAILABLE"
+    threshold: float = 0.95
+
+
+@dataclass(frozen=True)
+class FeatureSpec:
+    """
+    FEAT-002: Causal feature contract specification.
+    Guarantees that features consumed by models have strictly defined sources,
+    maximum lookbacks, and lag shifts >= 1 to prevent quantitative lookahead bias.
+    """
+
+    name: str
+    source: str  # "stock_ohlcv" | "index_ohlcv" | "reference_levels" | "portfolio"
+    max_lookback: int
+    shift: int  # Must be >= 1 for any feature used in ML training
+    allowed_timestamp: str = "prior_bar_close"
+    dtype: str = "float64"
+    description: str = ""
+
+    def __post_init__(self):
+        if self.shift < 1:
+            raise ValueError(
+                f"FeatureSpec '{self.name}' violates causal contract: shift={self.shift} < 1. "
+                "All ML features must have shift >= 1 to prevent lookahead bias."
+            )
+
+
+CANONICAL_FEATURE_CATALOG: dict[str, FeatureSpec] = {
+    f"rsi{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"rsi{ML_SAFE_SUFFIX}",
+        source="stock_ohlcv",
+        max_lookback=RSI_PERIOD,
+        shift=1,
+        description="Relative Strength Index (14-bar) shifted by 1 bar",
+    ),
+    f"macd_line{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"macd_line{ML_SAFE_SUFFIX}",
+        source="stock_ohlcv",
+        max_lookback=MACD_SLOW,
+        shift=1,
+        description="MACD fast-slow EMA difference shifted by 1 bar",
+    ),
+    f"macd_signal{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"macd_signal{ML_SAFE_SUFFIX}",
+        source="stock_ohlcv",
+        max_lookback=MACD_SLOW + MACD_SIGNAL,
+        shift=1,
+        description="MACD 9-bar signal EMA shifted by 1 bar",
+    ),
+    f"macd_histogram{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"macd_histogram{ML_SAFE_SUFFIX}",
+        source="stock_ohlcv",
+        max_lookback=MACD_SLOW + MACD_SIGNAL,
+        shift=1,
+        description="MACD line minus signal histogram shifted by 1 bar",
+    ),
+    f"bb_upper{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"bb_upper{ML_SAFE_SUFFIX}",
+        source="stock_ohlcv",
+        max_lookback=BOLLINGER_PERIOD,
+        shift=1,
+        description="Bollinger Upper Band (20-bar, 2 std) shifted by 1 bar",
+    ),
+    f"bb_middle{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"bb_middle{ML_SAFE_SUFFIX}",
+        source="stock_ohlcv",
+        max_lookback=BOLLINGER_PERIOD,
+        shift=1,
+        description="Bollinger Middle SMA (20-bar) shifted by 1 bar",
+    ),
+    f"bb_lower{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"bb_lower{ML_SAFE_SUFFIX}",
+        source="stock_ohlcv",
+        max_lookback=BOLLINGER_PERIOD,
+        shift=1,
+        description="Bollinger Lower Band (20-bar, 2 std) shifted by 1 bar",
+    ),
+    f"atr{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"atr{ML_SAFE_SUFFIX}",
+        source="stock_ohlcv",
+        max_lookback=ATR_PERIOD,
+        shift=1,
+        description="Average True Range (14-bar) shifted by 1 bar",
+    ),
+    f"vwap{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"vwap{ML_SAFE_SUFFIX}",
+        source="stock_ohlcv",
+        max_lookback=75,
+        shift=1,
+        description="Intraday Volume Weighted Average Price shifted by 1 bar",
+    ),
+    f"ema_fast{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"ema_fast{ML_SAFE_SUFFIX}",
+        source="stock_ohlcv",
+        max_lookback=MA_FAST_PERIOD,
+        shift=1,
+        description="Fast Exponential Moving Average (9-bar) shifted by 1 bar",
+    ),
+    f"ema_slow{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"ema_slow{ML_SAFE_SUFFIX}",
+        source="stock_ohlcv",
+        max_lookback=MA_SLOW_PERIOD,
+        shift=1,
+        description="Slow Exponential Moving Average (21-bar) shifted by 1 bar",
+    ),
+    f"orb_breakout{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"orb_breakout{ML_SAFE_SUFFIX}",
+        source="stock_ohlcv",
+        max_lookback=75,
+        shift=1,
+        dtype="bool",
+        description="Opening range breakout boolean indicator shifted by 1 bar",
+    ),
+    f"gap_pct{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"gap_pct{ML_SAFE_SUFFIX}",
+        source="stock_ohlcv",
+        max_lookback=2,
+        shift=1,
+        description="Overnight/session gap percentage shifted by 1 bar",
+    ),
+    f"volume_ratio{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"volume_ratio{ML_SAFE_SUFFIX}",
+        source="stock_ohlcv",
+        max_lookback=VOLUME_SPIKE_LOOKBACK_BARS,
+        shift=1,
+        description="Volume relative to 20-bar rolling average shifted by 1 bar",
+    ),
+    f"outperformance_pct{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"outperformance_pct{ML_SAFE_SUFFIX}",
+        source="index_ohlcv",
+        max_lookback=75,
+        shift=1,
+        description="Stock vs NIFTY index intraday return delta shifted by 1 bar",
+    ),
+    f"nifty_correlation{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"nifty_correlation{ML_SAFE_SUFFIX}",
+        source="index_ohlcv",
+        max_lookback=CORRELATION_LOOKBACK_BARS,
+        shift=1,
+        description="Rolling 50-bar correlation to NIFTY index shifted by 1 bar",
+    ),
+    f"pct_from_ma{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"pct_from_ma{ML_SAFE_SUFFIX}",
+        source="reference_levels",
+        max_lookback=500,
+        shift=1,
+        description="Percent distance from moving average shifted by 1 bar",
+    ),
+    f"pct_from_support_band{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"pct_from_support_band{ML_SAFE_SUFFIX}",
+        source="reference_levels",
+        max_lookback=500,
+        shift=1,
+        description="Percent distance from support band shifted by 1 bar",
+    ),
+    f"pct_from_resistance_band{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"pct_from_resistance_band{ML_SAFE_SUFFIX}",
+        source="reference_levels",
+        max_lookback=500,
+        shift=1,
+        description="Percent distance from resistance band shifted by 1 bar",
+    ),
+    f"pct_from_user_avg_cost{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"pct_from_user_avg_cost{ML_SAFE_SUFFIX}",
+        source="portfolio",
+        max_lookback=1,
+        shift=1,
+        description="Percent distance from user entry cost shifted by 1 bar",
+    ),
+    f"has_position{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"has_position{ML_SAFE_SUFFIX}",
+        source="portfolio",
+        max_lookback=1,
+        shift=1,
+        dtype="float64",
+        description="Position active flag shifted by 1 bar",
+    ),
+    f"rolling_1m_return{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"rolling_1m_return{ML_SAFE_SUFFIX}",
+        source="stock_ohlcv",
+        max_lookback=21,
+        shift=1,
+        description="Rolling 21-day return shifted by 1 bar",
+    ),
+    f"rolling_3m_return{ML_SAFE_SUFFIX}": FeatureSpec(
+        name=f"rolling_3m_return{ML_SAFE_SUFFIX}",
+        source="stock_ohlcv",
+        max_lookback=63,
+        shift=1,
+        description="Rolling 63-day return shifted by 1 bar",
+    ),
+}
+
+
+def validate_feature_contract(
+    features: pd.DataFrame | list[str],
+    catalog: dict[str, FeatureSpec] | None = None,
+) -> list[str]:
+    """
+    FEAT-002: Validates that every feature in the provided list or DataFrame
+    complies with a causal FeatureSpec contract.
+    Returns a list of error strings (empty if all valid).
+    """
+    if catalog is None:
+        catalog = CANONICAL_FEATURE_CATALOG
+
+    if isinstance(features, pd.DataFrame):
+        feature_cols = [c for c in features.columns if c.endswith(ML_SAFE_SUFFIX)]
+        # Also check for any raw, unlagged feature leak
+        raw_candidates = [
+            "rsi",
+            "macd_line",
+            "macd_signal",
+            "macd_histogram",
+            "bb_upper",
+            "bb_middle",
+            "bb_lower",
+            "atr",
+            "vwap",
+            "ema_fast",
+            "ema_slow",
+            "orb_breakout",
+            "gap_pct",
+            "volume_ratio",
+            "outperformance_pct",
+            "nifty_correlation",
+            "pct_from_ma",
+            "pct_from_support_band",
+            "pct_from_resistance_band",
+            "pct_from_user_avg_cost",
+            "has_position",
+        ]
+        raw_leaks = [c for c in features.columns if c in raw_candidates]
+        if raw_leaks:
+            return [f"Raw unshifted feature columns present in feature DataFrame: {raw_leaks}"]
+    else:
+        feature_cols = list(features)
+
+    errors = []
+    for col in feature_cols:
+        if col not in catalog:
+            errors.append(f"Feature '{col}' is not registered in CANONICAL_FEATURE_CATALOG.")
+            continue
+        spec = catalog[col]
+        if spec.shift < 1:
+            errors.append(f"Feature '{col}' has non-causal shift={spec.shift} (must be >= 1).")
+    return errors
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +576,48 @@ class FeatureEngineer:
             logger.error(f"Failed computing correlation breakdown: {e}")
             return pd.Series(dtype=float), pd.Series(dtype=bool)
 
+    @staticmethod
+    def check_alignment(
+        stock_df: pd.DataFrame,
+        index_df: pd.DataFrame,
+        min_ratio: float = 0.95,
+    ) -> AlignmentCoverageReport:
+        """DATA-003 / FEAT-003: Calculate stock/index timestamp alignment coverage."""
+        if stock_df is None or stock_df.empty:
+            return AlignmentCoverageReport(
+                source_count=0, matched_count=0, coverage_ratio=0.0, status="UNAVAILABLE", threshold=min_ratio
+            )
+        if index_df is None or index_df.empty:
+            return AlignmentCoverageReport(
+                source_count=len(stock_df), matched_count=0, coverage_ratio=0.0, status="UNAVAILABLE", threshold=min_ratio
+            )
+
+        stock_idx = pd.to_datetime(stock_df.index, utc=True)
+        index_idx = pd.to_datetime(index_df.index, utc=True)
+        matched = len(stock_idx.intersection(index_idx))
+        total = len(stock_idx)
+        ratio = matched / total if total > 0 else 0.0
+
+        if ratio >= min_ratio:
+            status = "HEALTHY"
+        elif ratio >= 0.50:
+            status = "DEGRADED"
+        else:
+            status = "UNAVAILABLE"
+
+        return AlignmentCoverageReport(
+            source_count=total,
+            matched_count=matched,
+            coverage_ratio=ratio,
+            status=status,
+            threshold=min_ratio,
+        )
+
+    @staticmethod
+    def validate_feature_contract(df_or_columns: pd.DataFrame | list[str]) -> list[str]:
+        """FEAT-002: Delegate to module-level validate_feature_contract."""
+        return validate_feature_contract(df_or_columns)
+
     # -----------------------------------------------------------------
     # Master orchestration
     # -----------------------------------------------------------------
@@ -389,13 +691,34 @@ class FeatureEngineer:
             out["low_liquidity"] = rolling_vol_avg < LOW_LIQUIDITY_VOLUME_FLOOR
 
             if index_df is not None and _validate_ohlcv(index_df, "index_df"):
-                outperf, outperf_flag = self.compute_outperformance(close, index_df["Close"])
-                out["outperformance_pct"] = outperf.reindex(out.index)
-                out["outperformance_flag"] = outperf_flag.reindex(out.index).fillna(False)
+                align_report = self.check_alignment(out, index_df)
+                out.attrs["alignment_report"] = align_report
+                out.attrs["alignment_status"] = align_report.status
+                out.attrs["alignment_ratio"] = align_report.coverage_ratio
+                out["alignment_ratio"] = align_report.coverage_ratio
+                out["alignment_status"] = align_report.status
 
-                corr, corr_breakdown = self.compute_correlation_breakdown(close, index_df["Close"])
-                out["nifty_correlation"] = corr.reindex(out.index)
-                out["correlation_breakdown"] = corr_breakdown.reindex(out.index).fillna(False)
+                if align_report.status in ("DEGRADED", "UNAVAILABLE"):
+                    logger.warning(
+                        f"DATA-003 / FEAT-003: Stock/index timestamp alignment {align_report.status}: "
+                        f"{align_report.matched_count}/{align_report.source_count} bars matched "
+                        f"({align_report.coverage_ratio*100:.1f}%, threshold={align_report.threshold*100:.1f}%)"
+                    )
+
+                if align_report.status == "UNAVAILABLE":
+                    # FEAT-003: If alignment is unavailable (< 50%), refuse to compute spurious cross-series features
+                    out["outperformance_pct"] = np.nan
+                    out["outperformance_flag"] = False
+                    out["nifty_correlation"] = np.nan
+                    out["correlation_breakdown"] = False
+                else:
+                    outperf, outperf_flag = self.compute_outperformance(close, index_df["Close"])
+                    out["outperformance_pct"] = outperf.reindex(out.index)
+                    out["outperformance_flag"] = outperf_flag.reindex(out.index).fillna(False)
+
+                    corr, corr_breakdown = self.compute_correlation_breakdown(close, index_df["Close"])
+                    out["nifty_correlation"] = corr.reindex(out.index)
+                    out["correlation_breakdown"] = corr_breakdown.reindex(out.index).fillna(False)
             else:
                 logger.info("No index_df provided — skipping outperformance/correlation features.")
 
@@ -521,7 +844,7 @@ class FeatureEngineer:
             for col in ["pct_from_ma", "pct_from_support_band", "pct_from_resistance_band"]:
                 out[f"{col}{ML_SAFE_SUFFIX}"] = out[col].shift(1)
 
-        if horizon == HORIZON_INTRADAY:
+        if horizon in (HORIZON_INTRADAY, HORIZON_SCALP):
             return out
 
         # For non-intraday horizons (daily bars), exclude intraday-specific features
@@ -552,6 +875,179 @@ class FeatureEngineer:
         out[f"rolling_3m_return{ML_SAFE_SUFFIX}"] = out["rolling_3m_return"].shift(1)
 
         return out
+
+    def verify_feature_equivalence(
+        self,
+        stock_df: pd.DataFrame,
+        index_df: pd.DataFrame | None = None,
+        timestamps: list[Any] | None = None,
+        horizon: str = "INTRADAY",
+        tolerance: float = 1e-9,
+    ) -> "FeatureEquivalenceReport":
+        return verify_feature_equivalence(
+            stock_df=stock_df,
+            index_df=index_df,
+            timestamps=timestamps,
+            horizon=horizon,
+            tolerance=tolerance,
+            engineer=self,
+        )
+
+
+@dataclass
+class FeatureEquivalenceReport:
+    """
+    BACK-001: Verification report comparing batch (backtest) vs sliced (live) features.
+    """
+    is_equivalent: bool
+    timestamps_checked: list[Any]
+    features_checked: list[str]
+    max_absolute_error: float
+    mismatches: list[dict[str, Any]]
+    details: str
+
+
+def verify_feature_equivalence(
+    stock_df: pd.DataFrame,
+    index_df: pd.DataFrame | None = None,
+    timestamps: list[Any] | None = None,
+    horizon: str = "INTRADAY",
+    tolerance: float = 1e-9,
+    engineer: FeatureEngineer | None = None,
+) -> FeatureEquivalenceReport:
+    """
+    BACK-001: Verifies bit-for-bit / high-precision numerical equivalence between
+    batch backtest feature computation and sequential point-in-time live feature extraction.
+
+    For each timestamp T in timestamps:
+      1. Batch backtest feature vector:
+         features_batch = engineer.engineer_features_for_horizon(stock_df, index_df, horizon).loc[[T]]
+      2. Sliced live feature vector:
+         features_live = engineer.engineer_features_for_horizon(stock_df.loc[:T], index_df.loc[:T] if index_df is not None else None, horizon).iloc[[-1:]]
+      3. Assert schema match (columns, ordering, dtypes).
+      4. Assert |features_batch[col] - features_live[col]| <= tolerance.
+    """
+    eng = engineer or FeatureEngineer()
+
+    # Step 1: Compute full batch features (Backtest path)
+    batch_df = eng.engineer_features_for_horizon(stock_df, index_df, horizon=horizon)
+    if batch_df is None or batch_df.empty:
+        return FeatureEquivalenceReport(
+            is_equivalent=False,
+            timestamps_checked=[],
+            features_checked=[],
+            max_absolute_error=float("inf"),
+            mismatches=[{"error": "Batch feature engineering failed or returned empty dataframe"}],
+            details="Batch feature engineering failed",
+        )
+
+    # Filter to ML-safe canonical features
+    feature_cols = [c for c in batch_df.columns if c in CANONICAL_FEATURE_CATALOG or c.endswith(ML_SAFE_SUFFIX)]
+
+    # Determine timestamps to check
+    if timestamps is None or len(timestamps) == 0:
+        warmup = min(60, len(stock_df) // 2)
+        valid_indices = stock_df.index[warmup:]
+        if len(valid_indices) <= 10:
+            timestamps = list(valid_indices)
+        else:
+            step = len(valid_indices) // 10
+            timestamps = [valid_indices[i * step] for i in range(10)]
+            if valid_indices[-1] not in timestamps:
+                timestamps.append(valid_indices[-1])
+
+    max_err = 0.0
+    mismatches: list[dict[str, Any]] = []
+
+    for ts in timestamps:
+        if ts not in stock_df.index:
+            continue
+
+        # Sliced data strictly up to ts (Replay/Live path)
+        stock_slice = stock_df.loc[:ts]
+        index_slice = index_df.loc[:ts] if index_df is not None else None
+
+        live_df = eng.engineer_features_for_horizon(stock_slice, index_slice, horizon=horizon)
+        if live_df is None or live_df.empty:
+            mismatches.append({
+                "timestamp": str(ts),
+                "error": "Live sliced feature engineering returned empty",
+            })
+            continue
+
+        # Schema match check:
+        live_cols = [c for c in live_df.columns if c in CANONICAL_FEATURE_CATALOG or c.endswith(ML_SAFE_SUFFIX)]
+        if set(feature_cols) != set(live_cols):
+            missing = set(feature_cols) - set(live_cols)
+            extra = set(live_cols) - set(feature_cols)
+            mismatches.append({
+                "timestamp": str(ts),
+                "error": f"Schema mismatch: missing={missing}, extra={extra}",
+            })
+            continue
+
+        batch_row = batch_df.loc[ts]
+        live_row = live_df.iloc[-1]
+
+        for col in feature_cols:
+            b_val = batch_row[col]
+            l_val = live_row[col]
+
+            # Handle boolean types
+            if isinstance(b_val, (bool, np.bool_)) or isinstance(l_val, (bool, np.bool_)):
+                if bool(b_val) != bool(l_val):
+                    mismatches.append({
+                        "timestamp": str(ts),
+                        "column": col,
+                        "batch_val": b_val,
+                        "live_val": l_val,
+                        "diff": "boolean mismatch",
+                    })
+                continue
+
+            # Handle NaN / None
+            b_nan = pd.isna(b_val)
+            l_nan = pd.isna(l_val)
+            if b_nan and l_nan:
+                continue
+            if b_nan != l_nan:
+                mismatches.append({
+                    "timestamp": str(ts),
+                    "column": col,
+                    "batch_val": b_val,
+                    "live_val": l_val,
+                    "diff": "NaN disparity",
+                })
+                continue
+
+            # Numerical comparison
+            err = abs(float(b_val) - float(l_val))
+            if err > max_err:
+                max_err = err
+
+            if err > tolerance:
+                mismatches.append({
+                    "timestamp": str(ts),
+                    "column": col,
+                    "batch_val": float(b_val),
+                    "live_val": float(l_val),
+                    "diff": err,
+                })
+
+    is_equiv = len(mismatches) == 0
+    details = (
+        f"Verified feature equivalence across {len(timestamps)} timestamps and {len(feature_cols)} features. "
+        f"Max error: {max_err:.2e}, Mismatches: {len(mismatches)}."
+    )
+
+    return FeatureEquivalenceReport(
+        is_equivalent=is_equiv,
+        timestamps_checked=timestamps,
+        features_checked=feature_cols,
+        max_absolute_error=max_err,
+        mismatches=mismatches,
+        details=details,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,9 @@
-﻿# 1. Standard library imports
+# 1. Standard library imports
 import logging
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,33 @@ class MarketDataResult:
     source: str
     adjustment_mode: PriceAdjustmentMode = PriceAdjustmentMode.ADJUSTED
     error: str | None = None
+    fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    age_seconds: float | None = None
+
+    def __post_init__(self):
+        # DATA-004: Standardize internal timestamps on timezone-aware UTC
+        if self.fetched_at is not None:
+            if self.fetched_at.tzinfo is None:
+                raise ValueError(
+                    f"Naive datetime rejected in MarketDataResult.fetched_at: {self.fetched_at}. "
+                    "Must be timezone-aware UTC."
+                )
+
+    @property
+    def df(self) -> pd.DataFrame | None:
+        return self.data
+
+    @property
+    def is_stale(self) -> bool:
+        return self.status == DataStatus.CACHED_STALE
+
+    @property
+    def is_live(self) -> bool:
+        return self.status == DataStatus.LIVE
+
+    @property
+    def is_available(self) -> bool:
+        return self.data is not None and not self.data.empty and self.status != DataStatus.UNAVAILABLE
 
 
 @dataclass

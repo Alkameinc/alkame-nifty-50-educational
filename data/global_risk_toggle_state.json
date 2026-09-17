@@ -1,7 +1,9 @@
 {
-  "enabled": true,
-  "reason": "test",
+  "enabled": false,
+  "reason": "Cleanup",
   "level_at_activation": null,
-  "activated_at": "2026-09-15T22:07:03.420288",
-  "updated_at": "2026-09-15T22:07:03.420288"
+  "activated_at": "2026-09-17T12:33:17.019424",
+  "updated_at": "2026-09-17T12:33:17.026736",
+  "changed_by": "worker-1",
+  "version": 67
 }

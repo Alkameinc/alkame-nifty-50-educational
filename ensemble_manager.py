@@ -49,8 +49,10 @@ from config import (
 )
 
 # 3. Local imports
+import config
 from database import SessionLocal
 from health_monitor import registry as health_registry
+from model_lineage import build_lineage_metadata
 from model_trainer import ModelTrainer
 from models import ModelRegistry
 
@@ -323,22 +325,11 @@ class EnsembleManager:
 
             import sklearn
 
-            metadata = {
+            extra_meta = {
                 "model_id": model_id,
                 "run_id": run_id,
-                "symbol": symbol,
-                "horizon": horizon,
-                "model_version": "v1.1",
-                "feature_version": "v1.0",
-                "trained_at": now_iso,
-                "code_commit_sha": commit_sha,
-                "training_sample_count": training_sample_count,
-                "training_data_start": training_data_start,
-                "training_data_end": training_data_end,
+                "feature_version": config.FEATURE_VERSION,
                 "training_seed": MODEL_RANDOM_SEED,
-                "feature_columns": feature_columns,
-                "feature_schema_hash": schema_hash,
-                "artifact_sha256": artifact_sha256,
                 "label_classes": LABEL_CLASSES,
                 "per_model_accuracy": per_model_accuracy,
                 "ensemble_accuracy": ensemble_accuracy,
@@ -351,6 +342,19 @@ class EnsembleManager:
                     "pandas_version": pd.__version__,
                 },
             }
+
+            metadata = build_lineage_metadata(
+                symbol=symbol,
+                horizon=horizon,
+                feature_columns=feature_columns,
+                artifact_path_or_hash=artifact_sha256,
+                dataset_start=training_data_start,
+                dataset_end=training_data_end,
+                sample_count=training_sample_count,
+                model_version=config.MODEL_VERSION,
+                universe_version=config.UNIVERSE_VERSION,
+                extra_metadata=extra_meta,
+            )
 
             with open(run_dir / "metadata.json", "w", encoding="utf-8") as f:
                 json.dump(metadata, f, indent=2)

@@ -1,7 +1,9 @@
 import json
 import logging
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any, Optional
 
 import pandas as pd
 from sqlalchemy.orm import sessionmaker
@@ -16,11 +18,17 @@ from models import BacktestMetric as DBBacktestMetric
 from models import Event as DBEvent
 from models import Prediction as DBPrediction
 from predictor import PredictionSignal
+from storage_reliability import (
+    atomic_transaction,
+    create_reliable_engine,
+    run_storage_recovery,
+    safe_float,
+    safe_iso_timestamp,
+    safe_json_loads,
+    with_db_retry,
+)
 
 logger = logging.getLogger(__name__)
-
-
-from dataclasses import dataclass
 
 
 @dataclass
@@ -47,6 +55,8 @@ class PredictionRecord:
     outcome_actual_class: str | None
     resolved_at: str | None
     is_out_of_sample: bool = False
+    prediction_key: str | None = None
+    feature_schema_hash: str | None = None
 
 
 @dataclass
@@ -69,40 +79,55 @@ class HistoryManager:
     def __init__(self, db_path: Path = DB_PATH):
         self.db_path = db_path
         if db_path and str(db_path) != str(DB_PATH):
-            from sqlalchemy import create_engine
-
             from database import Base
 
-            self.engine = create_engine(f"sqlite:///{db_path}")
+            self.engine = create_reliable_engine(db_path)
             Base.metadata.create_all(bind=self.engine)
-            self.SessionLocal = sessionmaker(bind=self.engine)
+            self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
         else:
+            from database import engine as default_engine
+
+            self.engine = default_engine
             self.SessionLocal = SessionLocal
         ensure_directories()
 
+    @with_db_retry(max_retries=5, initial_delay=0.05)
     def save_prediction(
         self,
         signal: PredictionSignal,
         narrative: str | None = None,
         dca_ladder: dict | None = None,
         is_out_of_sample: bool = False,
+        prediction_key: str | None = None,
     ) -> int | None:
+        p_key = prediction_key or getattr(signal, "prediction_key", None)
+        f_hash = getattr(signal, "feature_schema_hash", None)
         try:
-            with self.SessionLocal() as db:
+            with atomic_transaction(self.SessionLocal) as db:
+                # SCHED-002: Check for existing prediction before insert
+                if p_key:
+                    existing = db.query(DBPrediction).filter(DBPrediction.prediction_key == p_key).first()
+                    if existing:
+                        logger.info(
+                            f"[SCHED-002] Prediction already exists with key {p_key[:12]} (id={existing.id}). "
+                            "Skipping duplicate write and returning existing record."
+                        )
+                        return int(existing.id)
+
                 dca_ladder_str = (
                     json.dumps(dca_ladder) if isinstance(dca_ladder, dict) else str(dca_ladder) if dca_ladder else None
                 )
                 prediction = DBPrediction(
                     symbol=signal.symbol,
-                    timestamp=str(signal.timestamp),
+                    timestamp=safe_iso_timestamp(signal.timestamp),
                     action=signal.action,
                     model_predicted_class=signal.model_predicted_class,
-                    raw_confidence=float(signal.raw_confidence),
-                    risk_adjusted_confidence=float(signal.risk_adjusted_confidence),
+                    raw_confidence=safe_float(signal.raw_confidence),
+                    risk_adjusted_confidence=safe_float(signal.risk_adjusted_confidence),
                     calibrated_confidence=(
-                        float(signal.calibrated_confidence) if signal.calibrated_confidence is not None else None
+                        safe_float(signal.calibrated_confidence) if signal.calibrated_confidence is not None else None
                     ),
-                    agreement_fraction=float(signal.agreement_fraction),
+                    agreement_fraction=safe_float(signal.agreement_fraction),
                     downside_summary=signal.downside_summary,
                     upside_summary=signal.upside_summary,
                     reasoning=(
@@ -123,27 +148,146 @@ class HistoryManager:
                     code_commit=signal.code_commit,
                     data_snapshot_id=signal.data_snapshot_id,
                     is_out_of_sample=is_out_of_sample,
+                    prediction_key=p_key,
+                    feature_schema_hash=f_hash,
                 )
                 db.add(prediction)
-                db.commit()
-                db.refresh(prediction)
+                db.flush()
+                pred_id = int(prediction.id) if prediction and prediction.id is not None else None
+
             health_registry.report("history_manager", ok=True)
-            return int(prediction.id) if prediction and prediction.id is not None else None
+            return pred_id
         except Exception as e:
+            # If insert collided in race condition, query and return existing record
+            if p_key:
+                try:
+                    with self.SessionLocal() as db_retry:
+                        existing = db_retry.query(DBPrediction).filter(DBPrediction.prediction_key == p_key).first()
+                        if existing:
+                            logger.info(
+                                f"[SCHED-002] Race condition resolved for key {p_key[:12]}, returning existing id={existing.id}"
+                            )
+                            return int(existing.id)
+                except Exception:
+                    pass
             logger.error(f"Failed saving prediction for {signal.symbol}: {e}")
             health_registry.report("history_manager", ok=False, detail="Failed saving prediction", error=str(e))
             return None
 
+    @with_db_retry(max_retries=5, initial_delay=0.05)
+    def save_prediction_bundle(
+        self,
+        signal: PredictionSignal,
+        narrative: str | None = None,
+        dca_ladder: dict | None = None,
+        is_out_of_sample: bool = False,
+        events: list[Event] | None = None,
+        prediction_key: str | None = None,
+    ) -> tuple[int | None, list[str]]:
+        """SCHED-003: Persists a prediction and its associated contributing events in a single atomic transaction.
+        
+        Guarantees zero partial writes: if any event fails, the entire transaction rolls back,
+        preventing orphaned predictions or half-persisted states.
+        """
+        p_key = prediction_key or getattr(signal, "prediction_key", None)
+        f_hash = getattr(signal, "feature_schema_hash", None)
+        saved_event_ids: list[str] = []
+        try:
+            with atomic_transaction(self.SessionLocal) as db:
+                # 1. Prediction deduplication check
+                pred_id = None
+                if p_key:
+                    existing = db.query(DBPrediction).filter(DBPrediction.prediction_key == p_key).first()
+                    if existing:
+                        logger.info(
+                            f"[SCHED-002/SCHED-003] Bundle prediction already exists with key {p_key[:12]} (id={existing.id})."
+                        )
+                        pred_id = int(existing.id)
+
+                if pred_id is None:
+                    dca_ladder_str = (
+                        json.dumps(dca_ladder) if isinstance(dca_ladder, dict) else str(dca_ladder) if dca_ladder else None
+                    )
+                    prediction = DBPrediction(
+                        symbol=signal.symbol,
+                        timestamp=safe_iso_timestamp(signal.timestamp),
+                        action=signal.action,
+                        model_predicted_class=signal.model_predicted_class,
+                        raw_confidence=safe_float(signal.raw_confidence),
+                        risk_adjusted_confidence=safe_float(signal.risk_adjusted_confidence),
+                        calibrated_confidence=(
+                            safe_float(signal.calibrated_confidence) if signal.calibrated_confidence is not None else None
+                        ),
+                        agreement_fraction=safe_float(signal.agreement_fraction),
+                        downside_summary=signal.downside_summary,
+                        upside_summary=signal.upside_summary,
+                        reasoning=(
+                            json.dumps(signal.reasoning) if isinstance(signal.reasoning, list) else str(signal.reasoning)
+                        ),
+                        global_risk_level=signal.global_risk_level,
+                        risk_toggle_enabled=signal.risk_toggle_enabled,
+                        is_safe_to_trade_live=signal.is_safe_to_trade_live,
+                        data_stale=signal.data_stale,
+                        suppressed=signal.suppressed,
+                        suppression_reasons=json.dumps(signal.suppression_reasons) if signal.suppression_reasons else None,
+                        horizon=signal.horizon,
+                        narrative=narrative,
+                        dca_ladder=dca_ladder_str,
+                        model_version=signal.model_version,
+                        feature_version=signal.feature_version,
+                        model_id=signal.model_id,
+                        code_commit=signal.code_commit,
+                        data_snapshot_id=signal.data_snapshot_id,
+                        is_out_of_sample=is_out_of_sample,
+                        prediction_key=p_key,
+                        feature_schema_hash=f_hash,
+                    )
+                    db.add(prediction)
+                    db.flush()
+                    pred_id = int(prediction.id) if prediction and prediction.id is not None else None
+
+                # 2. Persist contributing events atomically in the same transaction
+                if events:
+                    for ev in events:
+                        existing_ev = db.query(DBEvent).filter(DBEvent.event_id == ev.event_id).first()
+                        if existing_ev:
+                            saved_event_ids.append(ev.event_id)
+                            continue
+
+                        tickers_str = TICKER_DELIMITER + TICKER_DELIMITER.join(ev.affected_tickers) + TICKER_DELIMITER
+                        db_event = DBEvent(
+                            event_id=ev.event_id,
+                            source=ev.source,
+                            event_type=ev.event_type,
+                            timestamp=safe_iso_timestamp(ev.timestamp),
+                            scope=ev.scope,
+                            affected_tickers=tickers_str,
+                            sector=ev.sector,
+                            confidence_in_scope=safe_float(ev.confidence_in_scope),
+                            headline_or_label=ev.headline_or_label,
+                            sentiment_score=safe_float(ev.sentiment_score) if ev.sentiment_score is not None else None,
+                            magnitude_estimate=ev.magnitude_estimate,
+                        )
+                        db.add(db_event)
+                        saved_event_ids.append(ev.event_id)
+
+            health_registry.report("history_manager", ok=True)
+            return pred_id, saved_event_ids
+        except Exception as e:
+            logger.error(f"[SCHED-003] Failed saving prediction bundle for {signal.symbol}: {e}")
+            health_registry.report("history_manager", ok=False, detail="Failed saving prediction bundle", error=str(e))
+            return None, []
+
+    @with_db_retry(max_retries=5, initial_delay=0.05)
     def resolve_outcome(self, prediction_id: int, actual_class: str) -> bool:
         try:
-            with self.SessionLocal() as db:
+            with atomic_transaction(self.SessionLocal) as db:
                 prediction = db.query(DBPrediction).filter(DBPrediction.id == prediction_id).first()
                 if prediction:
                     prediction.outcome_resolved = True  # type: ignore[assignment]
                     prediction.outcome_correct = prediction.model_predicted_class == actual_class  # type: ignore[assignment]
                     prediction.outcome_actual_class = actual_class  # type: ignore[assignment]
-                    prediction.resolved_at = datetime.now().isoformat()  # type: ignore[assignment]
-                    db.commit()
+                    prediction.resolved_at = datetime.now(timezone.utc).isoformat()  # type: ignore[assignment]
             health_registry.report("history_manager", ok=True)
             return True
         except Exception as e:
@@ -181,40 +325,138 @@ class HistoryManager:
 
                 records = []
                 for row in rows:
-                    records.append(
-                        PredictionRecord(
-                            id=int(row.id),
-                            symbol=str(row.symbol),
-                            horizon=str(row.horizon),
-                            model_version=str(row.model_version),
-                            feature_version=str(row.feature_version),
-                            model_id=str(row.model_id) if row.model_id else None,
-                            code_commit=str(row.code_commit) if row.code_commit else None,
-                            data_snapshot_id=str(row.data_snapshot_id) if row.data_snapshot_id else None,
-                            narrative=str(row.narrative) if row.narrative else "",
-                            dca_ladder=str(row.dca_ladder) if row.dca_ladder else "",
-                            timestamp=str(row.timestamp),
-                            action=str(row.action),
-                            model_predicted_class=str(row.model_predicted_class),
-                            raw_confidence=float(row.raw_confidence),
-                            risk_adjusted_confidence=float(row.risk_adjusted_confidence),
-                            calibrated_confidence=(
-                                float(row.calibrated_confidence) if row.calibrated_confidence is not None else None
-                            ),
-                            agreement_fraction=float(row.agreement_fraction),
-                            outcome_resolved=bool(row.outcome_resolved),
-                            outcome_correct=bool(row.outcome_correct) if row.outcome_correct is not None else None,
-                            outcome_actual_class=str(row.outcome_actual_class) if row.outcome_actual_class else None,
-                            resolved_at=str(row.resolved_at) if row.resolved_at else None,
-                            is_out_of_sample=bool(row.is_out_of_sample),
+                    try:
+                        records.append(
+                            PredictionRecord(
+                                id=int(row.id),
+                                symbol=str(row.symbol or "UNKNOWN"),
+                                horizon=str(row.horizon or "INTRADAY"),
+                                model_version=str(row.model_version or "UNKNOWN"),
+                                feature_version=str(row.feature_version or "UNKNOWN"),
+                                model_id=str(row.model_id) if row.model_id else None,
+                                code_commit=str(row.code_commit) if row.code_commit else None,
+                                data_snapshot_id=str(row.data_snapshot_id) if row.data_snapshot_id else None,
+                                narrative=str(row.narrative) if row.narrative else "",
+                                dca_ladder=str(row.dca_ladder) if row.dca_ladder else "",
+                                timestamp=safe_iso_timestamp(row.timestamp),
+                                action=str(row.action or "HOLD"),
+                                model_predicted_class=str(row.model_predicted_class or "FLAT"),
+                                raw_confidence=safe_float(row.raw_confidence, 0.0),
+                                risk_adjusted_confidence=safe_float(row.risk_adjusted_confidence, 0.0),
+                                calibrated_confidence=(
+                                    safe_float(row.calibrated_confidence) if row.calibrated_confidence is not None else None
+                                ),
+                                agreement_fraction=safe_float(row.agreement_fraction, 0.0),
+                                outcome_resolved=bool(row.outcome_resolved),
+                                outcome_correct=bool(row.outcome_correct) if row.outcome_correct is not None else None,
+                                outcome_actual_class=str(row.outcome_actual_class) if row.outcome_actual_class else None,
+                                resolved_at=safe_iso_timestamp(row.resolved_at) if row.resolved_at else None,
+                                is_out_of_sample=bool(row.is_out_of_sample),
+                                prediction_key=str(row.prediction_key) if getattr(row, "prediction_key", None) else None,
+                                feature_schema_hash=str(row.feature_schema_hash) if getattr(row, "feature_schema_hash", None) else None,
+                            )
                         )
-                    )
+                    except Exception as parse_err:
+                        logger.warning(f"[SCHED-003] Skipping corrupted prediction row id={getattr(row, 'id', None)}: {parse_err}")
             health_registry.report("history_manager", ok=True)
             return records
         except Exception as e:
             logger.error(f"Failed getting predictions: {e}")
             health_registry.report("history_manager", ok=False, detail="Failed getting predictions", error=str(e))
             return []
+
+    def get_prediction_by_key(self, prediction_key: str) -> PredictionRecord | None:
+        """SCHED-002: Retrieve a prediction record by its unique idempotency key."""
+        try:
+            with self.SessionLocal() as db:
+                row = db.query(DBPrediction).filter(DBPrediction.prediction_key == prediction_key).first()
+                if not row:
+                    return None
+                return PredictionRecord(
+                    id=int(row.id),
+                    symbol=str(row.symbol or "UNKNOWN"),
+                    horizon=str(row.horizon or "INTRADAY"),
+                    model_version=str(row.model_version or "UNKNOWN"),
+                    feature_version=str(row.feature_version or "UNKNOWN"),
+                    model_id=str(row.model_id) if row.model_id else None,
+                    code_commit=str(row.code_commit) if row.code_commit else None,
+                    data_snapshot_id=str(row.data_snapshot_id) if row.data_snapshot_id else None,
+                    narrative=str(row.narrative) if row.narrative else "",
+                    dca_ladder=str(row.dca_ladder) if row.dca_ladder else "",
+                    timestamp=safe_iso_timestamp(row.timestamp),
+                    action=str(row.action or "HOLD"),
+                    model_predicted_class=str(row.model_predicted_class or "FLAT"),
+                    raw_confidence=safe_float(row.raw_confidence, 0.0),
+                    risk_adjusted_confidence=safe_float(row.risk_adjusted_confidence, 0.0),
+                    calibrated_confidence=(
+                        safe_float(row.calibrated_confidence) if row.calibrated_confidence is not None else None
+                    ),
+                    agreement_fraction=safe_float(row.agreement_fraction, 0.0),
+                    outcome_resolved=bool(row.outcome_resolved),
+                    outcome_correct=bool(row.outcome_correct) if row.outcome_correct is not None else None,
+                    outcome_actual_class=str(row.outcome_actual_class) if row.outcome_actual_class else None,
+                    resolved_at=safe_iso_timestamp(row.resolved_at) if row.resolved_at else None,
+                    is_out_of_sample=bool(row.is_out_of_sample),
+                    prediction_key=str(row.prediction_key) if getattr(row, "prediction_key", None) else None,
+                    feature_schema_hash=str(row.feature_schema_hash) if getattr(row, "feature_schema_hash", None) else None,
+                )
+        except Exception as e:
+            logger.error(f"Failed getting prediction by key={prediction_key}: {e}")
+            return None
+
+    def get_prediction_signal_by_key(self, prediction_key: str) -> PredictionSignal | None:
+        """SCHED-002: Reconstructs a full PredictionSignal from stored database record."""
+        try:
+            with self.SessionLocal() as db:
+                row = db.query(DBPrediction).filter(DBPrediction.prediction_key == prediction_key).first()
+                if not row:
+                    return None
+
+                try:
+                    ts = pd.Timestamp(row.timestamp).to_pydatetime()
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                except Exception:
+                    ts = datetime.now(timezone.utc)
+
+                reasoning = safe_json_loads(row.reasoning, [])
+                if not isinstance(reasoning, list):
+                    reasoning = [str(reasoning)]
+
+                suppression_reasons = safe_json_loads(row.suppression_reasons, [])
+                if not isinstance(suppression_reasons, list):
+                    suppression_reasons = [str(suppression_reasons)]
+
+                return PredictionSignal(
+                    symbol=str(row.symbol),
+                    timestamp=ts,
+                    horizon=str(row.horizon),
+                    action=str(row.action),
+                    model_predicted_class=str(row.model_predicted_class),
+                    model_version=str(row.model_version),
+                    feature_version=str(row.feature_version),
+                    raw_confidence=safe_float(row.raw_confidence, 0.0),
+                    risk_adjusted_confidence=safe_float(row.risk_adjusted_confidence, 0.0),
+                    calibrated_confidence=safe_float(row.calibrated_confidence) if row.calibrated_confidence is not None else None,
+                    agreement_fraction=safe_float(row.agreement_fraction, 0.0),
+                    downside_summary=str(row.downside_summary or ""),
+                    upside_summary=str(row.upside_summary or ""),
+                    reasoning=reasoning,
+                    global_risk_level=str(row.global_risk_level or "NORMAL"),
+                    risk_toggle_enabled=bool(row.risk_toggle_enabled),
+                    is_safe_to_trade_live=bool(row.is_safe_to_trade_live),
+                    data_stale=bool(row.data_stale),
+                    suppressed=bool(row.suppressed),
+                    suppression_reasons=suppression_reasons,
+                    model_id=str(row.model_id) if row.model_id else None,
+                    code_commit=str(row.code_commit) if row.code_commit else None,
+                    data_snapshot_id=str(row.data_snapshot_id) if row.data_snapshot_id else None,
+                    prediction_key=str(row.prediction_key) if row.prediction_key else None,
+                    feature_schema_hash=str(row.feature_schema_hash) if getattr(row, "feature_schema_hash", None) else None,
+                )
+        except Exception as e:
+            logger.error(f"Failed reconstructing prediction signal for key={prediction_key}: {e}")
+            return None
 
     def build_calibration_dataset(
         self,
@@ -237,7 +479,7 @@ class HistoryManager:
             )
             cutoff_ts = None
             if max_age_days is not None and max_age_days > 0:
-                cutoff_ts = (datetime.now() - timedelta(days=max_age_days)).isoformat()
+                cutoff_ts = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
 
             data = []
             for r in records:
@@ -258,25 +500,33 @@ class HistoryManager:
             )
             return pd.DataFrame()
 
+    @with_db_retry(max_retries=5, initial_delay=0.05)
     def save_event(self, event: Event) -> bool:
         try:
-            with self.SessionLocal() as db:
+            with atomic_transaction(self.SessionLocal) as db:
+                # SCHED-003: Deduplicate writes on existing event_id
+                existing = db.query(DBEvent).filter(DBEvent.event_id == event.event_id).first()
+                if existing:
+                    logger.info(
+                        f"[SCHED-003] Event already exists with event_id={event.event_id}. Skipping duplicate write."
+                    )
+                    return True
+
                 tickers_str = TICKER_DELIMITER + TICKER_DELIMITER.join(event.affected_tickers) + TICKER_DELIMITER
                 db_event = DBEvent(
                     event_id=event.event_id,
                     source=event.source,
                     event_type=event.event_type,
-                    timestamp=str(event.timestamp),
+                    timestamp=safe_iso_timestamp(event.timestamp),
                     scope=event.scope,
                     affected_tickers=tickers_str,
                     sector=event.sector,
-                    confidence_in_scope=float(event.confidence_in_scope),
+                    confidence_in_scope=safe_float(event.confidence_in_scope),
                     headline_or_label=event.headline_or_label,
-                    sentiment_score=float(event.sentiment_score) if event.sentiment_score is not None else None,
+                    sentiment_score=safe_float(event.sentiment_score) if event.sentiment_score is not None else None,
                     magnitude_estimate=event.magnitude_estimate,
                 )
                 db.add(db_event)
-                db.commit()
             health_registry.report("history_manager", ok=True)
             return True
         except Exception as e:
@@ -298,23 +548,26 @@ class HistoryManager:
 
                 records = []
                 for row in rows:
-                    tickers = [t for t in str(row.affected_tickers).split(TICKER_DELIMITER) if t]
-                    records.append(
-                        EventRecord(
-                            id=int(row.id),
-                            event_id=str(row.event_id),
-                            source=str(row.source),
-                            event_type=str(row.event_type),
-                            timestamp=str(row.timestamp),
-                            scope=str(row.scope),
-                            affected_tickers=tickers,
-                            sector=str(row.sector) if row.sector else None,
-                            confidence_in_scope=float(row.confidence_in_scope),
-                            headline_or_label=str(row.headline_or_label),
-                            sentiment_score=float(row.sentiment_score) if row.sentiment_score is not None else None,
-                            magnitude_estimate=str(row.magnitude_estimate),
+                    try:
+                        tickers = [t for t in str(row.affected_tickers).split(TICKER_DELIMITER) if t]
+                        records.append(
+                            EventRecord(
+                                id=int(row.id),
+                                event_id=str(row.event_id),
+                                source=str(row.source),
+                                event_type=str(row.event_type),
+                                timestamp=safe_iso_timestamp(row.timestamp),
+                                scope=str(row.scope),
+                                affected_tickers=tickers,
+                                sector=str(row.sector) if row.sector else None,
+                                confidence_in_scope=safe_float(row.confidence_in_scope, 0.0),
+                                headline_or_label=str(row.headline_or_label),
+                                sentiment_score=safe_float(row.sentiment_score) if row.sentiment_score is not None else None,
+                                magnitude_estimate=str(row.magnitude_estimate),
+                            )
                         )
-                    )
+                    except Exception as ev_err:
+                        logger.warning(f"[SCHED-003] Skipping corrupted event row id={getattr(row, 'id', None)}: {ev_err}")
             health_registry.report("history_manager", ok=True)
             return records
         except Exception as e:
@@ -322,6 +575,7 @@ class HistoryManager:
             health_registry.report("history_manager", ok=False, detail="Failed fetching events", error=str(e))
             return []
 
+    @with_db_retry(max_retries=5, initial_delay=0.05)
     def save_backtest_result(
         self,
         symbol: str,
@@ -335,38 +589,41 @@ class HistoryManager:
         live_worthy: bool,
     ) -> bool:
         try:
-            with self.SessionLocal() as db:
+            with atomic_transaction(self.SessionLocal) as db:
                 row = db.query(DBBacktestMetric).filter_by(symbol=symbol, horizon=horizon).first()
                 if row:
-                    row.strategy_cumulative_return_pct = strategy_ret  # type: ignore[assignment]
-                    row.baseline_cumulative_return_pct = base_ret  # type: ignore[assignment]
-                    row.alpha_pct = alpha  # type: ignore[assignment]
+                    row.strategy_cumulative_return_pct = safe_float(strategy_ret)  # type: ignore[assignment]
+                    row.baseline_cumulative_return_pct = safe_float(base_ret)  # type: ignore[assignment]
+                    row.alpha_pct = safe_float(alpha)  # type: ignore[assignment]
                     row.edge_check_status = edge  # type: ignore[assignment]
                     row.calibration_status = calib  # type: ignore[assignment]
-                    row.calibration_ece = ece  # type: ignore[assignment]
-                    row.is_live_worthy = live_worthy  # type: ignore[assignment]
-                    row.updated_at = datetime.now().isoformat()  # type: ignore[assignment]
+                    row.calibration_ece = safe_float(ece) if ece is not None else None  # type: ignore[assignment]
+                    row.is_live_worthy = bool(live_worthy)  # type: ignore[assignment]
+                    row.updated_at = datetime.now(timezone.utc).isoformat()  # type: ignore[assignment]
                 else:
                     metric = DBBacktestMetric(
                         symbol=symbol,
                         horizon=horizon,
-                        strategy_cumulative_return_pct=strategy_ret,
-                        baseline_cumulative_return_pct=base_ret,
-                        alpha_pct=alpha,
+                        strategy_cumulative_return_pct=safe_float(strategy_ret),
+                        baseline_cumulative_return_pct=safe_float(base_ret),
+                        alpha_pct=safe_float(alpha),
                         edge_check_status=edge,
                         calibration_status=calib,
-                        calibration_ece=ece,
-                        is_live_worthy=live_worthy,
-                        updated_at=datetime.now().isoformat(),
+                        calibration_ece=safe_float(ece) if ece is not None else None,
+                        is_live_worthy=bool(live_worthy),
+                        updated_at=datetime.now(timezone.utc).isoformat(),
                     )
                     db.add(metric)
-                db.commit()
             health_registry.report("history_manager", ok=True, detail=f"Saved backtest metrics for {symbol} {horizon}")
             return True
         except Exception as e:
             logger.error(f"Failed saving backtest metrics for {symbol} {horizon}: {e}")
             health_registry.report("history_manager", ok=False, detail="Failed saving backtest metrics", error=str(e))
             return False
+
+    def run_recovery(self, stale_unresolved_hours: int = 24):
+        """SCHED-003: Runs storage startup recovery on the associated engine."""
+        return run_storage_recovery(self.engine, db_path=self.db_path, stale_unresolved_hours=stale_unresolved_hours)
 
 
 if __name__ == "__main__":
@@ -391,10 +648,10 @@ if __name__ == "__main__":
         manager = HistoryManager(db_path=test_db_path)
 
         for i in range(5):
-            actual = "UP" if i < 2 else "FLAT"
+            actual = "UP" if i < 3 else "FLAT"
             s = PredictionSignal(
                 symbol=test_symbol,
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc),
                 action="BUY",
                 model_predicted_class="UP",
                 raw_confidence=0.72 + (i * 0.01),
@@ -421,9 +678,9 @@ if __name__ == "__main__":
                 if i == 0:
                     print(f"Prediction saved: id={pid}")
                     resolved_ok = manager.resolve_outcome(pid, actual_class="UP")
-                predictions = manager.get_predictions(test_symbol)
-                print(f"Outcome resolved: {resolved_ok}, outcome_correct={predictions[0].outcome_correct}")
-                assert resolved_ok and predictions[0].outcome_correct is True
+                    predictions = manager.get_predictions(test_symbol)
+                    print(f"Outcome resolved: {resolved_ok}, outcome_correct={predictions[0].outcome_correct}")
+                    assert resolved_ok and predictions[0].outcome_correct is True
 
         calibration_df = manager.build_calibration_dataset(test_symbol, horizon="INTRADAY", model_version="v1.0")
         print(f"Calibration dataset built: {len(calibration_df)} rows, columns={list(calibration_df.columns)}")
@@ -435,7 +692,7 @@ if __name__ == "__main__":
             event_id="EVT_TEST_1",
             source="CORPORATE",
             event_type="CORPORATE_ANNOUNCEMENT",
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc),
             scope="STOCK",
             affected_tickers=[test_symbol, "HDFCBANK"],
             sector="Auto",
@@ -448,7 +705,7 @@ if __name__ == "__main__":
             event_id="EVT_TEST_2",
             source="CORPORATE",
             event_type="CORPORATE_ANNOUNCEMENT",
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc),
             scope="STOCK",
             affected_tickers=["MARUTI", "TMPV"],
             sector="Auto",
@@ -459,6 +716,10 @@ if __name__ == "__main__":
         )
         manager.save_event(event_for_symbol)
         manager.save_event(event_not_for_symbol)
+
+        # Duplicate event save test (SCHED-003)
+        dup_saved = manager.save_event(event_for_symbol)
+        assert dup_saved is True
 
         events_for_symbol = manager.get_events_for_symbol(test_symbol)
         print(f"Events correctly matched for {test_symbol}: {len(events_for_symbol)}")
@@ -477,6 +738,51 @@ if __name__ == "__main__":
             live_worthy=True,
         )
         assert metrics_saved is True
+
+        # Bundle test (SCHED-003)
+        bundle_signal = PredictionSignal(
+            symbol="INFY",
+            timestamp=datetime.now(timezone.utc),
+            action="BUY",
+            model_predicted_class="UP",
+            raw_confidence=0.85,
+            risk_adjusted_confidence=0.82,
+            calibrated_confidence=0.80,
+            agreement_fraction=0.9,
+            downside_summary="",
+            upside_summary="",
+            reasoning=["Bundle reasoning"],
+            global_risk_level="NORMAL",
+            risk_toggle_enabled=False,
+            is_safe_to_trade_live=True,
+            data_stale=False,
+            suppressed=False,
+            suppression_reasons=[],
+            horizon="INTRADAY",
+            model_version="v1.0",
+            feature_version="v1.0",
+        )
+        bundle_event = Event(
+            event_id="EVT_BUNDLE_1",
+            source="NEWS",
+            event_type="EARNINGS",
+            timestamp=datetime.now(timezone.utc),
+            scope="STOCK",
+            affected_tickers=["INFY"],
+            sector="IT",
+            confidence_in_scope=1.0,
+            headline_or_label="INFY Q2 results beat estimates",
+            sentiment_score=0.9,
+            magnitude_estimate="HIGH",
+        )
+        b_pred_id, b_ev_ids = manager.save_prediction_bundle(bundle_signal, events=[bundle_event])
+        assert b_pred_id is not None
+        assert b_ev_ids == ["EVT_BUNDLE_1"]
+
+        # Run recovery
+        rep = manager.run_recovery()
+        assert rep.integrity_ok is True
+        print(f"Recovery executed: WAL={rep.wal_checkpointed}, predictions={rep.prediction_count}")
 
         print("STATUS: PASS")
         logger.info("history_manager.py self-test passed.")

@@ -1,31 +1,39 @@
 import json
 import logging
+import re
+import uuid
 from datetime import datetime, timezone
 
 import pandas as pd
-from fastapi import Depends, FastAPI, HTTPException, Response, Security, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, Security, status
 from fastapi.middleware.cors import CORSMiddleware
-from database import SessionLocal
-from models import AuditLog
 from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
+from prometheus_client import Counter, Gauge, Histogram
 
 from api_schemas import (
     ErrorResponse,
     HealthResponse,
+    ModelValidityOut,
     MultiHorizonSignalResponse,
     SymbolsResponse,
 )
+from model_validity import can_serve_live_signal, evaluate_model_validity
 from config import (
     API_AUTH_ENABLED,
     API_KEYS_ROLE_MAP,
     CORS_ALLOW_CREDENTIALS,
+    CORS_ALLOWED_HEADERS,
+    CORS_ALLOWED_METHODS,
     CORS_ALLOWED_ORIGINS,
+    IS_PRODUCTION,
     NIFTY50_SYMBOLS,
     to_yfinance_ticker,
 )
+from database import SessionLocal
 from health_monitor import registry as health_registry
 from history_manager import HistoryManager
+from models import AuditLog
 from scalping import ScalpingEngine
 from scheduler import Scheduler
 
@@ -34,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Alkame Nifty50 API", version="1.0.0")
 
-# Security dependencies (P0-001)
+# Security dependencies (SEC-001, SEC-002, SEC-003)
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 bearer_auth = HTTPBearer(auto_error=False)
 
@@ -50,7 +58,13 @@ def get_current_client(
     bearer: HTTPAuthorizationCredentials | None = Security(bearer_auth),
 ) -> ClientAuth:
     if not API_AUTH_ENABLED:
-        return ClientAuth(key="disabled", role="ADMIN")
+        if IS_PRODUCTION:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="CRITICAL SECURITY ERROR (SEC-001): Authentication cannot be disabled in production.",
+            )
+        # Development: explicitly DEVELOPMENT_READONLY, never ADMIN (SEC-001)
+        return ClientAuth(key="disabled", role="DEVELOPMENT_READONLY")
 
     provided_key = None
     if api_key:
@@ -71,26 +85,40 @@ def get_current_client(
 
 def require_role(required_role: str):
     def role_checker(client: ClientAuth = Depends(get_current_client)) -> ClientAuth:
-        if required_role == "ADMIN" and client.role != "ADMIN":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Action requires '{required_role}' privilege. Client has role '{client.role}'.",
-            )
+        if required_role == "ADMIN":
+            if client.role != "ADMIN":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Action requires '{required_role}' privilege. Client has role '{client.role}'.",
+                )
+        elif required_role == "READ_ONLY":
+            if client.role not in ("READ_ONLY", "ADMIN", "DEVELOPMENT_READONLY"):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Action requires '{required_role}' privilege. Client has role '{client.role}'.",
+                )
         return client
 
     return role_checker
 
 
-import uuid
-
-from fastapi import Request
-from prometheus_client import Counter, Gauge, Histogram
-
-# Strict CORS without wildcard credentials (P0-002)
-
-
 @app.middleware("http")
 async def security_headers_middleware(request: Request, call_next):
+    # SEC-006: Protect /metrics from external unauthenticated access
+    if request.url.path == "/metrics":
+        client_host = request.client.host if request.client else ""
+        is_internal = client_host in ("127.0.0.1", "::1", "testclient", "localhost")
+        if not is_internal:
+            api_key = request.headers.get("X-API-Key")
+            auth_header = request.headers.get("Authorization", "")
+            bearer_key = auth_header.replace("Bearer ", "").strip() if "Bearer " in auth_header else ""
+            key = api_key or bearer_key
+            if not key or API_KEYS_ROLE_MAP.get(key) != "ADMIN":
+                return Response(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    content="Forbidden: /metrics requires internal or ADMIN access.",
+                )
+
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -107,7 +135,15 @@ async def security_headers_middleware(request: Request, call_next):
     return response
 
 
-def log_audit_event(client: ClientAuth, action: str, resource: str, status: str, details: str, request: Request):
+def log_audit_event(
+    client: ClientAuth,
+    action: str,
+    resource: str,
+    status: str,
+    details: str,
+    request: Request,
+    fail_closed: bool = False,
+):
     ip_address = request.client.host if request and request.client else "unknown"
     key_prefix = client.key[:6] if client.key else "none"
     try:
@@ -126,20 +162,31 @@ def log_audit_event(client: ClientAuth, action: str, resource: str, status: str,
             db.commit()
     except Exception as e:
         logger.error(f"Failed to record audit log: {e}")
+        if fail_closed:
+            raise RuntimeError(f"Audit log recording failed: {e}") from e
 
 
+# Strict CORS without wildcard credentials (SEC-008)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOWED_ORIGINS,
     allow_credentials=CORS_ALLOW_CREDENTIALS,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=CORS_ALLOWED_METHODS,
+    allow_headers=CORS_ALLOWED_HEADERS,
 )
+
+
+_SAFE_CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_\-\.]{1,64}$")
 
 
 @app.middleware("http")
 async def correlation_id_middleware(request: Request, call_next):
-    correlation_id = request.headers.get("X-Correlation-ID", str(uuid.uuid4()))
+    # SEC-010: Validate/sanitize client correlation IDs
+    raw_cid = request.headers.get("X-Correlation-ID")
+    if raw_cid and _SAFE_CORRELATION_ID_PATTERN.match(raw_cid):
+        correlation_id = raw_cid
+    else:
+        correlation_id = str(uuid.uuid4())
     request.state.correlation_id = correlation_id
     response = await call_next(request)
     response.headers["X-Correlation-ID"] = correlation_id
@@ -185,6 +232,8 @@ def translate_health_message(component: str, status: str) -> str:
             "human_insight_manager": "Override subsystem is available.",
             "ensemble_manager": "Models loaded successfully.",
             "predictor": "Signal inference is operational.",
+            "scheduler": "Periodic signal and outcome scheduling pipeline is operational.",
+            "storage": "SQLite storage engine and WAL journal are healthy and verified.",
         }
         return messages.get(component, "Component is operational.")
     elif status == "DEGRADED":
@@ -230,6 +279,7 @@ def humanize_reasoning(reasons: list) -> list:
 def get_health():
     overall = health_registry.get_overall_status()
     statuses = health_registry.get_status()
+    engine_health_res = health_registry.get_engine_health()
 
     diagnostic = []
     if statuses:
@@ -242,7 +292,32 @@ def get_health():
                     "message": translate_health_message(s.component, s.status),
                 }
             )
-    return {"overall": overall, "diagnostics": diagnostic}
+    return {
+        "overall": overall,
+        "diagnostics": diagnostic,
+        "engine_health": engine_health_res.status,
+        "checks": engine_health_res.checks,
+    }
+
+
+@app.get("/api/v1/model-validity/{symbol}", response_model=ModelValidityOut)
+def get_model_validity(symbol: str, horizon: str = "INTRADAY"):
+    if symbol not in NIFTY50_SYMBOLS:
+        raise HTTPException(status_code=404, detail="Invalid symbol")
+    res = evaluate_model_validity(symbol=symbol, horizon=horizon)
+    return ModelValidityOut(
+        symbol=res.symbol,
+        horizon=res.horizon,
+        validity_status=res.validity_status,
+        is_live_eligible=res.is_live_eligible,
+        model_version=res.model_version,
+        trained_at=res.trained_at,
+        age_days=res.age_days,
+        calibration_status=res.calibration_status,
+        edge_status=res.edge_status,
+        reasons=res.reasons,
+        metadata=res.metadata,
+    )
 
 
 @app.get("/healthz", tags=["Health"], response_model=HealthResponse)
@@ -265,17 +340,20 @@ def get_signal(symbol: str):
     if symbol not in NIFTY50_SYMBOLS:
         raise HTTPException(status_code=404, detail="Invalid symbol")
 
-    yf_ticker = to_yfinance_ticker(symbol)
-    raw_stock = scheduler.data_fetcher.fetch_ohlcv(yf_ticker)
-    raw_index = scheduler.data_fetcher.fetch_nifty_index()
-    stock_df = getattr(raw_stock, "df", raw_stock)
-    index_df = getattr(raw_index, "df", raw_index)
+    event_context = scheduler.get_event_context(symbol)
+    context = scheduler.build_prediction_context(
+        symbol,
+        macro_events=event_context.macro_events,
+        corporate_events=event_context.corporate_events,
+        news_articles=event_context.news_articles,
+    )
+    stock_df = context.market_data
+    index_df = context.index_data
 
     if stock_df is None or not isinstance(stock_df, pd.DataFrame) or stock_df.empty:
         raise HTTPException(status_code=503, detail=f"Could not fetch data for {symbol}")
 
     scheduler.resolve_pending_outcomes(symbol, stock_df)
-    event_context = scheduler.get_event_context(symbol)
     cycle_res = scheduler.run_one_cycle_for_symbol(
         symbol,
         stock_df,
@@ -296,18 +374,37 @@ def get_signal(symbol: str):
         else "No narrative available."
     )
 
+    engine_health_res = health_registry.get_engine_health()
+
     all_horizons_data = {}
     for hor, sig in multi_signal.signals.items():
-        PREDICTIONS_TOTAL.labels(symbol=symbol, horizon=hor, action=sig.action).inc()
-        if sig.action == "BUY":
-            verdict_text = "Strong opportunity identified. Proceed with entry according to your risk parameters."
-        elif sig.action == "SELL":
-            verdict_text = "Warning: Downward pressure detected. Consider hedging or reducing exposure."
-        else:
-            if sig.suppressed:
-                verdict_text = "Holding back: We don't have enough historical proof that this pattern works yet."
+        validity_res = evaluate_model_validity(symbol, hor)
+        can_serve, serve_reasons = can_serve_live_signal(engine_health_res, validity_res)
+
+        sig_action = sig.action
+        calibrated_conf = getattr(sig, "calibrated_confidence", None)
+        raw_reasoning = list(sig.reasoning)
+
+        if not can_serve:
+            sig_action = "HOLD"
+            calibrated_conf = None
+            raw_reasoning.extend(serve_reasons)
+            if not validity_res.is_live_eligible:
+                verdict_text = f"Holding: Model for {hor} is {validity_res.validity_status} and not eligible for live execution."
             else:
-                verdict_text = "No clear edge detected. Better to stay out and wait for a higher-probability setup."
+                verdict_text = "Holding: Engine health is FAILED; live execution halted."
+        else:
+            if sig_action == "BUY":
+                verdict_text = "Strong opportunity identified. Proceed with entry according to your risk parameters."
+            elif sig_action == "SELL":
+                verdict_text = "Warning: Downward pressure detected. Consider hedging or reducing exposure."
+            else:
+                if sig.suppressed:
+                    verdict_text = "Holding back: We don't have enough historical proof that this pattern works yet."
+                else:
+                    verdict_text = "No clear edge detected. Better to stay out and wait for a higher-probability setup."
+
+        PREDICTIONS_TOTAL.labels(symbol=symbol, horizon=hor, action=sig_action).inc()
 
         events = []
         for e in sig.contributing_events:
@@ -315,13 +412,13 @@ def get_signal(symbol: str):
 
         all_horizons_data[hor] = {
             "horizon": hor,
-            "action": sig.action,
+            "action": sig_action,
             "verdict_text": verdict_text,
-            "confidence": getattr(sig, "calibrated_confidence", None),
+            "confidence": calibrated_conf,
             "raw_confidence": getattr(sig, "raw_confidence", 0.0),
             "risk_adjusted_confidence": getattr(sig, "risk_adjusted_confidence", 0.0),
-            "calibrated_confidence": getattr(sig, "calibrated_confidence", None),
-            "calibration_status": "VALID" if getattr(sig, "calibrated_confidence", None) is not None else "UNAVAILABLE",
+            "calibrated_confidence": calibrated_conf,
+            "calibration_status": "VALID" if calibrated_conf is not None else "UNAVAILABLE",
             "current_price": float(stock_df["Close"].iloc[-1]) if not stock_df.empty else None,
             "target_price": sig.target_price,
             "stop_loss": sig.stop_loss,
@@ -329,10 +426,16 @@ def get_signal(symbol: str):
             "downside_summary": sig.downside_summary,
             "upside_summary": sig.upside_summary,
             "events": events,
-            "reasoning": humanize_reasoning(sig.reasoning),
+            "reasoning": humanize_reasoning(raw_reasoning),
+            "prediction_key": getattr(sig, "prediction_key", None),
         }
 
-    return {"symbol": symbol, "narrative": narrative, "signals": all_horizons_data}
+    return {
+        "symbol": symbol,
+        "narrative": narrative,
+        "signals": all_horizons_data,
+        "prediction_key": getattr(multi_signal, "prediction_key", None),
+    }
 
 
 @app.get("/api/v1/signal/stream/{symbol}")
@@ -340,17 +443,21 @@ def stream_signal(symbol: str):
     if symbol not in NIFTY50_SYMBOLS:
         raise HTTPException(status_code=404, detail="Invalid symbol")
 
-    yf_ticker = to_yfinance_ticker(symbol)
-    raw_stock = scheduler.data_fetcher.fetch_ohlcv(yf_ticker)
-    raw_index = scheduler.data_fetcher.fetch_nifty_index()
-    stock_df = getattr(raw_stock, "df", raw_stock)
-    index_df = getattr(raw_index, "df", raw_index)
+    event_context = scheduler.get_event_context(symbol)
+    context = scheduler.build_prediction_context(
+        symbol,
+        macro_events=event_context.macro_events,
+        corporate_events=event_context.corporate_events,
+        news_articles=event_context.news_articles,
+    )
+    stock_df = context.market_data
+    index_df = context.index_data
 
     if stock_df is None or not isinstance(stock_df, pd.DataFrame) or stock_df.empty:
         raise HTTPException(status_code=503, detail=f"Could not fetch data for {symbol}")
 
     scheduler.resolve_pending_outcomes(symbol, stock_df)
-    event_context = scheduler.get_event_context(symbol)
+    engine_health_res = health_registry.get_engine_health()
 
     def generate():
         stream = scheduler.run_cycle_stream_for_symbol(
@@ -362,15 +469,31 @@ def stream_signal(symbol: str):
             news_articles=event_context.news_articles,
         )
         for sig in stream:
-            if sig.action == "BUY":
-                verdict_text = "Strong opportunity identified. Proceed with entry according to your risk parameters."
-            elif sig.action == "SELL":
-                verdict_text = "Warning: Downward pressure detected. Consider hedging or reducing exposure."
-            else:
-                if getattr(sig, "suppressed", False):
-                    verdict_text = "Holding back: We don't have enough historical proof that this pattern works yet."
+            validity_res = evaluate_model_validity(symbol, sig.horizon)
+            can_serve, serve_reasons = can_serve_live_signal(engine_health_res, validity_res)
+
+            sig_action = sig.action
+            calibrated_conf = getattr(sig, "calibrated_confidence", None)
+            raw_reasoning = list(getattr(sig, "reasoning", []))
+
+            if not can_serve:
+                sig_action = "HOLD"
+                calibrated_conf = None
+                raw_reasoning.extend(serve_reasons)
+                if not validity_res.is_live_eligible:
+                    verdict_text = f"Holding: Model for {sig.horizon} is {validity_res.validity_status} and not eligible for live execution."
                 else:
-                    verdict_text = "No clear edge detected. Better to stay out and wait for a higher-probability setup."
+                    verdict_text = "Holding: Engine health is FAILED; live execution halted."
+            else:
+                if sig_action == "BUY":
+                    verdict_text = "Strong opportunity identified. Proceed with entry according to your risk parameters."
+                elif sig_action == "SELL":
+                    verdict_text = "Warning: Downward pressure detected. Consider hedging or reducing exposure."
+                else:
+                    if getattr(sig, "suppressed", False):
+                        verdict_text = "Holding back: We don't have enough historical proof that this pattern works yet."
+                    else:
+                        verdict_text = "No clear edge detected. Better to stay out and wait for a higher-probability setup."
 
             events = []
             if getattr(sig, "contributing_events", None):
@@ -385,16 +508,16 @@ def stream_signal(symbol: str):
 
             data = {
                 "horizon": sig.horizon,
-                "action": sig.action,
+                "action": sig_action,
                 "verdict_text": verdict_text,
-                "confidence": getattr(sig, "calibrated_confidence", None),
+                "confidence": calibrated_conf,
                 "raw_confidence": getattr(sig, "raw_confidence", 0.0),
                 "risk_adjusted_confidence": getattr(
                     sig, "risk_adjusted_confidence", getattr(sig, "raw_confidence", 0.0)
                 ),
-                "calibrated_confidence": getattr(sig, "calibrated_confidence", None),
+                "calibrated_confidence": calibrated_conf,
                 "calibration_status": (
-                    "VALID" if getattr(sig, "calibrated_confidence", None) is not None else "UNAVAILABLE"
+                    "VALID" if calibrated_conf is not None else "UNAVAILABLE"
                 ),
                 "current_price": float(stock_df["Close"].iloc[-1]) if not stock_df.empty else None,
                 "target_price": getattr(sig, "target_price", None),
@@ -403,7 +526,7 @@ def stream_signal(symbol: str):
                 "downside_summary": getattr(sig, "downside_summary", ""),
                 "upside_summary": getattr(sig, "upside_summary", ""),
                 "events": events,
-                "reasoning": humanize_reasoning(getattr(sig, "reasoning", [])),
+                "reasoning": humanize_reasoning(raw_reasoning),
             }
             yield f"data: {json.dumps(data)}\n\n"
 
@@ -536,12 +659,50 @@ def get_risk_toggle():
 
 @app.post("/api/v1/risk/toggle")
 def set_risk_toggle(enabled: bool, request: Request, client: ClientAuth = Depends(require_role("ADMIN"))):
-    # In a real app, you might take the reason from the request body.
-    # For now, we'll just toggle it with a generic reason.
     reason = f"Toggled by {client.role} ({client.key[:6]}...) via API"
-    state = scheduler.predictor.global_risk_monitor.set_toggle(enabled, reason)
-    log_audit_event(client, "TOGGLE_RISK", "global_risk", "SUCCESS", f"Set enabled={enabled}", request)
+    try:
+        log_audit_event(
+            client, "TOGGLE_RISK", "global_risk", "SUCCESS", f"Set enabled={enabled}", request, fail_closed=True
+        )
+    except Exception as e:
+        logger.error(f"Audit failure aborting risk toggle mutation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Critical state mutation aborted because audit logging failed.",
+        ) from e
+
+    state = scheduler.predictor.global_risk_monitor.set_toggle(enabled, reason, changed_by=client.role)
     return {"status": "success", "enabled": state.enabled}
+
+
+@app.get("/api/v1/scheduler/status")
+def get_scheduler_status():
+    """SCHED-001 / OPS-001: Exposes real-time scheduler state and circuit breaker status."""
+    return scheduler.get_status()
+
+
+@app.post("/api/v1/scheduler/reset-circuit-breaker")
+def reset_scheduler_circuit_breaker(request: Request, client: ClientAuth = Depends(require_role("ADMIN"))):
+    """SCHED-001 / OPS-001: Administratively resets a tripped scheduler circuit breaker."""
+    try:
+        log_audit_event(
+            client,
+            "RESET_CIRCUIT_BREAKER",
+            "scheduler",
+            "SUCCESS",
+            "Reset scheduler circuit breaker",
+            request,
+            fail_closed=True,
+        )
+    except Exception as e:
+        logger.error(f"Audit failure aborting circuit breaker reset: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Critical state mutation aborted because audit logging failed.",
+        ) from e
+
+    status_data = scheduler.reset_circuit_breaker()
+    return {"status": "success", "scheduler": status_data}
 
 
 if __name__ == "__main__":

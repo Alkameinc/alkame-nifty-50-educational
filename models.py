@@ -37,6 +37,8 @@ class Prediction(Base):
     code_commit = Column(String)
     data_snapshot_id = Column(String)
     is_out_of_sample = Column(Boolean, default=False)
+    prediction_key = Column(String, index=True, nullable=True)
+    feature_schema_hash = Column(String, nullable=True)
 
 
 class Event(Base):
@@ -113,3 +115,17 @@ class AuditLog(Base):
     status = Column(String)  # SUCCESS | FAILED | REJECTED
     details = Column(String)
     ip_address = Column(String)
+
+
+class RiskState(Base):
+    __tablename__ = "risk_state"
+
+    id = Column(Integer, primary_key=True, default=1)
+    enabled = Column(Boolean, nullable=False, default=False)
+    reason = Column(String, default="")
+    level_at_activation = Column(String, nullable=True)
+    activated_at = Column(String, nullable=True)
+    updated_at = Column(String, nullable=False)
+    changed_by = Column(String, default="system")
+    version = Column(Integer, nullable=False, default=1)
+

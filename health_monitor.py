@@ -1,7 +1,9 @@
 # 1. Standard library imports
 import logging
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from datetime import datetime
+from sqlalchemy import text as sa_text
 
 # 2. Third-party imports
 # 3. Local imports
@@ -17,10 +19,14 @@ from models import HealthStatus as DBHealthStatus
 # 4. Logger setup
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# 5. Constants & Dataclasses (MODEL-004)
+# ---------------------------------------------------------------------------
+ENGINE_HEALTH_HEALTHY = "HEALTHY"
+ENGINE_HEALTH_DEGRADED = "DEGRADED"
+ENGINE_HEALTH_FAILED = "FAILED"
 
-# ---------------------------------------------------------------------------
-# 5. Dataclasses
-# ---------------------------------------------------------------------------
+
 @dataclass
 class HealthStatus:
     component: str
@@ -30,6 +36,21 @@ class HealthStatus:
     last_error_at: datetime | None
     consecutive_failures: int
     detail: str  # free-text
+
+
+@dataclass
+class EngineHealthResult:
+    """
+    MODEL-004: Evaluates operational infrastructure across 6 distinct checks:
+    api, data, events, scheduler, storage, model_file_availability.
+    Decoupled from statistical model validity.
+    """
+
+    status: str  # HEALTHY | DEGRADED | FAILED
+    checks: dict[str, str]  # check name -> "HEALTHY" | "DEGRADED" | "FAILED"
+    components: list[HealthStatus]
+    summary: str
+    reasons: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +175,120 @@ class HealthRegistry:
         if "DEGRADED" in status_levels:
             return "DEGRADED"
         return "OK"
+
+    def get_engine_health(self) -> EngineHealthResult:
+        """
+        MODEL-004: Performs infrastructure health checks across 6 distinct checks:
+        1. api: DB connectivity & API infrastructure responsiveness.
+        2. data: data_fetcher reachability.
+        3. events: corporate_events_fetcher, news_sentiment_fetcher, event_classifier.
+        4. scheduler: scheduler execution status.
+        5. storage: DB accessibility and writable data/ storage directories.
+        6. model_file_availability: models/ directory accessibility and readability.
+        """
+        checks: dict[str, str] = {}
+        reasons: list[str] = []
+
+        statuses = self.get_status()
+        comp_map = {s.component: s for s in statuses}
+
+        # 1. API Check
+        try:
+            with SessionLocal() as db:
+                db.execute(sa_text("SELECT 1"))
+            checks["api"] = ENGINE_HEALTH_HEALTHY
+        except Exception as e:
+            checks["api"] = ENGINE_HEALTH_FAILED
+            reasons.append(f"API infrastructure DB connection failed: {e}")
+
+        # 2. Data Check (DataFetcher)
+        df_status = comp_map.get("data_fetcher")
+        if df_status is None or df_status.status == "OK":
+            checks["data"] = ENGINE_HEALTH_HEALTHY
+        elif df_status.status == "DEGRADED":
+            checks["data"] = ENGINE_HEALTH_DEGRADED
+            reasons.append(f"Market data provider degraded: {df_status.detail or df_status.last_error}")
+        else:
+            checks["data"] = ENGINE_HEALTH_FAILED
+            reasons.append(f"Market data provider offline: {df_status.detail or df_status.last_error}")
+
+        # 3. Events Check (Corporate events, news sentiment, event classifier)
+        event_comps = ["corporate_events_fetcher", "news_sentiment_fetcher", "event_classifier"]
+        event_statuses = [comp_map[c].status for c in event_comps if c in comp_map]
+        if "DOWN" in event_statuses:
+            checks["events"] = ENGINE_HEALTH_DEGRADED
+            reasons.append("One or more event fetchers/classifiers offline.")
+        elif "DEGRADED" in event_statuses:
+            checks["events"] = ENGINE_HEALTH_DEGRADED
+            reasons.append("Event subsystem operating in degraded mode.")
+        else:
+            checks["events"] = ENGINE_HEALTH_HEALTHY
+
+        # 4. Scheduler Check
+        sched_status = comp_map.get("scheduler")
+        if sched_status is None or sched_status.status == "OK":
+            checks["scheduler"] = ENGINE_HEALTH_HEALTHY
+        elif sched_status.status == "DEGRADED":
+            checks["scheduler"] = ENGINE_HEALTH_DEGRADED
+            reasons.append("Scheduler cycle execution experiencing delays.")
+        else:
+            checks["scheduler"] = ENGINE_HEALTH_FAILED
+            reasons.append("Scheduler execution offline.")
+
+        # 5. Storage Check (DB & writable disk directories)
+        try:
+            import config
+
+            db_ok = config.DB_PATH.parent.exists()
+            data_ok = config.DATA_DIR.exists() and os.access(config.DATA_DIR, os.W_OK)
+            if db_ok and data_ok:
+                checks["storage"] = ENGINE_HEALTH_HEALTHY
+            else:
+                checks["storage"] = ENGINE_HEALTH_FAILED
+                reasons.append("Storage directory write permission or existence check failed.")
+        except Exception as e:
+            checks["storage"] = ENGINE_HEALTH_FAILED
+            reasons.append(f"Storage accessibility check failed: {e}")
+
+        # 6. Model File Availability Check (models/ directory accessible and readable)
+        try:
+            import config
+
+            models_dir = config.MODELS_DIR
+            if models_dir.exists() and os.access(models_dir, os.R_OK):
+                checks["model_file_availability"] = ENGINE_HEALTH_HEALTHY
+            else:
+                checks["model_file_availability"] = ENGINE_HEALTH_FAILED
+                reasons.append("Model storage directory does not exist or is not readable.")
+        except Exception as e:
+            checks["model_file_availability"] = ENGINE_HEALTH_FAILED
+            reasons.append(f"Model storage accessibility check failed: {e}")
+
+        # Overall Status Resolution:
+        # Critical checks: api, data, storage, model_file_availability
+        critical_failed = any(
+            checks.get(c) == ENGINE_HEALTH_FAILED
+            for c in ["api", "data", "storage", "model_file_availability"]
+        )
+
+        check_vals = list(checks.values())
+        if critical_failed:
+            overall_status = ENGINE_HEALTH_FAILED
+            summary = "Engine health is FAILED: critical infrastructure components are unavailable."
+        elif ENGINE_HEALTH_DEGRADED in check_vals or ENGINE_HEALTH_FAILED in check_vals:
+            overall_status = ENGINE_HEALTH_DEGRADED
+            summary = "Engine health is DEGRADED: operating with partial subsystem availability."
+        else:
+            overall_status = ENGINE_HEALTH_HEALTHY
+            summary = "Engine health is HEALTHY: all infrastructure checks operational."
+
+        return EngineHealthResult(
+            status=overall_status,
+            checks=checks,
+            components=statuses,
+            summary=summary,
+            reasons=reasons,
+        )
 
 
 # ---------------------------------------------------------------------------

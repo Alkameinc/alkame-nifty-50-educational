@@ -7,6 +7,15 @@ import pandas as pd
 from config import ALL_HORIZONS, NIFTY50_SYMBOLS, to_yfinance_ticker
 from data_fetcher import DataFetcher
 from predictor import ACTION_BUY, MultiHorizonSignal, Predictor
+from scanner_validator import (
+    ScannerCohortMetrics,
+    ScannerRegimeMetrics,
+    ScannerSignal,
+    ScannerTurnoverMetrics,
+    ScannerValidationReport,
+    ScannerValidator,
+)
+from sector_provider import sector_map_provider
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +25,7 @@ class ScanResult:
     symbol: str
     signal: MultiHorizonSignal
     conviction_score: float
+    sector: str = "Unknown"
 
 
 @dataclass
@@ -164,8 +174,11 @@ class OpportunityScanner:
 
                 # Composite conviction score: blends risk-adjusted confidence and agreement fraction
                 score = primary_sig.risk_adjusted_confidence * primary_sig.agreement_fraction
+                sec = sector_map_provider.get_sector(symbol, as_of=multi_sig.timestamp)
 
-                summary.opportunities.append(ScanResult(symbol=symbol, signal=multi_sig, conviction_score=score))
+                summary.opportunities.append(
+                    ScanResult(symbol=symbol, signal=multi_sig, conviction_score=score, sector=sec)
+                )
             except Exception as e:
                 logger.error(f"Error scanning {symbol}: {e}")
                 summary.add_rejection(symbol, f"Error scanning {symbol}: {e}", "data_error")
@@ -182,6 +195,26 @@ class OpportunityScanner:
             f"{summary.data_error} errors"
         )
         return summary
+
+    def validate_selection(
+        self,
+        historical_scans: list[list[ScannerSignal] | dict[str, Any]],
+        index_df: pd.DataFrame | None = None,
+        top_n: int = 5,
+        cost_scenarios: dict | None = None,
+    ) -> ScannerValidationReport:
+        """
+        SCAN-001: Validates top-N scanner selection against all eligible signals
+        across calibration, hit rate, class/sector distribution, turnover, cost sensitivity,
+        and regime resilience.
+        """
+        validator = ScannerValidator(cost_scenarios=cost_scenarios)
+        return validator.evaluate_scan_history(
+            scan_periods=historical_scans,
+            index_df=index_df,
+            top_n=top_n,
+            cost_scenarios=cost_scenarios,
+        )
 
 
 if __name__ == "__main__":
