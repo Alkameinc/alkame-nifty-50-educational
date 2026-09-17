@@ -31,13 +31,27 @@ NOW = pd.Timestamp("2026-09-10 10:00", tz="Asia/Kolkata")
 
 @pytest.fixture
 def real_refresh_context(monkeypatch, tmp_path):
-    def no_network(*args, **kwargs):
+    orig_connect = socket.socket.connect
+    orig_connect_ex = socket.socket.connect_ex
+
+    def no_network(self, address, *args, **kwargs):
+        host = address[0] if isinstance(address, tuple) and len(address) > 0 else str(address)
+        if host in ("127.0.0.1", "localhost", "::1"):
+            return orig_connect(self, address, *args, **kwargs)
+        raise RuntimeError("Network disabled for refresh integration verification")
+
+    def no_connect_ex(self, address, *args, **kwargs):
+        host = address[0] if isinstance(address, tuple) and len(address) > 0 else str(address)
+        if host in ("127.0.0.1", "localhost", "::1"):
+            return orig_connect_ex(self, address, *args, **kwargs)
+        raise RuntimeError("Network disabled for refresh integration verification")
+
+    def no_curl(*args, **kwargs):
         raise RuntimeError("Network disabled for refresh integration verification")
 
     monkeypatch.setattr(socket.socket, "connect", no_network)
-    monkeypatch.setattr(socket.socket, "connect_ex", no_network)
-    monkeypatch.setattr(socket, "create_connection", no_network)
-    monkeypatch.setattr(curl_cffi.Curl, "perform", no_network)
+    monkeypatch.setattr(socket.socket, "connect_ex", no_connect_ex)
+    monkeypatch.setattr(curl_cffi.Curl, "perform", no_curl)
     cache_dir = tmp_path / "cache"
     monkeypatch.setattr(config, "REQUIRED_DIRS", [cache_dir])
     history = HistoryManager(db_path=tmp_path / "history.sqlite3")

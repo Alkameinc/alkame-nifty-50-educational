@@ -32,6 +32,13 @@ ACTION_HOLD = "HOLD"
 CLASS_TO_ACTION = {"UP": ACTION_BUY, "DOWN": ACTION_SELL, "FLAT": ACTION_HOLD}
 
 
+def _round_to_tick(price: float, tick_size: float = 0.05) -> float:
+    """Rounds price to the nearest market tick size (default 0.05 for NSE)."""
+    if price is None:
+        return None
+    return float(round(round(price / tick_size) * tick_size, 2))
+
+
 @dataclass
 class PredictionSignal:
     symbol: str
@@ -69,8 +76,19 @@ class PredictionSignal:
 
     def __post_init__(self):
         # DATA-004: Standardize internal timestamps on timezone-aware UTC
-        if self.timestamp is not None and self.timestamp.tzinfo is None:
-            self.timestamp = self.timestamp.replace(tzinfo=timezone.utc)
+        if self.timestamp is not None:
+            if isinstance(self.timestamp, str):
+                try:
+                    ts = pd.to_datetime(self.timestamp)
+                    if ts.tz is None:
+                        ts = ts.tz_localize("UTC")
+                    else:
+                        ts = ts.tz_convert("UTC")
+                    self.timestamp = ts.to_pydatetime()
+                except Exception:
+                    pass
+            elif hasattr(self.timestamp, "tzinfo") and self.timestamp.tzinfo is None:
+                self.timestamp = self.timestamp.replace(tzinfo=timezone.utc)
 
 
 @dataclass

@@ -50,11 +50,11 @@ class Prediction(Base):
     target_timestamp = Column(String)
     outcome_entry_price = Column(Float)
     outcome_endpoint_price = Column(Float)
-    outcome_resolution_status = Column(String, default="PENDING")
+    outcome_resolution_status = Column(String, default="PENDING", server_default="PENDING")
     outcome_resolution_reason = Column(String)
     outcome_entry_timestamp = Column(String)
     outcome_target_timestamp = Column(String)
-    delivery_count = Column(Integer, default=1, nullable=False)
+    delivery_count = Column(Integer, default=1, server_default="1")
 
 
 class Event(Base):

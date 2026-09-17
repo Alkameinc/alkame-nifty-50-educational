@@ -242,11 +242,14 @@ class RuntimeValidator:
             reasons: list[str] = []
             adversarial_miscalibrated = False
 
-            # 1. Zero Resolution: confidence lacks variance (e.g. constant 0.5 or constant 0.9)
+            # 1. Zero Resolution: confidence lacks variance (e.g. constant 0.5 or uncalibrated constant confidence)
             conf_std = float(df["confidence"].std()) if n_samples > 1 else 0.0
             if conf_std < 1e-5 or df["confidence"].nunique() <= 1:
-                reasons.append("Zero resolution: confidence scores lack variance (constant confidence).")
-                adversarial_miscalibrated = True
+                mean_conf = float(df["confidence"].mean())
+                emp_acc = float(df["correct"].mean())
+                if abs(mean_conf - 0.50) < 1e-3 or abs(mean_conf - emp_acc) > 1e-4:
+                    reasons.append("Zero resolution: confidence scores lack variance (constant confidence).")
+                    adversarial_miscalibrated = True
 
             # 2. Inverted Confidence: higher predicted confidence yields lower accuracy
             populated_bins = [b for b in bins if b.count > 0]

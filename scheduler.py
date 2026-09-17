@@ -302,7 +302,16 @@ class Scheduler:
 
         from config import LIVE_WORTHINESS_REFRESH_HOURS
 
-        age = datetime.now() - snapshot.refreshed_at
+        now_val = pd.Timestamp.now()
+        ref_at = snapshot.refreshed_at
+        if hasattr(now_val, "to_pydatetime"):
+            now_val = now_val.to_pydatetime()
+        if ref_at.tzinfo is not None and now_val.tzinfo is None:
+            now_val = now_val.replace(tzinfo=ref_at.tzinfo)
+        elif ref_at.tzinfo is None and now_val.tzinfo is not None:
+            now_val = now_val.replace(tzinfo=None)
+
+        age = now_val - ref_at
         if age >= timedelta(hours=LIVE_WORTHINESS_REFRESH_HOURS):
             return None
 
@@ -493,7 +502,12 @@ class Scheduler:
         if stock_df is None or stock_df.empty:
             return "UNKNOWN"
         cols = [c for c in ("Open", "High", "Low", "Close", "Volume") if c in stock_df.columns]
-        tail = stock_df.loc[stock_df.index <= pd.Timestamp(as_of), cols].tail(500)
+        as_of_ts = pd.Timestamp(as_of)
+        if hasattr(stock_df.index, "tz") and stock_df.index.tz is None and as_of_ts.tz is not None:
+            as_of_ts = as_of_ts.tz_localize(None)
+        elif hasattr(stock_df.index, "tz") and stock_df.index.tz is not None and as_of_ts.tz is None:
+            as_of_ts = as_of_ts.tz_localize("UTC")
+        tail = stock_df.loc[stock_df.index <= as_of_ts, cols].tail(500)
         payload = tail.to_csv().encode("utf-8")
         return "data-" + hashlib.sha256(payload).hexdigest()[:24]
 
@@ -653,18 +667,22 @@ class Scheduler:
             if hasattr(self.predictor, "predict_context"):
                 multi_sig = self.predictor.predict_context(context, horizons=horizons)
             else:
-                multi_sig = self.predictor.generate_multi_horizon_signal(
-                    symbol=context.symbol,
-                    horizons=horizons,
-                    stock_df=context.market_data,
-                    index_df=context.index_data,
-                    macro_events=context.macro_events,
-                    corporate_events=context.corporate_events,
-                    news_articles=context.news_events,
-                    calibration_results=context.calibration_results,
-                    edge_check_results=context.edge_check_results,
-                    as_of=context.as_of or context.timestamp,
-                )
+                kwargs = {
+                    "symbol": context.symbol,
+                    "horizons": horizons,
+                    "stock_df": context.market_data,
+                    "index_df": context.index_data,
+                    "macro_events": context.macro_events,
+                    "corporate_events": context.corporate_events,
+                    "news_articles": context.news_events,
+                    "calibration_results": context.calibration_results,
+                    "edge_check_results": context.edge_check_results,
+                }
+                import inspect
+                sig_params = inspect.signature(self.predictor.generate_multi_horizon_signal).parameters
+                if "as_of" in sig_params:
+                    kwargs["as_of"] = context.as_of or context.timestamp
+                multi_sig = self.predictor.generate_multi_horizon_signal(**kwargs)
 
             for h, sig in multi_sig.signals.items():
                 data_version = self._data_version(stock_df, sig.timestamp)

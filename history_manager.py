@@ -228,13 +228,21 @@ class HistoryManager:
                         "model_version": signal.model_version, "feature_version": signal.feature_version,
                         "action": signal.action, "predicted_class": signal.model_predicted_class,
                         "entry_timestamp": entry_ts, "entry_price": entry_px}
+                if p_key:
+                    seed["prediction_key"] = p_key
                 stable_generation_id = generation_id or "forecast-" + hashlib.sha256(
                     json.dumps(seed, sort_keys=True, default=str).encode("utf-8")
                 ).hexdigest()[:24]
-                existing = db.query(DBPrediction).filter(DBPrediction.generation_id == stable_generation_id).first()
+                existing = (
+                    db.query(DBPrediction)
+                    .filter(
+                        DBPrediction.generation_id == stable_generation_id,
+                        DBPrediction.outcome_resolved.is_(False),
+                    )
+                    .first()
+                )
                 if existing:
                     existing.delivery_count = int(existing.delivery_count or 1) + 1
-                    db.commit()
                     return int(existing.id)
                 prediction = DBPrediction(
                     symbol=signal.symbol,
@@ -352,6 +360,8 @@ class HistoryManager:
                         "entry_timestamp": entry_ts,
                         "entry_price": entry_px,
                     }
+                    if p_key:
+                        seed["prediction_key"] = p_key
                     stable_generation_id = (
                         generation_id
                         or getattr(signal, "generation_id", None)

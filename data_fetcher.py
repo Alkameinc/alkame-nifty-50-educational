@@ -84,8 +84,9 @@ class DataFetcher:
             if path.exists():
                 df = pd.read_csv(path, index_col=0, parse_dates=True)
                 # DATA-004: Standardize internal timestamps on timezone-aware UTC
-                df.index = pd.to_datetime(df.index, utc=True)
-                if df.index.tz is not None:
+                if df.index.tz is None:
+                    df.index = df.index.tz_localize("UTC")
+                else:
                     try:
                         df.index = df.index.tz_convert("Asia/Kolkata")
                     except Exception:
@@ -100,8 +101,9 @@ class DataFetcher:
         try:
             if legacy_path.exists():
                 df = pd.read_csv(legacy_path, index_col=0, parse_dates=True)
-                df.index = pd.to_datetime(df.index, utc=True)
-                if df.index.tz is not None:
+                if df.index.tz is None:
+                    df.index = df.index.tz_localize("UTC")
+                else:
                     try:
                         df.index = df.index.tz_convert("Asia/Kolkata")
                     except Exception:
@@ -130,7 +132,7 @@ class DataFetcher:
         DATA-001: Returns MarketDataResult if return_metadata=True, or DataFrame/None.
         If return_metadata=False and cache is stale, returns None unless allow_stale=True.
         """
-        now_utc = datetime.now(timezone.utc)
+        now_utc = pd.Timestamp.now(tz=timezone.utc).to_pydatetime()
 
         # FIRST: Check if we have a fresh cache
         cached = self._load_cache(ticker, interval=interval)
@@ -168,8 +170,6 @@ class DataFetcher:
                 # DATA-004: Standardize internal timestamps on timezone-aware UTC
                 if df.index.tz is None:
                     df.index = df.index.tz_localize("UTC")
-                else:
-                    df.index = df.index.tz_convert("UTC")
 
                 self._save_cache(ticker, df, interval=interval)
                 health_registry.report("data_fetcher", ok=True, detail=f"Fetched live data for {ticker}")
@@ -472,7 +472,7 @@ class DataFetcher:
 
             tz_ist = ZoneInfo(MARKET_TIMEZONE)
             if now is None:
-                now_ist = datetime.now(tz_ist)
+                now_ist = pd.Timestamp.now(tz=tz_ist).to_pydatetime()
             else:
                 now_ist = now.astimezone(tz_ist) if now.tzinfo is not None else now.replace(tzinfo=tz_ist)
 
@@ -547,7 +547,7 @@ class DataFetcher:
 
             tz_ist = ZoneInfo(MARKET_TIMEZONE)
             if now is None:
-                now_ist = datetime.now(tz_ist)
+                now_ist = pd.Timestamp.now(tz=tz_ist).to_pydatetime()
             else:
                 now_ist = now.astimezone(tz_ist) if now.tzinfo is not None else now.replace(tzinfo=tz_ist)
 

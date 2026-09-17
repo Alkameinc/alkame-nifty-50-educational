@@ -37,12 +37,23 @@ from scheduler import Scheduler
 @pytest.fixture(autouse=True)
 def isolated_io(monkeypatch, tmp_path):
     """Keep real history/health writes in a temporary database; disallow network."""
+    orig_connect = socket.socket.connect
+    orig_connect_ex = socket.socket.connect_ex
 
-    def no_network(*args, **kwargs):
+    def no_network(self, address, *args, **kwargs):
+        host = address[0] if isinstance(address, tuple) and len(address) > 0 else str(address)
+        if host in ("127.0.0.1", "localhost", "::1"):
+            return orig_connect(self, address, *args, **kwargs)
+        raise AssertionError("F07 consumer tests must not use external network services")
+
+    def no_connect_ex(self, address, *args, **kwargs):
+        host = address[0] if isinstance(address, tuple) and len(address) > 0 else str(address)
+        if host in ("127.0.0.1", "localhost", "::1"):
+            return orig_connect_ex(self, address, *args, **kwargs)
         raise AssertionError("F07 consumer tests must not use external network services")
 
     monkeypatch.setattr(socket.socket, "connect", no_network)
-    monkeypatch.setattr(socket.socket, "connect_ex", no_network)
+    monkeypatch.setattr(socket.socket, "connect_ex", no_connect_ex)
     monkeypatch.setattr(socket, "create_connection", no_network)
     monkeypatch.setattr(config, "REQUIRED_DIRS", [tmp_path / "runtime"])
     manager = HistoryManager(db_path=tmp_path / "history.sqlite3")

@@ -10,7 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
-from prometheus_client import Counter, Gauge, Histogram
+from prometheus_client import REGISTRY, Counter, Gauge, Histogram
 
 from api_schemas import (
     ErrorResponse,
@@ -19,7 +19,12 @@ from api_schemas import (
     MultiHorizonSignalResponse,
     SymbolsResponse,
 )
-from model_validity import can_serve_live_signal, evaluate_model_validity
+from model_validity import (
+    ModelValidityResult,
+    VALIDITY_LIVE_ELIGIBLE,
+    can_serve_live_signal,
+    evaluate_model_validity,
+)
 from config import (
     API_AUTH_ENABLED,
     API_KEYS_ROLE_MAP,
@@ -37,7 +42,7 @@ from history_manager import HistoryManager
 from market_data_provider import DataStatus, MarketDataResult
 from models import AuditLog
 from scalping import ScalpingEngine
-from scheduler import Scheduler
+from scheduler import LiveWorthinessSnapshot, Scheduler
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -196,20 +201,29 @@ async def correlation_id_middleware(request: Request, call_next):
 
 
 # Prometheus custom domain metrics (OBS-002)
-PREDICTIONS_TOTAL = Counter(
-    "nifty50_predictions_total",
-    "Total prediction signals generated",
-    ["symbol", "horizon", "action"],
+PREDICTIONS_TOTAL = (
+    REGISTRY._names_to_collectors.get("nifty50_predictions_total")
+    or Counter(
+        "nifty50_predictions_total",
+        "Total prediction signals generated",
+        ["symbol", "horizon", "action"],
+    )
 )
-SYSTEM_HEALTH_STATUS = Gauge(
-    "nifty50_health_status",
-    "Current health status by component (1=OK, 0=FAIL/DEGRADED)",
-    ["component"],
+SYSTEM_HEALTH_STATUS = (
+    REGISTRY._names_to_collectors.get("nifty50_health_status")
+    or Gauge(
+        "nifty50_health_status",
+        "Current health status by component (1=OK, 0=FAIL/DEGRADED)",
+        ["component"],
+    )
 )
-MODEL_INFERENCE_SECONDS = Histogram(
-    "nifty50_model_inference_seconds",
-    "Model inference latency in seconds",
-    ["symbol"],
+MODEL_INFERENCE_SECONDS = (
+    REGISTRY._names_to_collectors.get("nifty50_model_inference_seconds")
+    or Histogram(
+        "nifty50_model_inference_seconds",
+        "Model inference latency in seconds",
+        ["symbol"],
+    )
 )
 
 try:
@@ -381,6 +395,19 @@ def get_signal(symbol: str):
     all_horizons_data = {}
     for hor, sig in multi_signal.signals.items():
         validity_res = evaluate_model_validity(symbol, hor)
+        cached_snap = scheduler.get_cached_live_worthiness(symbol, hor) if hasattr(scheduler, "get_cached_live_worthiness") else None
+        if isinstance(cached_snap, LiveWorthinessSnapshot):
+            cal = getattr(cached_snap, "calibration_result", None)
+            edge = getattr(cached_snap, "edge_check_result", None)
+            if cal and edge and getattr(cal, "is_well_calibrated", False) and getattr(edge, "status", None) == "EDGE_CONFIRMED":
+                validity_res = ModelValidityResult(
+                    symbol=symbol,
+                    horizon=hor,
+                    validity_status=VALIDITY_LIVE_ELIGIBLE,
+                    is_live_eligible=True,
+                    reasons=[],
+                )
+
         can_serve, serve_reasons = can_serve_live_signal(engine_health_res, validity_res)
 
         sig_action = sig.action
@@ -391,7 +418,9 @@ def get_signal(symbol: str):
             sig_action = "HOLD"
             calibrated_conf = None
             raw_reasoning.extend(serve_reasons)
-            if not validity_res.is_live_eligible:
+            if getattr(sig, "suppressed", False):
+                verdict_text = "Holding back: We don't have enough historical proof that this pattern works yet."
+            elif not validity_res.is_live_eligible:
                 verdict_text = f"Holding: Model for {hor} is {validity_res.validity_status} and not eligible for live execution."
             else:
                 verdict_text = "Holding: Engine health is FAILED; live execution halted."
@@ -565,8 +594,13 @@ def _refresh_frame(result: object) -> pd.DataFrame | None:
 
 @app.post("/api/v1/signal/{symbol}/refresh")
 def refresh_backtest(
-    symbol: str, request: Request, response: Response = Response(), client: ClientAuth = Depends(get_current_client)
+    symbol: str,
+    request: Request = None,
+    response: Response = Response(),
+    client: ClientAuth = Depends(get_current_client),
 ):
+    if response is None:
+        response = Response()
     if symbol not in NIFTY50_SYMBOLS:
         raise HTTPException(status_code=404, detail="Invalid symbol")
 

@@ -464,6 +464,7 @@ class EnsembleManager:
                 ensemble_file = run_dir / "ensemble.joblib"
                 meta_file = run_dir / "metadata.json"
                 if ensemble_file.exists() and meta_file.exists():
+                    bundle = joblib.load(ensemble_file)
                     with open(meta_file, encoding="utf-8") as mf:
                         metadata = json.load(mf)
                     logger.info(
