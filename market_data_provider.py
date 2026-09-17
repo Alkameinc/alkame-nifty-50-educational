@@ -80,6 +80,11 @@ class MarketDataResult:
     def is_available(self) -> bool:
         return self.data is not None and not self.data.empty and self.status != DataStatus.UNAVAILABLE
 
+    @property
+    def is_stale(self) -> bool:
+        """Whether this result contains data explicitly marked as stale cache."""
+        return self.status == DataStatus.CACHED_STALE
+
 
 @dataclass
 class DataQualityReport:

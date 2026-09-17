@@ -57,8 +57,14 @@ class DataFetcher:
         ensure_directories()
 
     def _cache_path(self, ticker: str, interval: str = BAR_INTERVAL) -> Path:
+        """Primary cache path with interval suffix (current standard)."""
         safe_name = ticker.replace("=", "_").replace("^", "IDX_").replace(".", "_")
         return self.cache_dir / f"{safe_name}_{interval}.csv"
+
+    def _legacy_cache_path(self, ticker: str) -> Path:
+        """Legacy cache path WITHOUT interval suffix (pre-multi-interval compatibility)."""
+        safe_name = ticker.replace("=", "_").replace("^", "IDX_").replace(".", "_")
+        return self.cache_dir / f"{safe_name}.csv"
 
     def _save_cache(self, ticker: str, df: pd.DataFrame, interval: str = BAR_INTERVAL) -> None:
         try:
@@ -67,16 +73,48 @@ class DataFetcher:
             logger.error(f"Failed to write cache for {ticker} ({interval}): {e}")
 
     def _load_cache(self, ticker: str, interval: str = BAR_INTERVAL) -> pd.DataFrame | None:
+        """
+        Load OHLCV cache with 2-tier fallback:
+        1. Interval-suffixed path (current standard)
+        2. Un-suffixed legacy path (pre-multi-interval compatibility with warnings)
+        """
+        # TIER 1: Try interval-suffixed path first
         path = self._cache_path(ticker, interval=interval)
         try:
             if path.exists():
                 df = pd.read_csv(path, index_col=0, parse_dates=True)
                 # DATA-004: Standardize internal timestamps on timezone-aware UTC
                 df.index = pd.to_datetime(df.index, utc=True)
-                logger.warning(f"Loaded CACHED data for {ticker} ({interval}) from {path}")
+                if df.index.tz is not None:
+                    try:
+                        df.index = df.index.tz_convert("Asia/Kolkata")
+                    except Exception:
+                        pass
+                logger.info(f"Loaded CACHED data for {ticker} ({interval}) from {path}")
                 return df
         except Exception as e:
-            logger.error(f"Failed to load cache for {ticker} ({interval}): {e}")
+            logger.error(f"Failed to load interval-suffixed cache for {ticker} ({interval}): {e}")
+
+        # TIER 2: Fall back to legacy unsuffixed path
+        legacy_path = self._legacy_cache_path(ticker)
+        try:
+            if legacy_path.exists():
+                df = pd.read_csv(legacy_path, index_col=0, parse_dates=True)
+                df.index = pd.to_datetime(df.index, utc=True)
+                if df.index.tz is not None:
+                    try:
+                        df.index = df.index.tz_convert("Asia/Kolkata")
+                    except Exception:
+                        pass
+                logger.warning(
+                    f"LEGACY CACHE COMPATIBILITY: Loaded {ticker} from unsuffixed path {legacy_path.name}. "
+                    f"Requested interval={interval} but legacy cache has no interval metadata. "
+                    f"Data may be 5m, 1d, or other interval. Consider re-fetching to create interval-tagged cache."
+                )
+                return df
+        except Exception as e:
+            logger.error(f"Failed to load legacy unsuffixed cache for {ticker}: {e}")
+        
         return None
 
     def fetch_ohlcv(
@@ -190,7 +228,7 @@ class DataFetcher:
             return MarketDataResult(
                 data=None,
                 status=DataStatus.UNAVAILABLE,
-                source="none",
+                source="unavailable",
                 fetched_at=now_utc,
                 error=str(last_error) if last_error else "Data unavailable",
             )
@@ -273,9 +311,10 @@ class DataFetcher:
         self,
         interval: str = BAR_INTERVAL,
         period: str = BAR_HISTORY_PERIOD,
-    ) -> pd.DataFrame | None:
+        return_metadata: bool = False,
+    ) -> pd.DataFrame | None | MarketDataResult:
         """Fetch the NIFTY 50 index itself — used as the baseline for edge/outperformance checks."""
-        return self.fetch_ohlcv(NIFTY_INDEX_TICKER, interval=interval, period=period)
+        return self.fetch_ohlcv(NIFTY_INDEX_TICKER, interval=interval, period=period, return_metadata=return_metadata)
 
     def fetch_stock_fundamentals(self, ticker: str) -> dict[str, object]:
         """Fetch fundamental metrics (P/E, P/B, Market Cap, EPS, Div Yield, 52W High/Low) with safe fallbacks."""

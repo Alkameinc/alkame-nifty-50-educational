@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import re
 import uuid
 from datetime import datetime, timezone
@@ -33,6 +34,7 @@ from config import (
 from database import SessionLocal
 from health_monitor import registry as health_registry
 from history_manager import HistoryManager
+from market_data_provider import DataStatus, MarketDataResult
 from models import AuditLog
 from scalping import ScalpingEngine
 from scheduler import Scheduler
@@ -538,14 +540,27 @@ import time
 
 # --- Refresh protection state ---
 _refresh_locks: dict[str, threading.Lock] = {}  # symbol -> threading.Lock
-_refresh_last_time: dict[str, float] = {}  # symbol -> float (epoch)
+_refresh_locks_guard = threading.Lock()
+_refresh_last_time: dict[str, float] = {}  # symbol -> last attempt completion (monotonic)
 _REFRESH_COOLDOWN_SECONDS = 60  # Minimum seconds between refreshes for the same symbol
 
 
 def _get_refresh_lock(symbol: str) -> threading.Lock:
-    if symbol not in _refresh_locks:
-        _refresh_locks[symbol] = threading.Lock()
-    return _refresh_locks[symbol]
+    with _refresh_locks_guard:
+        if symbol not in _refresh_locks:
+            _refresh_locks[symbol] = threading.Lock()
+        return _refresh_locks[symbol]
+
+
+def _refresh_frame(result: object) -> pd.DataFrame | None:
+    """Do not renew live-worthiness evidence from explicitly stale/unavailable bars."""
+    if isinstance(result, MarketDataResult):
+        if result.status not in (DataStatus.LIVE, DataStatus.CACHED_FRESH):
+            return None
+        data = result.data
+    else:
+        data = getattr(result, "df", result)
+    return data if isinstance(data, pd.DataFrame) and not data.empty else None
 
 
 @app.post("/api/v1/signal/{symbol}/refresh")
@@ -561,11 +576,12 @@ def refresh_backtest(
             response.status_code = status.HTTP_429_TOO_MANY_REQUESTS
         return {"status": "rejected", "reason": "A refresh is already running for this symbol.", "http_status": 429}
 
+    attempt_started = False
     try:
-        last = _refresh_last_time.get(symbol, 0)
-        elapsed = time.time() - last
-        if elapsed < _REFRESH_COOLDOWN_SECONDS:
-            remaining = int(_REFRESH_COOLDOWN_SECONDS - elapsed)
+        last = _refresh_last_time.get(symbol)
+        elapsed = time.monotonic() - last if last is not None else None
+        if elapsed is not None and elapsed < _REFRESH_COOLDOWN_SECONDS:
+            remaining = math.ceil(_REFRESH_COOLDOWN_SECONDS - elapsed)
             if response is not None:
                 response.status_code = status.HTTP_429_TOO_MANY_REQUESTS
             return {
@@ -574,22 +590,21 @@ def refresh_backtest(
                 "http_status": 429,
             }
 
+        attempt_started = True
         yf_ticker = to_yfinance_ticker(symbol)
-        raw_stock = scheduler.data_fetcher.fetch_ohlcv(yf_ticker)
-        raw_index = scheduler.data_fetcher.fetch_nifty_index()
-        stock_df = getattr(raw_stock, "df", raw_stock)
-        index_df = getattr(raw_index, "df", raw_index)
-        if (
-            isinstance(stock_df, pd.DataFrame)
-            and isinstance(index_df, pd.DataFrame)
-            and not stock_df.empty
-            and not index_df.empty
-        ):
+        raw_stock = scheduler.data_fetcher.fetch_ohlcv(yf_ticker, return_metadata=True)
+        raw_index = scheduler.data_fetcher.fetch_nifty_index(return_metadata=True)
+        stock_df = _refresh_frame(raw_stock)
+        index_df = _refresh_frame(raw_index)
+        if stock_df is not None and index_df is not None:
             scheduler.refresh_live_worthiness(symbol, stock_df, index_df)
-            _refresh_last_time[symbol] = time.time()
             return {"status": "success"}
         return {"error": "Failed to fetch data"}
     finally:
+        # Failed work consumes resources too. Rejected requests must not extend
+        # the cooldown, and elapsed wall-clock adjustments must not bypass it.
+        if attempt_started:
+            _refresh_last_time[symbol] = time.monotonic()
         lock.release()
 
 

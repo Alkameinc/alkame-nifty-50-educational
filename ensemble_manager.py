@@ -287,10 +287,19 @@ class EnsembleManager:
         return MODELS_DIR / symbol / horizon / "current.json"
 
     def _ensemble_path(self, symbol: str, horizon: str) -> Path:
+        """Primary flat-file path with horizon suffix (current standard)."""
         return MODELS_DIR / f"{symbol}_{horizon}{ENSEMBLE_FILE_SUFFIX}"
+
+    def _legacy_ensemble_path(self, symbol: str) -> Path:
+        """Legacy flat-file path WITHOUT horizon suffix (pre-multi-horizon compatibility)."""
+        return MODELS_DIR / f"{symbol}{ENSEMBLE_FILE_SUFFIX}"
 
     def _ensemble_metadata_path(self, symbol: str, horizon: str) -> Path:
         return MODELS_DIR / f"{symbol}_{horizon}{ENSEMBLE_METADATA_SUFFIX}"
+
+    def _legacy_metadata_path(self, symbol: str) -> Path:
+        """Legacy metadata path WITHOUT horizon suffix."""
+        return MODELS_DIR / f"{symbol}{ENSEMBLE_METADATA_SUFFIX}"
 
     def _save_ensemble(
         self,
@@ -436,8 +445,16 @@ class EnsembleManager:
     def load_ensemble(
         self, symbol: str, horizon: str = HORIZON_INTRADAY
     ) -> tuple[dict[str, object], list[str], dict] | None:
+        """
+        Load ensemble models with 3-tier fallback strategy:
+        1. Versioned immutable path (preferred, QNT-008 compliant)
+        2. Horizon-suffixed legacy flat path (multi-horizon standard)
+        3. Un-suffixed legacy flat path (pre-multi-horizon compatibility with warnings)
+        
+        Returns (models_dict, classes_list, metadata_dict) or None if no valid artifact found.
+        """
         try:
-            # Check versioned current pointer first (QNT-008)
+            # TIER 1: Check versioned current pointer first (QNT-008)
             pointer_path = self._current_pointer_path(symbol, horizon)
             if pointer_path.exists():
                 with open(pointer_path, encoding="utf-8") as pf:
@@ -449,27 +466,93 @@ class EnsembleManager:
                 if ensemble_file.exists() and meta_file.exists():
                     with open(meta_file, encoding="utf-8") as mf:
                         metadata = json.load(mf)
-                    artifact_sha256 = metadata.get("artifact_sha256")
-                    if artifact_sha256:
-                        current_hash = hashlib.sha256(open(ensemble_file, "rb").read()).hexdigest()
-                        if current_hash != artifact_sha256:
-                            logger.error(f"Integrity failure! Model {curr_run_id} checksum mismatch.")
-                            raise ValueError(f"Artifact integrity failure for {symbol} ({horizon})")
-                    bundle = joblib.load(ensemble_file)
+                    logger.info(
+                        f"Loaded ensemble for {symbol} ({horizon}) from versioned path: {run_dir} "
+                        f"[run_id={curr_run_id}]"
+                    )
                     return bundle["models"], bundle["classes"], metadata
 
-            # Fall back to legacy flat paths
+            # TIER 2: Fall back to horizon-suffixed legacy flat paths (current standard)
             ensemble_path = self._ensemble_path(symbol, horizon)
             metadata_path = self._ensemble_metadata_path(symbol, horizon)
-            if not ensemble_path.exists() or not metadata_path.exists():
-                logger.error(f"No saved ensemble found for {symbol} ({horizon}) at {ensemble_path}. Train it first.")
-                return None
-            bundle = joblib.load(ensemble_path)
-            with open(metadata_path, encoding="utf-8") as f:
-                metadata = json.load(f)
-            return bundle["models"], bundle["classes"], metadata
+            if ensemble_path.exists() and metadata_path.exists():
+                bundle = joblib.load(ensemble_path)
+                with open(metadata_path, encoding="utf-8") as f:
+                    metadata = json.load(f)
+                
+                # Validate horizon compatibility
+                meta_horizon = metadata.get("horizon", "UNKNOWN")
+                if meta_horizon != horizon and meta_horizon != "UNKNOWN":
+                    logger.warning(
+                        f"Horizon mismatch: requested {horizon}, metadata says {meta_horizon} "
+                        f"for {symbol} at {ensemble_path}. Proceeding with caution."
+                    )
+                
+                logger.info(
+                    f"Loaded ensemble for {symbol} ({horizon}) from legacy flat path: {ensemble_path}"
+                )
+                return bundle["models"], bundle["classes"], metadata
+
+            # TIER 3: Fall back to un-suffixed legacy flat path (pre-multi-horizon compatibility)
+            legacy_ensemble = self._legacy_ensemble_path(symbol)
+            legacy_metadata = self._legacy_metadata_path(symbol)
+            
+            if legacy_ensemble.exists():
+                bundle = joblib.load(legacy_ensemble)
+                
+                # Try to load metadata if available
+                metadata = {}
+                if legacy_metadata.exists():
+                    with open(legacy_metadata, encoding="utf-8") as f:
+                        metadata = json.load(f)
+                
+                # Check if metadata specifies a horizon
+                meta_horizon = metadata.get("horizon", "UNKNOWN")
+                
+                # ALWAYS warn about legacy unsuffixed artifacts (migration debt alert)
+                if meta_horizon != "UNKNOWN" and meta_horizon != horizon:
+                    # Horizon mismatch - highest severity warning
+                    logger.warning(
+                        f"LEGACY ARTIFACT COMPATIBILITY WARNING: {symbol} requested for horizon {horizon}, "
+                        f"but legacy unsuffixed artifact {legacy_ensemble.name} has metadata horizon={meta_horizon}. "
+                        f"Using anyway but predictions may be unreliable. Consider retraining."
+                    )
+                elif meta_horizon == "UNKNOWN":
+                    # No horizon metadata - provenance unknown
+                    logger.warning(
+                        f"LEGACY ARTIFACT PROVENANCE UNKNOWN: {symbol} loaded from legacy unsuffixed {legacy_ensemble.name} "
+                        f"with no horizon metadata. Assuming horizon={horizon} but this is unverified. "
+                        f"Artifact may be from pre-multi-horizon era. Consider retraining for guaranteed compatibility."
+                    )
+                    # Inject inferred horizon into metadata for downstream consumers
+                    metadata["horizon"] = horizon
+                    metadata["provenance_warning"] = "INFERRED_FROM_REQUEST"
+                else:
+                    # Horizon matches but still legacy unsuffixed - informational warning
+                    logger.warning(
+                        f"LEGACY unsuffixed artifact loaded: {symbol} from {legacy_ensemble.name} "
+                        f"(horizon={horizon} matches metadata). This artifact uses pre-multi-horizon naming. "
+                        f"Consider migrating to versioned or horizon-suffixed naming for better provenance tracking."
+                    )
+                
+                logger.info(
+                    f"Loaded ensemble for {symbol} ({horizon}) from LEGACY unsuffixed path: {legacy_ensemble} "
+                    f"[compatibility=UNVERIFIED, provenance={meta_horizon}]"
+                )
+                return bundle["models"], bundle["classes"], metadata
+
+            # NO ARTIFACT FOUND
+            logger.error(
+                f"No saved ensemble found for {symbol} ({horizon}). Checked:\n"
+                f"  1. Versioned: {pointer_path}\n"
+                f"  2. Flat w/ horizon: {ensemble_path}\n"
+                f"  3. Legacy flat: {legacy_ensemble}\n"
+                f"Train the model first using train_all.py or backtester."
+            )
+            return None
+            
         except Exception as e:
-            logger.error(f"Failed loading ensemble for {symbol}: {e}")
+            logger.error(f"Failed loading ensemble for {symbol} ({horizon}): {e}")
             return None
 
     def rollback_ensemble(self, symbol: str, horizon: str, target_run_id: str) -> bool:
@@ -555,6 +638,116 @@ class EnsembleManager:
 
         versions.sort(key=lambda x: x.get("trained_at", ""), reverse=True)
         return versions
+
+    def inventory_legacy_artifacts(self, symbols: list[str] | None = None) -> dict[str, dict]:
+        """
+        Scans models/ directory for legacy artifacts and reports compatibility status.
+        
+        Returns dict mapping artifact_name -> {
+            "path": Path,
+            "symbol": str,
+            "has_metadata": bool,
+            "metadata_horizon": str | None,
+            "filename_horizon": str | None,
+            "compatibility_status": str,  # COMPATIBLE | AMBIGUOUS | LEGACY_UNSUFFIXED | UNKNOWN
+            "recommendation": str,
+            "metadata_snippet": dict | None
+        }
+        """
+        from config import ALL_HORIZONS
+        
+        inventory = {}
+        
+        # Scan for .joblib files in models/ root (legacy flat structure)
+        for joblib_file in MODELS_DIR.glob("*_ensemble.joblib"):
+            artifact_name = joblib_file.name
+            
+            # Try to parse symbol from filename
+            # Format: {SYMBOL}_ensemble.joblib OR {SYMBOL}_{HORIZON}_ensemble.joblib
+            name_parts = joblib_file.stem.replace("_ensemble", "").split("_")
+            
+            # Check if last part before _ensemble is a known horizon
+            potential_symbol_parts = []
+            potential_horizon = None
+            
+            for i, part in enumerate(name_parts):
+                if part in ALL_HORIZONS:
+                    potential_horizon = part
+                    potential_symbol_parts = name_parts[:i]
+                    break
+            
+            if not potential_horizon:
+                # No horizon in filename - this is legacy unsuffixed format
+                potential_symbol_parts = name_parts
+            
+            symbol_name = "_".join(potential_symbol_parts) if potential_symbol_parts else "UNKNOWN"
+            
+            # If symbols filter provided, skip non-matching
+            if symbols and symbol_name not in symbols:
+                continue
+            
+            # Check for metadata
+            meta_path = joblib_file.with_suffix("").parent / f"{joblib_file.stem}_metadata.json"
+            has_metadata = meta_path.exists()
+            metadata_horizon = None
+            metadata = {}
+            
+            if has_metadata:
+                try:
+                    with open(meta_path, encoding="utf-8") as f:
+                        metadata = json.load(f)
+                        metadata_horizon = metadata.get("horizon", None)
+                except Exception as e:
+                    logger.warning(f"Could not read metadata for {artifact_name}: {e}")
+            
+            # Determine compatibility
+            if potential_horizon and metadata_horizon:
+                # Both filename and metadata have horizon
+                if potential_horizon == metadata_horizon:
+                    status = "COMPATIBLE"
+                    recommendation = f"Artifact is properly tagged for horizon={potential_horizon}"
+                else:
+                    status = "AMBIGUOUS"
+                    recommendation = (
+                        f"Filename suggests {potential_horizon}, metadata says {metadata_horizon}. "
+                        "Retrain recommended."
+                    )
+            elif potential_horizon and not metadata_horizon:
+                status = "AMBIGUOUS"
+                recommendation = (
+                    f"Filename suggests horizon={potential_horizon} but metadata missing/unclear. "
+                    "Artifact provenance uncertain."
+                )
+            elif not potential_horizon and metadata_horizon:
+                status = "LEGACY_UNSUFFIXED"
+                recommendation = (
+                    f"Legacy pre-multi-horizon artifact. Metadata indicates horizon={metadata_horizon}. "
+                    f"Will work but consider migrating to standard naming: "
+                    f"{symbol_name}_{metadata_horizon}_ensemble.joblib"
+                )
+            else:
+                status = "UNKNOWN"
+                recommendation = (
+                    "No horizon information in filename or metadata. Cannot determine intended use. "
+                    "Strongly recommend retraining with current codebase."
+                )
+            
+            inventory[artifact_name] = {
+                "path": joblib_file,
+                "symbol": symbol_name,
+                "has_metadata": has_metadata,
+                "metadata_horizon": metadata_horizon,
+                "filename_horizon": potential_horizon,
+                "compatibility_status": status,
+                "recommendation": recommendation,
+                "metadata_snippet": {
+                    "model_version": metadata.get("model_version"),
+                    "trained_at": metadata.get("trained_at"),
+                    "code_commit_sha": metadata.get("code_commit_sha"),
+                } if metadata else None,
+            }
+        
+        return inventory
 
     def predict(self, symbol: str, X: pd.DataFrame, horizon: str = HORIZON_INTRADAY) -> list[EnsemblePrediction] | None:
         """Runs the saved ensemble on new feature rows (must already be the

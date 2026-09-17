@@ -39,6 +39,25 @@ from config import (
     configure_logging,
 )
 from reference_level_engine import ReferenceLevelDeltas
+from magic_numbers_config import (
+    RSI_NEUTRAL_VALUE,
+    DEFAULT_MA_PERIOD,
+    HORIZON_LOOKBACK_MAP,
+    DEFAULT_LOOKBACK_PERIOD,
+    RESISTANCE_HIGH_QUANTILE,
+    RESISTANCE_LOW_QUANTILE,
+    SUPPORT_HIGH_QUANTILE,
+    RESISTANCE_BAND_LOWER_THRESHOLD,
+    RESISTANCE_BAND_UPPER_THRESHOLD,
+    TRADING_DAYS_PER_MONTH_APPROX,
+    TRADING_DAYS_PER_QUARTER_APPROX,
+    MUTATION_TEST_PRICE_DELTA,
+    MUTATION_TEST_VOLUME_MULTIPLIER,
+    DEFAULT_TEST_DAYS,
+    DEFAULT_TEST_BARS_PER_DAY,
+    LONG_TEST_DAYS,
+    MINUTES_PER_HOUR,
+)
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -323,7 +342,7 @@ def _interval_to_minutes(interval: str) -> int:
         logger.error(f"Could not parse interval '{interval}', defaulting to 5 minutes.")
         return 5
     value, unit = int(match.group(1)), match.group(2)
-    return value * 60 if unit == "h" else value
+    return value * MINUTES_PER_HOUR if unit == "h" else value
 
 
 def _validate_ohlcv(df: pd.DataFrame, name: str = "df") -> bool:
@@ -368,7 +387,7 @@ class FeatureEngineer:
 
             rsi = rsi.mask((avg_loss == 0) & (avg_gain > 0), 100.0)
             rsi = rsi.mask((avg_gain == 0) & (avg_loss > 0), 0.0)
-            rsi = rsi.mask((avg_gain == 0) & (avg_loss == 0), 50.0)
+            rsi = rsi.mask((avg_gain == 0) & (avg_loss == 0), RSI_NEUTRAL_VALUE)
 
             return rsi  # neutral RSI where undefined (e.g. no losses yet)
         except Exception as e:
@@ -795,7 +814,7 @@ class FeatureEngineer:
             # Fix pipeline leakage: populate historical rolling S/R and MA features for the level model
             from config import BOLLINGER_PERIOD, BOLLINGER_STD_DEV, HORIZON_TO_MA_PERIOD, HORIZON_TO_SR_METHOD
 
-            ma_period = HORIZON_TO_MA_PERIOD.get(horizon, 50)
+            ma_period = HORIZON_TO_MA_PERIOD.get(horizon, DEFAULT_MA_PERIOD)
             rolling_ma = out["Close"].rolling(window=ma_period, min_periods=1).mean()
             out["pct_from_ma"] = ((out["Close"] - rolling_ma) / rolling_ma) * 100.0
 
@@ -821,12 +840,11 @@ class FeatureEngineer:
                     ),
                 )
             else:
-                lookback_map = {"30D": 60, "3M": 120, "6M": 252, "1Y": 500}
-                lookback = lookback_map.get(horizon, 120)
+                lookback = HORIZON_LOOKBACK_MAP.get(horizon, DEFAULT_LOOKBACK_PERIOD)
 
-                res_high = out["High"].rolling(window=lookback, min_periods=1).quantile(0.90)
-                res_low = out["High"].rolling(window=lookback, min_periods=1).quantile(0.75)
-                sup_high = out["Low"].rolling(window=lookback, min_periods=1).quantile(0.25)
+                res_high = out["High"].rolling(window=lookback, min_periods=1).quantile(RESISTANCE_HIGH_QUANTILE)
+                res_low = out["High"].rolling(window=lookback, min_periods=1).quantile(RESISTANCE_LOW_QUANTILE)
+                sup_high = out["Low"].rolling(window=lookback, min_periods=1).quantile(SUPPORT_HIGH_QUANTILE)
                 sup_low = out["Low"].rolling(window=lookback, min_periods=1).min()
 
                 out["pct_from_support_band"] = np.where(
@@ -862,13 +880,13 @@ class FeatureEngineer:
             "gap_pct_feat",
             "gap_event",
         ]
-        out.drop(columns=[c for c in intraday_cols if c in out.columns], inplace=True)
+        out = out.drop(columns=[c for c in intraday_cols if c in out.columns])
 
         # Add long-horizon features
         # 1-month return (approx 21 trading days)
-        out["rolling_1m_return"] = out["Close"].pct_change(periods=21, fill_method=None) * 100.0
+        out["rolling_1m_return"] = out["Close"].pct_change(periods=TRADING_DAYS_PER_MONTH_APPROX) * 100.0
         # 3-month return (approx 63 trading days)
-        out["rolling_3m_return"] = out["Close"].pct_change(periods=63, fill_method=None) * 100.0
+        out["rolling_3m_return"] = out["Close"].pct_change(periods=TRADING_DAYS_PER_QUARTER_APPROX) * 100.0
 
         # Make them ML-safe
         out[f"rolling_1m_return{ML_SAFE_SUFFIX}"] = out["rolling_1m_return"].shift(1)
@@ -1057,7 +1075,7 @@ if __name__ == "__main__":
     configure_logging(log_filename="feature_engineer_selftest.log")
     logger.info("Running feature_engineer.py self-test...")
 
-    def _build_synthetic_ohlcv(n_days: int = 5, bars_per_day: int = 75, seed: int = 42) -> pd.DataFrame:
+    def _build_synthetic_ohlcv(n_days: int = DEFAULT_TEST_DAYS, bars_per_day: int = DEFAULT_TEST_BARS_PER_DAY, seed: int = 42) -> pd.DataFrame:
         """Builds deterministic synthetic 5-min OHLCV bars across several
         trading days, purely offline — no network dependency for this test."""
         rng = np.random.default_rng(seed)
@@ -1138,8 +1156,8 @@ if __name__ == "__main__":
         # earlier row's feature value changes because of a future bar's data,
         # that is a real lookahead bug.
         mutated_df = stock_df.copy()
-        mutated_df.iloc[-1, mutated_df.columns.get_loc("Close")] += 500.0
-        mutated_df.iloc[-1, mutated_df.columns.get_loc("Volume")] *= 20
+        mutated_df.iloc[-1, mutated_df.columns.get_loc("Close")] += MUTATION_TEST_PRICE_DELTA
+        mutated_df.iloc[-1, mutated_df.columns.get_loc("Volume")] *= MUTATION_TEST_VOLUME_MULTIPLIER
 
         mutated_features = engineer.engineer_features(mutated_df, index_df)
         assert mutated_features is not None
@@ -1165,8 +1183,8 @@ if __name__ == "__main__":
 
         # --- Test engineer_features_for_horizon ---
         # Generate enough data (at least 65 days) to test rolling returns
-        stock_df_long = _build_synthetic_ohlcv(n_days=70, bars_per_day=1, seed=42)
-        index_df_long = _build_synthetic_ohlcv(n_days=70, bars_per_day=1, seed=7)
+        stock_df_long = _build_synthetic_ohlcv(n_days=LONG_TEST_DAYS, bars_per_day=1, seed=42)
+        index_df_long = _build_synthetic_ohlcv(n_days=LONG_TEST_DAYS, bars_per_day=1, seed=7)
         index_df_long.index = stock_df_long.index
 
         features_long = engineer.engineer_features_for_horizon(

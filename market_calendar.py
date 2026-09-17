@@ -246,6 +246,32 @@ class MarketCalendar:
 
         raise RuntimeError("No trading day found in previous 30 days.")
 
+    def count_trading_days(self, start_date: date, calendar_days: int) -> int:
+        """
+        Count actual trading days within a calendar period.
+
+        Args:
+            start_date: Starting date
+            calendar_days: Number of calendar days to look forward
+
+        Returns:
+            Number of trading days in the period (excludes weekends and holidays)
+
+        Example:
+            >>> cal = MarketCalendar()
+            >>> cal.count_trading_days(date(2026, 9, 14), 7)  # Monday + 7 days
+            5  # Mon, Tue, Wed, Thu, Fri (excludes Sat, Sun)
+        """
+        trading_days = 0
+        current = start_date
+
+        for _ in range(calendar_days):
+            if self.is_trading_day(current):
+                trading_days += 1
+            current += timedelta(days=1)
+
+        return trading_days
+
 
 # Global default instance
 market_calendar = MarketCalendar()
