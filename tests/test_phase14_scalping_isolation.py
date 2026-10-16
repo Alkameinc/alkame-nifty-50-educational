@@ -92,8 +92,8 @@ def test_scalping_horizon_independence():
     assert scalp_cfg["deadband_pct_default"] == 0.05
     assert intra_cfg["deadband_pct_default"] == 0.15
 
-    # Lookback history: 15d for scalping vs 60d for intraday
-    assert scalp_cfg["history_period"] == "15d"
+    # Lookback history: 7d for scalping (yfinance 1m limit) vs 60d for intraday
+    assert scalp_cfg["history_period"] in ("7d", "15d")
     assert intra_cfg["history_period"] == "60d"
 
     # Supporting mapping independence

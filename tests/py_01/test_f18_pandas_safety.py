@@ -87,7 +87,7 @@ def test_f18_proper_filtered_assignment_with_copy():
     df_base = pd.DataFrame(
         {
             "symbol": ["RELIANCE", "TCS", "INFY", "HDFC"],
-            "price": [2500, 3500, 1500, 1600],
+            "price": [2500.0, 3500.0, 1500.0, 1600.0],
             "sector": ["Energy", "IT", "IT", "Finance"],
         }
     )
@@ -428,7 +428,7 @@ def test_f18_copy_after_filtering_best_practice():
     """F18-17: Demonstrate best practice: filter -> copy -> modify."""
     df = pd.DataFrame(
         {
-            "price": [100, 200, 300, 400, 500],
+            "price": [100.0, 200.0, 300.0, 400.0, 500.0],
             "volume": [1000, 2000, 3000, 4000, 5000],
             "sector": ["IT", "Finance", "IT", "Energy", "IT"],
         }
@@ -439,7 +439,7 @@ def test_f18_copy_after_filtering_best_practice():
     df_it.loc[:, "price"] = df_it["price"] * 1.1  # Modify safely
 
     # Original unchanged
-    assert df["price"].tolist() == [100, 200, 300, 400, 500]
+    assert df["price"].tolist() == [100.0, 200.0, 300.0, 400.0, 500.0]
 
     # Filtered copy modified
     assert len(df_it) == 3  # IT sector only
