@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 # Suppress pandas future warnings about downcasting
-pd.set_option('future.no_silent_downcasting', True)
+pd.set_option("future.no_silent_downcasting", True)
 
 # 3. Local imports
 from config import (
@@ -598,7 +598,11 @@ class FeatureEngineer:
             )
         if index_df is None or index_df.empty:
             return AlignmentCoverageReport(
-                source_count=len(stock_df), matched_count=0, coverage_ratio=0.0, status="UNAVAILABLE", threshold=min_ratio
+                source_count=len(stock_df),
+                matched_count=0,
+                coverage_ratio=0.0,
+                status="UNAVAILABLE",
+                threshold=min_ratio,
             )
 
         stock_idx = pd.to_datetime(stock_df.index, utc=True)
@@ -907,6 +911,7 @@ class FeatureEquivalenceReport:
     """
     BACK-001: Verification report comparing batch (backtest) vs sliced (live) features.
     """
+
     is_equivalent: bool
     timestamps_checked: list[Any]
     features_checked: list[str]
@@ -977,10 +982,12 @@ def verify_feature_equivalence(
 
         live_df = eng.engineer_features_for_horizon(stock_slice, index_slice, horizon=horizon)
         if live_df is None or live_df.empty:
-            mismatches.append({
-                "timestamp": str(ts),
-                "error": "Live sliced feature engineering returned empty",
-            })
+            mismatches.append(
+                {
+                    "timestamp": str(ts),
+                    "error": "Live sliced feature engineering returned empty",
+                }
+            )
             continue
 
         # Schema match check:
@@ -988,10 +995,12 @@ def verify_feature_equivalence(
         if set(feature_cols) != set(live_cols):
             missing = set(feature_cols) - set(live_cols)
             extra = set(live_cols) - set(feature_cols)
-            mismatches.append({
-                "timestamp": str(ts),
-                "error": f"Schema mismatch: missing={missing}, extra={extra}",
-            })
+            mismatches.append(
+                {
+                    "timestamp": str(ts),
+                    "error": f"Schema mismatch: missing={missing}, extra={extra}",
+                }
+            )
             continue
 
         batch_row = batch_df.loc[ts]
@@ -1004,13 +1013,15 @@ def verify_feature_equivalence(
             # Handle boolean types
             if isinstance(b_val, (bool, np.bool_)) or isinstance(l_val, (bool, np.bool_)):
                 if bool(b_val) != bool(l_val):
-                    mismatches.append({
-                        "timestamp": str(ts),
-                        "column": col,
-                        "batch_val": b_val,
-                        "live_val": l_val,
-                        "diff": "boolean mismatch",
-                    })
+                    mismatches.append(
+                        {
+                            "timestamp": str(ts),
+                            "column": col,
+                            "batch_val": b_val,
+                            "live_val": l_val,
+                            "diff": "boolean mismatch",
+                        }
+                    )
                 continue
 
             # Handle NaN / None
@@ -1019,13 +1030,15 @@ def verify_feature_equivalence(
             if b_nan and l_nan:
                 continue
             if b_nan != l_nan:
-                mismatches.append({
-                    "timestamp": str(ts),
-                    "column": col,
-                    "batch_val": b_val,
-                    "live_val": l_val,
-                    "diff": "NaN disparity",
-                })
+                mismatches.append(
+                    {
+                        "timestamp": str(ts),
+                        "column": col,
+                        "batch_val": b_val,
+                        "live_val": l_val,
+                        "diff": "NaN disparity",
+                    }
+                )
                 continue
 
             # Numerical comparison
@@ -1034,13 +1047,15 @@ def verify_feature_equivalence(
                 max_err = err
 
             if err > tolerance:
-                mismatches.append({
-                    "timestamp": str(ts),
-                    "column": col,
-                    "batch_val": float(b_val),
-                    "live_val": float(l_val),
-                    "diff": err,
-                })
+                mismatches.append(
+                    {
+                        "timestamp": str(ts),
+                        "column": col,
+                        "batch_val": float(b_val),
+                        "live_val": float(l_val),
+                        "diff": err,
+                    }
+                )
 
     is_equiv = len(mismatches) == 0
     details = (
@@ -1065,7 +1080,9 @@ if __name__ == "__main__":
     configure_logging(log_filename="feature_engineer_selftest.log")
     logger.info("Running feature_engineer.py self-test...")
 
-    def _build_synthetic_ohlcv(n_days: int = DEFAULT_TEST_DAYS, bars_per_day: int = DEFAULT_TEST_BARS_PER_DAY, seed: int = 42) -> pd.DataFrame:
+    def _build_synthetic_ohlcv(
+        n_days: int = DEFAULT_TEST_DAYS, bars_per_day: int = DEFAULT_TEST_BARS_PER_DAY, seed: int = 42
+    ) -> pd.DataFrame:
         """Builds deterministic synthetic 5-min OHLCV bars across several
         trading days, purely offline — no network dependency for this test."""
         rng = np.random.default_rng(seed)

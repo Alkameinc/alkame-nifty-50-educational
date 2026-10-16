@@ -49,8 +49,10 @@ def test_data_001_return_metadata_returns_market_data_result():
     now_utc = datetime.now(UTC)
     fresh_df = _make_intraday_bars(now_utc - timedelta(minutes=10), num_bars=3)
 
-    with patch.object(fetcher, "_load_cache", return_value=fresh_df), \
-         patch.object(fetcher, "check_staleness", return_value=False):
+    with (
+        patch.object(fetcher, "_load_cache", return_value=fresh_df),
+        patch.object(fetcher, "check_staleness", return_value=False),
+    ):
         res = fetcher.fetch_ohlcv("RELIANCE.NS", return_metadata=True)
         assert isinstance(res, MarketDataResult)
         assert res.status == DataStatus.CACHED_FRESH
@@ -66,9 +68,11 @@ def test_data_001_stale_cache_returns_none_in_plain_path_unless_allow_stale():
     stale_dt = datetime.now(UTC) - timedelta(days=5)
     stale_df = _make_intraday_bars(stale_dt, num_bars=5)
 
-    with patch.object(fetcher, "_load_cache", return_value=stale_df), \
-         patch.object(fetcher, "check_staleness", return_value=True), \
-         patch("data_fetcher.yf.Ticker", side_effect=RuntimeError("Live fetch network timeout")):
+    with (
+        patch.object(fetcher, "_load_cache", return_value=stale_df),
+        patch.object(fetcher, "check_staleness", return_value=True),
+        patch("data_fetcher.yf.Ticker", side_effect=RuntimeError("Live fetch network timeout")),
+    ):
         # Default allow_stale=False must return None
         raw_res = fetcher.fetch_ohlcv("RELIANCE.NS", return_metadata=False, allow_stale=False)
         assert raw_res is None
@@ -106,9 +110,15 @@ def test_data_001_scheduler_does_not_promote_stale_data_to_live():
         news_sentiment_fetcher=MagicMock(),
     )
 
-    with patch.object(fetcher, "fetch_ohlcv", return_value=stale_result), \
-         patch.object(fetcher, "fetch_nifty_index", return_value=stale_df), \
-         patch.object(scheduler, "get_event_context", return_value=MagicMock(macro_events=[], corporate_events=[], news_articles=[], status="EVENTS_AVAILABLE")):
+    with (
+        patch.object(fetcher, "fetch_ohlcv", return_value=stale_result),
+        patch.object(fetcher, "fetch_nifty_index", return_value=stale_df),
+        patch.object(
+            scheduler,
+            "get_event_context",
+            return_value=MagicMock(macro_events=[], corporate_events=[], news_articles=[], status="EVENTS_AVAILABLE"),
+        ),
+    ):
         ctx = scheduler.build_prediction_context("RELIANCE")
         assert ctx.data_status == "CACHED_STALE"
         assert ctx.data_status != "LIVE"

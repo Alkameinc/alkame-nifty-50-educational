@@ -131,6 +131,7 @@ class HistoryManager:
         if self.engine.dialect.name != "sqlite":
             return
         from database import Base
+
         Base.metadata.create_all(bind=self.engine)
         prediction_columns = {
             "generation_id": "TEXT",
@@ -157,10 +158,22 @@ class HistoryManager:
             for name, definition in prediction_columns.items():
                 if name not in existing:
                     conn.execute(text(f"ALTER TABLE predictions ADD COLUMN {name} {definition}"))
-            conn.execute(text("UPDATE predictions SET generation_id='UNKNOWN' WHERE generation_id IS NULL OR generation_id=''"))
-            conn.execute(text("UPDATE predictions SET data_version='UNKNOWN' WHERE data_version IS NULL OR data_version=''"))
-            conn.execute(text("UPDATE predictions SET label_definition_version='UNKNOWN' WHERE label_definition_version IS NULL OR label_definition_version=''"))
-            conn.execute(text("UPDATE predictions SET outcome_resolution_status=CASE WHEN outcome_resolved=1 THEN 'RESOLVED' ELSE 'PENDING' END"))
+            conn.execute(
+                text("UPDATE predictions SET generation_id='UNKNOWN' WHERE generation_id IS NULL OR generation_id=''")
+            )
+            conn.execute(
+                text("UPDATE predictions SET data_version='UNKNOWN' WHERE data_version IS NULL OR data_version=''")
+            )
+            conn.execute(
+                text(
+                    "UPDATE predictions SET label_definition_version='UNKNOWN' WHERE label_definition_version IS NULL OR label_definition_version=''"
+                )
+            )
+            conn.execute(
+                text(
+                    "UPDATE predictions SET outcome_resolution_status=CASE WHEN outcome_resolved=1 THEN 'RESOLVED' ELSE 'PENDING' END"
+                )
+            )
             missing = set(prediction_columns) - {row[1] for row in conn.execute(text("PRAGMA table_info(predictions)"))}
             if missing:
                 raise RuntimeError(f"Prediction schema migration incomplete: {sorted(missing)}")
@@ -231,16 +244,25 @@ class HistoryManager:
                 )
                 entry_ts = entry_timestamp or str(signal.timestamp)
                 entry_px = entry_price if entry_price is not None else getattr(signal, "entry_price", None)
-                seed = {"symbol": signal.symbol, "timestamp": str(signal.timestamp), "horizon": signal.horizon,
-                        "model_version": signal.model_version, "feature_version": signal.feature_version,
-                        "action": signal.action, "predicted_class": signal.model_predicted_class,
-                        "entry_timestamp": entry_ts, "entry_price": entry_px,
-                        "is_out_of_sample": bool(is_out_of_sample)}
+                seed = {
+                    "symbol": signal.symbol,
+                    "timestamp": str(signal.timestamp),
+                    "horizon": signal.horizon,
+                    "model_version": signal.model_version,
+                    "feature_version": signal.feature_version,
+                    "action": signal.action,
+                    "predicted_class": signal.model_predicted_class,
+                    "entry_timestamp": entry_ts,
+                    "entry_price": entry_px,
+                    "is_out_of_sample": bool(is_out_of_sample),
+                }
                 if p_key:
                     seed["prediction_key"] = p_key
-                stable_generation_id = generation_id or "forecast-" + hashlib.sha256(
-                    json.dumps(seed, sort_keys=True, default=str).encode("utf-8")
-                ).hexdigest()[:24]
+                stable_generation_id = (
+                    generation_id
+                    or "forecast-"
+                    + hashlib.sha256(json.dumps(seed, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:24]
+                )
                 existing = (
                     db.query(DBPrediction)
                     .filter(
@@ -287,7 +309,9 @@ class HistoryManager:
                     feature_schema_hash=f_hash,
                     generation_id=stable_generation_id,
                     data_version=data_version or getattr(signal, "data_version", None) or "UNKNOWN",
-                    label_definition_version=label_definition_version or getattr(signal, "label_definition_version", None) or LABEL_DEFINITION_VERSION,
+                    label_definition_version=label_definition_version
+                    or getattr(signal, "label_definition_version", None)
+                    or LABEL_DEFINITION_VERSION,
                     entry_timestamp=entry_ts,
                     entry_price=safe_float(entry_px) if entry_px is not None else None,
                     outcome_resolution_status="PENDING",
@@ -360,7 +384,9 @@ class HistoryManager:
 
                 if pred_id is None:
                     dca_ladder_str = (
-                        json.dumps(dca_ladder) if isinstance(dca_ladder, dict) else str(dca_ladder) if dca_ladder else None
+                        json.dumps(dca_ladder)
+                        if isinstance(dca_ladder, dict)
+                        else str(dca_ladder) if dca_ladder else None
                     )
                     entry_ts = entry_timestamp or getattr(signal, "entry_timestamp", None) or str(signal.timestamp)
                     entry_px = entry_price if entry_price is not None else getattr(signal, "entry_price", None)
@@ -380,7 +406,8 @@ class HistoryManager:
                     stable_generation_id = (
                         generation_id
                         or getattr(signal, "generation_id", None)
-                        or "forecast-" + hashlib.sha256(json.dumps(seed, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:24]
+                        or "forecast-"
+                        + hashlib.sha256(json.dumps(seed, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:24]
                     )
                     prediction = DBPrediction(
                         symbol=signal.symbol,
@@ -390,20 +417,26 @@ class HistoryManager:
                         raw_confidence=safe_float(signal.raw_confidence),
                         risk_adjusted_confidence=safe_float(signal.risk_adjusted_confidence),
                         calibrated_confidence=(
-                            safe_float(signal.calibrated_confidence) if signal.calibrated_confidence is not None else None
+                            safe_float(signal.calibrated_confidence)
+                            if signal.calibrated_confidence is not None
+                            else None
                         ),
                         agreement_fraction=safe_float(signal.agreement_fraction),
                         downside_summary=signal.downside_summary,
                         upside_summary=signal.upside_summary,
                         reasoning=(
-                            json.dumps(signal.reasoning) if isinstance(signal.reasoning, list) else str(signal.reasoning)
+                            json.dumps(signal.reasoning)
+                            if isinstance(signal.reasoning, list)
+                            else str(signal.reasoning)
                         ),
                         global_risk_level=signal.global_risk_level,
                         risk_toggle_enabled=signal.risk_toggle_enabled,
                         is_safe_to_trade_live=signal.is_safe_to_trade_live,
                         data_stale=signal.data_stale,
                         suppressed=signal.suppressed,
-                        suppression_reasons=json.dumps(signal.suppression_reasons) if signal.suppression_reasons else None,
+                        suppression_reasons=(
+                            json.dumps(signal.suppression_reasons) if signal.suppression_reasons else None
+                        ),
                         horizon=signal.horizon,
                         narrative=narrative,
                         dca_ladder=dca_ladder_str,
@@ -417,7 +450,9 @@ class HistoryManager:
                         feature_schema_hash=f_hash,
                         generation_id=stable_generation_id,
                         data_version=data_version or getattr(signal, "data_version", None) or "UNKNOWN",
-                        label_definition_version=label_definition_version or getattr(signal, "label_definition_version", None) or LABEL_DEFINITION_VERSION,
+                        label_definition_version=label_definition_version
+                        or getattr(signal, "label_definition_version", None)
+                        or LABEL_DEFINITION_VERSION,
                         entry_timestamp=entry_ts,
                         entry_price=safe_float(entry_px) if entry_px is not None else None,
                         outcome_resolution_status="PENDING",
@@ -550,45 +585,100 @@ class HistoryManager:
                                 raw_confidence=safe_float(row.raw_confidence, 0.0),
                                 risk_adjusted_confidence=safe_float(row.risk_adjusted_confidence, 0.0),
                                 calibrated_confidence=(
-                                    safe_float(row.calibrated_confidence) if row.calibrated_confidence is not None else None
+                                    safe_float(row.calibrated_confidence)
+                                    if row.calibrated_confidence is not None
+                                    else None
                                 ),
                                 agreement_fraction=safe_float(row.agreement_fraction, 0.0),
                                 outcome_resolved=bool(row.outcome_resolved),
                                 outcome_correct=bool(row.outcome_correct) if row.outcome_correct is not None else None,
-                                outcome_actual_class=str(row.outcome_actual_class) if row.outcome_actual_class else None,
+                                outcome_actual_class=(
+                                    str(row.outcome_actual_class) if row.outcome_actual_class else None
+                                ),
                                 resolved_at=safe_iso_timestamp(row.resolved_at) if row.resolved_at else None,
                                 is_out_of_sample=bool(row.is_out_of_sample),
                                 model_id=str(row.model_id) if getattr(row, "model_id", None) else None,
                                 code_commit=str(row.code_commit) if getattr(row, "code_commit", None) else None,
-                                data_snapshot_id=str(row.data_snapshot_id) if getattr(row, "data_snapshot_id", None) else None,
-                                prediction_key=str(row.prediction_key) if getattr(row, "prediction_key", None) else None,
-                                feature_schema_hash=str(row.feature_schema_hash) if getattr(row, "feature_schema_hash", None) else None,
-                                generation_id=str(row.generation_id) if getattr(row, "generation_id", None) else "UNKNOWN",
+                                data_snapshot_id=(
+                                    str(row.data_snapshot_id) if getattr(row, "data_snapshot_id", None) else None
+                                ),
+                                prediction_key=(
+                                    str(row.prediction_key) if getattr(row, "prediction_key", None) else None
+                                ),
+                                feature_schema_hash=(
+                                    str(row.feature_schema_hash) if getattr(row, "feature_schema_hash", None) else None
+                                ),
+                                generation_id=(
+                                    str(row.generation_id) if getattr(row, "generation_id", None) else "UNKNOWN"
+                                ),
                                 data_version=str(row.data_version) if getattr(row, "data_version", None) else "UNKNOWN",
-                                label_definition_version=str(row.label_definition_version) if getattr(row, "label_definition_version", None) else "UNKNOWN",
-                                entry_timestamp=str(row.entry_timestamp) if getattr(row, "entry_timestamp", None) else None,
-                                entry_price=safe_float(row.entry_price) if getattr(row, "entry_price", None) is not None else None,
-                                target_timestamp=str(row.target_timestamp) if getattr(row, "target_timestamp", None) else None,
-                                outcome_entry_price=safe_float(row.outcome_entry_price) if getattr(row, "outcome_entry_price", None) is not None else None,
-                                outcome_endpoint_price=safe_float(row.outcome_endpoint_price) if getattr(row, "outcome_endpoint_price", None) is not None else None,
-                                outcome_resolution_status=str(getattr(row, "outcome_resolution_status", None) or "PENDING"),
-                                outcome_resolution_reason=str(row.outcome_resolution_reason) if getattr(row, "outcome_resolution_reason", None) else None,
-                                outcome_entry_timestamp=str(row.outcome_entry_timestamp) if getattr(row, "outcome_entry_timestamp", None) else None,
-                                outcome_target_timestamp=str(row.outcome_target_timestamp) if getattr(row, "outcome_target_timestamp", None) else None,
+                                label_definition_version=(
+                                    str(row.label_definition_version)
+                                    if getattr(row, "label_definition_version", None)
+                                    else "UNKNOWN"
+                                ),
+                                entry_timestamp=(
+                                    str(row.entry_timestamp) if getattr(row, "entry_timestamp", None) else None
+                                ),
+                                entry_price=(
+                                    safe_float(row.entry_price)
+                                    if getattr(row, "entry_price", None) is not None
+                                    else None
+                                ),
+                                target_timestamp=(
+                                    str(row.target_timestamp) if getattr(row, "target_timestamp", None) else None
+                                ),
+                                outcome_entry_price=(
+                                    safe_float(row.outcome_entry_price)
+                                    if getattr(row, "outcome_entry_price", None) is not None
+                                    else None
+                                ),
+                                outcome_endpoint_price=(
+                                    safe_float(row.outcome_endpoint_price)
+                                    if getattr(row, "outcome_endpoint_price", None) is not None
+                                    else None
+                                ),
+                                outcome_resolution_status=str(
+                                    getattr(row, "outcome_resolution_status", None) or "PENDING"
+                                ),
+                                outcome_resolution_reason=(
+                                    str(row.outcome_resolution_reason)
+                                    if getattr(row, "outcome_resolution_reason", None)
+                                    else None
+                                ),
+                                outcome_entry_timestamp=(
+                                    str(row.outcome_entry_timestamp)
+                                    if getattr(row, "outcome_entry_timestamp", None)
+                                    else None
+                                ),
+                                outcome_target_timestamp=(
+                                    str(row.outcome_target_timestamp)
+                                    if getattr(row, "outcome_target_timestamp", None)
+                                    else None
+                                ),
                                 delivery_count=int(getattr(row, "delivery_count", None) or 1),
                                 data_stale=bool(getattr(row, "data_stale", False)),
                                 suppressed=bool(getattr(row, "suppressed", False)),
-                                event_source_status=str(getattr(row, "event_source_status", None) or "EVENTS_AVAILABLE"),
+                                event_source_status=str(
+                                    getattr(row, "event_source_status", None) or "EVENTS_AVAILABLE"
+                                ),
                                 config_hash=str(row.config_hash) if getattr(row, "config_hash", None) else None,
                                 reproducibility_bundle=(
                                     json.loads(row.reproducibility_bundle)
-                                    if getattr(row, "reproducibility_bundle", None) and isinstance(row.reproducibility_bundle, str)
-                                    else (row.reproducibility_bundle if isinstance(getattr(row, "reproducibility_bundle", None), dict) else None)
+                                    if getattr(row, "reproducibility_bundle", None)
+                                    and isinstance(row.reproducibility_bundle, str)
+                                    else (
+                                        row.reproducibility_bundle
+                                        if isinstance(getattr(row, "reproducibility_bundle", None), dict)
+                                        else None
+                                    )
                                 ),
                             )
                         )
                     except Exception as parse_err:
-                        logger.warning(f"[SCHED-003] Skipping corrupted prediction row id={getattr(row, 'id', None)}: {parse_err}")
+                        logger.warning(
+                            f"[SCHED-003] Skipping corrupted prediction row id={getattr(row, 'id', None)}: {parse_err}"
+                        )
             health_registry.report("history_manager", ok=True)
             return records
         except Exception as e:
@@ -629,13 +719,19 @@ class HistoryManager:
                     resolved_at=safe_iso_timestamp(row.resolved_at) if row.resolved_at else None,
                     is_out_of_sample=bool(row.is_out_of_sample),
                     prediction_key=str(row.prediction_key) if getattr(row, "prediction_key", None) else None,
-                    feature_schema_hash=str(row.feature_schema_hash) if getattr(row, "feature_schema_hash", None) else None,
+                    feature_schema_hash=(
+                        str(row.feature_schema_hash) if getattr(row, "feature_schema_hash", None) else None
+                    ),
                     event_source_status=str(getattr(row, "event_source_status", None) or "EVENTS_AVAILABLE"),
                     config_hash=str(row.config_hash) if getattr(row, "config_hash", None) else None,
                     reproducibility_bundle=(
                         json.loads(row.reproducibility_bundle)
                         if getattr(row, "reproducibility_bundle", None) and isinstance(row.reproducibility_bundle, str)
-                        else (row.reproducibility_bundle if isinstance(getattr(row, "reproducibility_bundle", None), dict) else None)
+                        else (
+                            row.reproducibility_bundle
+                            if isinstance(getattr(row, "reproducibility_bundle", None), dict)
+                            else None
+                        )
                     ),
                 )
         except Exception as e:
@@ -675,7 +771,9 @@ class HistoryManager:
                     feature_version=str(row.feature_version),
                     raw_confidence=safe_float(row.raw_confidence, 0.0),
                     risk_adjusted_confidence=safe_float(row.risk_adjusted_confidence, 0.0),
-                    calibrated_confidence=safe_float(row.calibrated_confidence) if row.calibrated_confidence is not None else None,
+                    calibrated_confidence=(
+                        safe_float(row.calibrated_confidence) if row.calibrated_confidence is not None else None
+                    ),
                     agreement_fraction=safe_float(row.agreement_fraction, 0.0),
                     downside_summary=str(row.downside_summary or ""),
                     upside_summary=str(row.upside_summary or ""),
@@ -690,7 +788,9 @@ class HistoryManager:
                     code_commit=str(row.code_commit) if row.code_commit else None,
                     data_snapshot_id=str(row.data_snapshot_id) if row.data_snapshot_id else None,
                     prediction_key=str(row.prediction_key) if row.prediction_key else None,
-                    feature_schema_hash=str(row.feature_schema_hash) if getattr(row, "feature_schema_hash", None) else None,
+                    feature_schema_hash=(
+                        str(row.feature_schema_hash) if getattr(row, "feature_schema_hash", None) else None
+                    ),
                     event_source_status=str(getattr(row, "event_source_status", None) or "EVENTS_AVAILABLE"),
                 )
         except Exception as e:
@@ -805,12 +905,16 @@ class HistoryManager:
                                 sector=str(row.sector) if row.sector else None,
                                 confidence_in_scope=safe_float(row.confidence_in_scope, 0.0),
                                 headline_or_label=str(row.headline_or_label),
-                                sentiment_score=safe_float(row.sentiment_score) if row.sentiment_score is not None else None,
+                                sentiment_score=(
+                                    safe_float(row.sentiment_score) if row.sentiment_score is not None else None
+                                ),
                                 magnitude_estimate=str(row.magnitude_estimate),
                             )
                         )
                     except Exception as ev_err:
-                        logger.warning(f"[SCHED-003] Skipping corrupted event row id={getattr(row, 'id', None)}: {ev_err}")
+                        logger.warning(
+                            f"[SCHED-003] Skipping corrupted event row id={getattr(row, 'id', None)}: {ev_err}"
+                        )
             health_registry.report("history_manager", ok=True)
             return records
         except Exception as e:

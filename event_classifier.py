@@ -325,9 +325,7 @@ class EventClassifier:
 
             if not isinstance(pub_at, datetime):
                 # DATA-005: Never fallback to datetime.now()! Reject the event
-                logger.warning(
-                    f"DATA-005: Invalid/missing published_at in news article {title}. Rejecting event."
-                )
+                logger.warning(f"DATA-005: Invalid/missing published_at in news article {title}. Rejecting event.")
                 if allow_invalid:
                     pub_at = INVALID_EVENT_TIMESTAMP
                 else:
@@ -400,9 +398,7 @@ class EventClassifier:
             return evt
         except Exception as e:
             logger.error(f"Failed classifying news event {news_article}: {e}")
-            health_registry.report(
-                "event_classifier", ok=False, detail="Failed classifying news event", error=str(e)
-            )
+            health_registry.report("event_classifier", ok=False, detail="Failed classifying news event", error=str(e))
             return self._fallback_event("NEWS", news_article.get("title", ""))
 
     @staticmethod

@@ -52,11 +52,13 @@ def test_invalid_atr_requires_levels_to_be_unavailable():
     assert target_price is None
     assert stop_loss is None
 
+
 def test_missing_atr_uses_documented_half_percent_fallback():
     cmp = 100.0
     atr = None
     atr_val = cmp * 0.005 if atr is None else atr
     assert atr_val == 0.5
+
 
 def test_tick_size_rounds_levels_to_executable_increment():
     entry = 100.03

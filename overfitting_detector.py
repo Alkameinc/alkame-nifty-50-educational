@@ -37,6 +37,7 @@ BOLD = "\033[1m"
 
 class OverfitSeverity(Enum):
     """Severity levels for overfitting detection."""
+
     NONE = "NONE"  # No overfitting detected
     MILD = "MILD"  # Minor overfitting, acceptable for production
     MODERATE = "MODERATE"  # Significant overfitting, needs attention
@@ -48,6 +49,7 @@ class OverfittingMetrics:
     """
     Comprehensive overfitting detection metrics.
     """
+
     # Basic metrics
     train_accuracy: float
     test_accuracy: float
@@ -117,7 +119,7 @@ class OverfittingDetector:
         severe_threshold: float = SEVERE_THRESHOLD,
         perfect_train_threshold: float = PERFECT_TRAIN_THRESHOLD,
         poor_test_threshold: float = POOR_TEST_THRESHOLD,
-        high_variance_threshold: float = HIGH_VARIANCE_THRESHOLD
+        high_variance_threshold: float = HIGH_VARIANCE_THRESHOLD,
     ):
         """
         Initialize overfitting detector with custom thresholds.
@@ -144,7 +146,7 @@ class OverfittingDetector:
         y_train: np.ndarray,
         X_test: np.ndarray,
         y_test: np.ndarray,
-        fold_accuracies: list[float] | None = None
+        fold_accuracies: list[float] | None = None,
     ) -> OverfittingMetrics:
         """
         Evaluate model for overfitting.
@@ -171,8 +173,8 @@ class OverfittingDetector:
         # Additional metrics
         train_bal_acc = balanced_accuracy_score(y_train, y_train_pred)
         test_bal_acc = balanced_accuracy_score(y_test, y_test_pred)
-        train_f1 = f1_score(y_train, y_train_pred, average='macro', zero_division=0)
-        test_f1 = f1_score(y_test, y_test_pred, average='macro', zero_division=0)
+        train_f1 = f1_score(y_train, y_train_pred, average="macro", zero_division=0)
+        test_f1 = f1_score(y_test, y_test_pred, average="macro", zero_division=0)
 
         # Initialize result
         metrics = OverfittingMetrics(
@@ -183,7 +185,7 @@ class OverfittingDetector:
             test_balanced_accuracy=test_bal_acc,
             train_f1_macro=train_f1,
             test_f1_macro=test_f1,
-            fold_accuracies=fold_accuracies
+            fold_accuracies=fold_accuracies,
         )
 
         # Detect overfitting
@@ -209,13 +211,15 @@ class OverfittingDetector:
             metrics.warnings.append(
                 f"SEVERE overfitting: train-test gap = {gap:.1%} (threshold: {self.severe_threshold:.1%})"
             )
-            metrics.recommendations.extend([
-                "Reduce model complexity (lower max_depth, fewer estimators)",
-                "Increase regularization",
-                "Add more training data",
-                "Use dropout or early stopping",
-                "Consider simpler model architecture"
-            ])
+            metrics.recommendations.extend(
+                [
+                    "Reduce model complexity (lower max_depth, fewer estimators)",
+                    "Increase regularization",
+                    "Add more training data",
+                    "Use dropout or early stopping",
+                    "Consider simpler model architecture",
+                ]
+            )
 
         # Check for perfect train + poor test pattern
         elif train_acc >= self.perfect_train_threshold and test_acc < self.poor_test_threshold:
@@ -225,12 +229,14 @@ class OverfittingDetector:
             metrics.warnings.append(
                 f"SEVERE overfitting: near-perfect train ({train_acc:.1%}) with poor test ({test_acc:.1%})"
             )
-            metrics.recommendations.extend([
-                "Model is memorizing training data",
-                "Drastically reduce model complexity",
-                "Use ensemble methods with diverse models",
-                "Verify data quality and label correctness"
-            ])
+            metrics.recommendations.extend(
+                [
+                    "Model is memorizing training data",
+                    "Drastically reduce model complexity",
+                    "Use ensemble methods with diverse models",
+                    "Verify data quality and label correctness",
+                ]
+            )
 
         # Moderate overfitting
         elif gap >= self.moderate_threshold:
@@ -240,12 +246,14 @@ class OverfittingDetector:
             metrics.warnings.append(
                 f"MODERATE overfitting: train-test gap = {gap:.1%} (threshold: {self.moderate_threshold:.1%})"
             )
-            metrics.recommendations.extend([
-                "Consider reducing model complexity",
-                "Increase regularization strength",
-                "Use cross-validation for hyperparameter tuning",
-                "Monitor performance on fresh data"
-            ])
+            metrics.recommendations.extend(
+                [
+                    "Consider reducing model complexity",
+                    "Increase regularization strength",
+                    "Use cross-validation for hyperparameter tuning",
+                    "Monitor performance on fresh data",
+                ]
+            )
 
         # Mild overfitting
         elif gap >= self.mild_threshold:
@@ -293,7 +301,7 @@ class OverfittingDetector:
         test_accuracy: float,
         train_balanced_accuracy: float | None = None,
         test_balanced_accuracy: float | None = None,
-        fold_accuracies: list[float] | None = None
+        fold_accuracies: list[float] | None = None,
     ) -> OverfittingMetrics:
         """
         Evaluate overfitting from pre-computed metrics (no model required).
@@ -318,7 +326,7 @@ class OverfittingDetector:
             train_test_gap=gap,
             train_balanced_accuracy=train_balanced_accuracy,
             test_balanced_accuracy=test_balanced_accuracy,
-            fold_accuracies=fold_accuracies
+            fold_accuracies=fold_accuracies,
         )
 
         self._assess_overfitting(metrics)
@@ -339,7 +347,7 @@ class OverfittingDetector:
             OverfitSeverity.NONE: GREEN,
             OverfitSeverity.MILD: YELLOW,
             OverfitSeverity.MODERATE: YELLOW,
-            OverfitSeverity.SEVERE: RED
+            OverfitSeverity.SEVERE: RED,
         }.get(metrics.severity, RESET)
 
         lines = [
@@ -356,20 +364,24 @@ class OverfittingDetector:
         ]
 
         if metrics.train_balanced_accuracy is not None:
-            lines.extend([
-                f"\n{BOLD}Balanced Accuracy:{RESET}",
-                f"  Train:                 {metrics.train_balanced_accuracy:.1%}",
-                f"  Test:                  {metrics.test_balanced_accuracy:.1%}",
-                f"  Gap:                   {severity_color}{metrics.train_balanced_accuracy - metrics.test_balanced_accuracy:+.1%}{RESET}"
-            ])
+            lines.extend(
+                [
+                    f"\n{BOLD}Balanced Accuracy:{RESET}",
+                    f"  Train:                 {metrics.train_balanced_accuracy:.1%}",
+                    f"  Test:                  {metrics.test_balanced_accuracy:.1%}",
+                    f"  Gap:                   {severity_color}{metrics.train_balanced_accuracy - metrics.test_balanced_accuracy:+.1%}{RESET}",
+                ]
+            )
 
         if metrics.train_f1_macro is not None:
-            lines.extend([
-                f"\n{BOLD}F1 Macro:{RESET}",
-                f"  Train:                 {metrics.train_f1_macro:.1%}",
-                f"  Test:                  {metrics.test_f1_macro:.1%}",
-                f"  Gap:                   {severity_color}{metrics.train_f1_macro - metrics.test_f1_macro:+.1%}{RESET}"
-            ])
+            lines.extend(
+                [
+                    f"\n{BOLD}F1 Macro:{RESET}",
+                    f"  Train:                 {metrics.train_f1_macro:.1%}",
+                    f"  Test:                  {metrics.test_f1_macro:.1%}",
+                    f"  Gap:                   {severity_color}{metrics.train_f1_macro - metrics.test_f1_macro:+.1%}{RESET}",
+                ]
+            )
 
         if metrics.fold_accuracies:
             fold_mean = np.mean(metrics.fold_accuracies)
@@ -377,33 +389,29 @@ class OverfittingDetector:
             fold_min = np.min(metrics.fold_accuracies)
             fold_max = np.max(metrics.fold_accuracies)
 
-            lines.extend([
-                f"\n{BOLD}Cross-Validation Folds:{RESET}",
-                f"  Fold Count:            {len(metrics.fold_accuracies)}",
-                f"  Mean Accuracy:         {fold_mean:.1%}",
-                f"  Std Dev:               {fold_std:.1%}",
-                f"  Min:                   {fold_min:.1%}",
-                f"  Max:                   {fold_max:.1%}",
-                f"  Range:                 {fold_max - fold_min:.1%}"
-            ])
+            lines.extend(
+                [
+                    f"\n{BOLD}Cross-Validation Folds:{RESET}",
+                    f"  Fold Count:            {len(metrics.fold_accuracies)}",
+                    f"  Mean Accuracy:         {fold_mean:.1%}",
+                    f"  Std Dev:               {fold_std:.1%}",
+                    f"  Min:                   {fold_min:.1%}",
+                    f"  Max:                   {fold_max:.1%}",
+                    f"  Range:                 {fold_max - fold_min:.1%}",
+                ]
+            )
 
         if metrics.warnings:
-            lines.extend([
-                f"\n{BOLD}Warnings:{RESET}"
-            ])
+            lines.extend([f"\n{BOLD}Warnings:{RESET}"])
             for warning in metrics.warnings:
                 lines.append(f"  ⚠️  {warning}")
 
         if metrics.recommendations:
-            lines.extend([
-                f"\n{BOLD}Recommendations:{RESET}"
-            ])
+            lines.extend([f"\n{BOLD}Recommendations:{RESET}"])
             for rec in metrics.recommendations:
                 lines.append(f"  💡 {rec}")
 
-        lines.extend([
-            f"\n{'=' * 80}"
-        ])
+        lines.extend([f"\n{'=' * 80}"])
 
         return "\n".join(lines)
 
@@ -414,7 +422,7 @@ def check_overfitting(
     y_train: np.ndarray,
     X_test: np.ndarray,
     y_test: np.ndarray,
-    verbose: bool = True
+    verbose: bool = True,
 ) -> tuple[bool, OverfittingMetrics]:
     """
     Convenience function to quickly check if a model is overfit.
@@ -449,6 +457,7 @@ def check_overfitting(
 # Self-test
 # =============================================================================
 
+
 def _self_test():
     """Self-test to verify overfitting detection works correctly."""
     from sklearn.datasets import make_classification
@@ -466,7 +475,7 @@ def _self_test():
         n_redundant=3,
         n_classes=3,
         class_sep=1.5,  # More separable classes
-        random_state=42
+        random_state=42,
     )
 
     # Split
@@ -481,25 +490,17 @@ def _self_test():
     overfit_model = DecisionTreeClassifier(max_depth=None, random_state=42)
     overfit_model.fit(X_train, y_train)
 
-    overfit_metrics = detector.evaluate(
-        overfit_model, X_train, y_train, X_test, y_test
-    )
+    overfit_metrics = detector.evaluate(overfit_model, X_train, y_train, X_test, y_test)
 
     print(detector.generate_report(overfit_metrics))
 
     # Test 2: Well-regularized model (Logistic Regression)
     print(f"\n{BOLD}Test 2: Well-Regularized Model (LogisticRegression){RESET}")
 
-    good_model = LogisticRegression(
-        max_iter=1000,
-        C=1.0,  # Regularization
-        random_state=42
-    )
+    good_model = LogisticRegression(max_iter=1000, C=1.0, random_state=42)  # Regularization
     good_model.fit(X_train, y_train)
 
-    good_metrics = detector.evaluate(
-        good_model, X_train, y_train, X_test, y_test
-    )
+    good_metrics = detector.evaluate(good_model, X_train, y_train, X_test, y_test)
 
     print(detector.generate_report(good_metrics))
 
@@ -509,10 +510,7 @@ def _self_test():
     # Test 3: From metrics (no model required)
     print(f"\n{BOLD}Test 3: Evaluation from Metrics Only{RESET}")
     metrics_only = detector.evaluate_from_metrics(
-        train_accuracy=0.98,
-        test_accuracy=0.72,
-        train_balanced_accuracy=0.97,
-        test_balanced_accuracy=0.71
+        train_accuracy=0.98, test_accuracy=0.72, train_balanced_accuracy=0.97, test_balanced_accuracy=0.71
     )
 
     print(detector.generate_report(metrics_only))
@@ -520,15 +518,13 @@ def _self_test():
     # Summary
     print(f"\n{BOLD}Self-Test Summary:{RESET}")
     print(f"  Test 1 (Overfit):      {'✓ PASS' if overfit_metrics.is_overfit else '✗ FAIL'}")
-    print(f"  Test 2 (Regularized):  {'✓ PASS' if is_acceptable else '✗ FAIL (severity: ' + good_metrics.severity.value + ')'}")
+    print(
+        f"  Test 2 (Regularized):  {'✓ PASS' if is_acceptable else '✗ FAIL (severity: ' + good_metrics.severity.value + ')'}"
+    )
     print(f"  Test 3 (Metrics-only): {'✓ PASS' if metrics_only.is_overfit else '✗ FAIL'}")
     print()
 
-    all_pass = (
-        overfit_metrics.is_overfit and
-        is_acceptable and
-        metrics_only.is_overfit
-    )
+    all_pass = overfit_metrics.is_overfit and is_acceptable and metrics_only.is_overfit
 
     if all_pass:
         print(f"{GREEN}{BOLD}✓ ALL TESTS PASSED{RESET}\n")
@@ -540,4 +536,5 @@ def _self_test():
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(_self_test())

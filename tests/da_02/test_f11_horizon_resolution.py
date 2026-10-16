@@ -6,16 +6,18 @@ from scheduler import Scheduler
 
 
 def _bars():
-    index = pd.to_datetime([
-        "2026-09-04 15:30",
-        "2026-09-07 09:15",
-        "2026-09-07 09:20",
-        "2026-09-07 09:25",
-        "2026-09-07 09:30",
-        "2026-09-07 09:35",
-        "2026-09-07 09:40",
-        "2026-09-07 09:45",
-    ])
+    index = pd.to_datetime(
+        [
+            "2026-09-04 15:30",
+            "2026-09-07 09:15",
+            "2026-09-07 09:20",
+            "2026-09-07 09:25",
+            "2026-09-07 09:30",
+            "2026-09-07 09:35",
+            "2026-09-07 09:40",
+            "2026-09-07 09:45",
+        ]
+    )
 
     closes = [
         100.0,
@@ -72,11 +74,7 @@ def test_f11_requires_full_forward_horizon():
 
     assert resolved == 0
 
-    record = next(
-        record
-        for record in hm.get_predictions("RELIANCE")
-        if record.id == prediction_id
-    )
+    record = next(record for record in hm.get_predictions("RELIANCE") if record.id == prediction_id)
 
     assert record.outcome_resolved is False
 
@@ -96,11 +94,7 @@ def test_f11_resolves_after_full_forward_horizon():
 
     assert resolved == 1
 
-    record = next(
-        record
-        for record in hm.get_predictions("RELIANCE")
-        if record.id == prediction_id
-    )
+    record = next(record for record in hm.get_predictions("RELIANCE") if record.id == prediction_id)
 
     assert record.outcome_resolved is True
     assert record.outcome_actual_class == "UP"

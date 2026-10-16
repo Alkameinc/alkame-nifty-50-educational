@@ -28,6 +28,7 @@ class ScalpLatencyConfig:
     SCALP-001: Explicit latency configuration modeling order queue delay,
     network latency, and adverse selection price drag.
     """
+
     latency_ms: float = 100.0  # Execution delay in milliseconds
     base_fill_bps: float = 2.0  # Base slippage on market fill
     adverse_selection_bps: float = 4.0  # Additional adverse fill penalty on stop-outs
@@ -49,6 +50,7 @@ class ScalpCostScenario:
     SCALP-001: Scalping-specific cost scenario modeling tight spreads,
     high frequency turnover, and toxic flow on adverse fills.
     """
+
     name: str
     spread_bps: float = 2.0
     slippage_bps: float = 2.5
@@ -116,6 +118,7 @@ SCALPING_COST_SCENARIOS: dict[str, ScalpCostScenario] = {
 @dataclass
 class ScalpCalibrationResult:
     """Independent calibration result for scalping predictions."""
+
     status: str  # SUFFICIENT, INSUFFICIENT_DATA, MISCALIBRATED
     expected_calibration_error: float | None
     brier_score: float | None
@@ -127,6 +130,7 @@ class ScalpCalibrationResult:
 @dataclass
 class ScalpEdgeResult:
     """Independent edge evaluation for scalping setups against zero-drift baseline."""
+
     n_trades: int
     win_rate_pct: float
     profit_factor: float
@@ -143,6 +147,7 @@ class ScalpValidationReport:
     SCALP-001: Comprehensive validation document certifying whether a symbol's
     independent scalping model is safe and profitable to trade live.
     """
+
     symbol: str
     horizon: str
     is_scalp_valid: bool
@@ -437,7 +442,11 @@ class ScalpValidator:
         # Baseline is zero drift
         alpha = cum_net
 
-        has_edge = (n_trades >= self.min_scalp_trades) and (cum_net > 0.0) and (win_rate >= self.min_win_rate_pct or profit_factor >= 1.15)
+        has_edge = (
+            (n_trades >= self.min_scalp_trades)
+            and (cum_net > 0.0)
+            and (win_rate >= self.min_win_rate_pct or profit_factor >= 1.15)
+        )
 
         if has_edge:
             status = "STRONG_EDGE" if profit_factor >= 1.3 else "MODERATE_EDGE"
@@ -537,8 +546,22 @@ class ScalpValidator:
             scalp_model.train(X_train, y_train)
         except Exception as e:
             logger.error(f"ScalpModel training failed for {symbol}: {e}")
-            cal_res = ScalpCalibrationResult(status="INSUFFICIENT_DATA", expected_calibration_error=None, brier_score=None, is_well_calibrated=False, n_samples=0)
-            edge_res = ScalpEdgeResult(n_trades=0, win_rate_pct=0.0, profit_factor=0.0, gross_cumulative_return_pct=0.0, net_cumulative_return_pct=0.0, alpha_pct=0.0, status="INSUFFICIENT_DATA")
+            cal_res = ScalpCalibrationResult(
+                status="INSUFFICIENT_DATA",
+                expected_calibration_error=None,
+                brier_score=None,
+                is_well_calibrated=False,
+                n_samples=0,
+            )
+            edge_res = ScalpEdgeResult(
+                n_trades=0,
+                win_rate_pct=0.0,
+                profit_factor=0.0,
+                gross_cumulative_return_pct=0.0,
+                net_cumulative_return_pct=0.0,
+                alpha_pct=0.0,
+                status="INSUFFICIENT_DATA",
+            )
             return ScalpValidationReport(
                 symbol=symbol,
                 horizon=HORIZON_SCALP,
@@ -567,7 +590,12 @@ class ScalpValidator:
         conf_series = pd.Series(confs, index=X_test.index)
 
         edge_res = self.simulate_scalp_backtest(
-            test_df, pred_series, conf_series, latency_cfg=cfg, cost_scenario=scenarios["SCALP_BASE"], horizon_bars=horizon_bars
+            test_df,
+            pred_series,
+            conf_series,
+            latency_cfg=cfg,
+            cost_scenario=scenarios["SCALP_BASE"],
+            horizon_bars=horizon_bars,
         )
 
         cost_sensitivity = {}

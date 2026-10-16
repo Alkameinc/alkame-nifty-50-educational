@@ -189,6 +189,7 @@ Extended test period for features requiring longer history.
 # UTILITY FUNCTIONS
 # ===========================================================================
 
+
 def get_horizon_lookback(horizon: str) -> int:
     """
     Get appropriate lookback period for a given horizon.
@@ -235,10 +236,7 @@ def get_trading_days_for_period(period: str) -> int:
     }
 
     if period not in period_map:
-        raise ValueError(
-            f"Unknown period: {period}. "
-            f"Supported: {list(period_map.keys())}"
-        )
+        raise ValueError(f"Unknown period: {period}. " f"Supported: {list(period_map.keys())}")
 
     return period_map[period]
 
@@ -261,14 +259,13 @@ def validate_quantile(value: float, name: str = "quantile") -> None:
         ValueError: bad_quantile must be between 0.0 and 1.0, got 1.5
     """
     if not (0.0 <= value <= 1.0):
-        raise ValueError(
-            f"{name} must be between 0.0 and 1.0, got {value}"
-        )
+        raise ValueError(f"{name} must be between 0.0 and 1.0, got {value}")
 
 
 # ===========================================================================
 # MODULE SELF-TEST
 # ===========================================================================
+
 
 def _self_test():
     """Self-test to verify all constants and functions work correctly."""
@@ -395,4 +392,5 @@ def _self_test():
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(_self_test())

@@ -207,9 +207,7 @@ class SectorMapProvider:
 
         return sector_map
 
-    def get_symbols_for_sector(
-        self, sector: str, as_of: Any = None, version: str | None = None
-    ) -> list[str]:
+    def get_symbols_for_sector(self, sector: str, as_of: Any = None, version: str | None = None) -> list[str]:
         """Return all symbols belonging to a specified sector, optionally at historical timestamp `as_of`."""
         sec_lower = sector.lower()
 
@@ -267,11 +265,15 @@ if __name__ == "__main__":
     print("\nTesting historical point-in-time sector resolution...")
     assert provider.get_sector("TATACONSUM", as_of="2020-05-01") == "Beverages"
     assert provider.get_sector("TATACONSUM", as_of="2022-05-01") == "FMCG"
-    print(f"TATACONSUM 2020: {provider.get_sector('TATACONSUM', as_of='2020-05-01')} | 2022: {provider.get_sector('TATACONSUM', as_of='2022-05-01')}")
+    print(
+        f"TATACONSUM 2020: {provider.get_sector('TATACONSUM', as_of='2020-05-01')} | 2022: {provider.get_sector('TATACONSUM', as_of='2022-05-01')}"
+    )
 
     assert provider.get_sector("SHRIRAMFIN", as_of="2021-06-01") == "AutoFinance"
     assert provider.get_sector("SHRIRAMFIN", as_of="2023-06-01") == "NBFC"
-    print(f"SHRIRAMFIN 2021: {provider.get_sector('SHRIRAMFIN', as_of='2021-06-01')} | 2023: {provider.get_sector('SHRIRAMFIN', as_of='2023-06-01')}")
+    print(
+        f"SHRIRAMFIN 2021: {provider.get_sector('SHRIRAMFIN', as_of='2021-06-01')} | 2023: {provider.get_sector('SHRIRAMFIN', as_of='2023-06-01')}"
+    )
 
     assert provider.get_sector("HDFC", as_of="2022-01-01") == "NBFC"
     assert provider.get_sector("IOC", as_of="2021-01-01") == "Energy"
@@ -284,4 +286,3 @@ if __name__ == "__main__":
     assert s_map_2020["GAIL"] == "Utilities"
 
     print("STATUS: PASS")
-

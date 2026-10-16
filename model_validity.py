@@ -68,6 +68,7 @@ class ModelValidityResult:
     MODEL-004: Decoupled Model Validity representation.
     Tracks statistical viability, calibration, and edge separate from engine health.
     """
+
     symbol: str
     horizon: str
     validity_status: str
@@ -120,6 +121,7 @@ def evaluate_model_validity(
     if ensemble_manager is None:
         try:
             from ensemble_manager import EnsembleManager
+
             ensemble_manager = EnsembleManager()
         except Exception as em_err:
             logger.debug(f"Could not import/init EnsembleManager: {em_err}")
@@ -153,6 +155,7 @@ def evaluate_model_validity(
     if artifact_path is None:
         try:
             from model_trainer import ModelTrainer
+
             trainer = ModelTrainer()
             single_path = trainer._model_path(symbol, horizon, is_level=False)
             single_meta = trainer._metadata_path(symbol, horizon, is_level=False)
@@ -204,7 +207,9 @@ def evaluate_model_validity(
                     validity_status=VALIDITY_INVALID,
                     is_live_eligible=False,
                     model_version=metadata.get("model_version"),
-                    reasons=[f"Artifact checksum verification failed (expected {expected_sha[:8]}, got {actual_sha[:8]})."],
+                    reasons=[
+                        f"Artifact checksum verification failed (expected {expected_sha[:8]}, got {actual_sha[:8]})."
+                    ],
                     metadata=metadata,
                 )
         except Exception as fe:
@@ -220,6 +225,7 @@ def evaluate_model_validity(
     # Verify model_hash lineage integrity if single model
     if "model_hash" in metadata:
         from model_lineage import verify_lineage_integrity
+
         ok, lineage_reason = verify_lineage_integrity(metadata, artifact_path)
         if not ok:
             return ModelValidityResult(
@@ -249,9 +255,7 @@ def evaluate_model_validity(
 
     is_stale = age_days > max_model_age_days
     if is_stale:
-        reasons.append(
-            f"Model artifact is stale (age={age_days:.1f} days, max allowable={max_model_age_days} days)."
-        )
+        reasons.append(f"Model artifact is stale (age={age_days:.1f} days, max allowable={max_model_age_days} days).")
 
     # 5. Check Calibration
     calibration_status = CALIBRATION_STATUS_UNAVAILABLE
@@ -326,7 +330,9 @@ def evaluate_model_validity(
         extra_meta = metadata.get("extra_metadata", {})
         meta_alpha = extra_meta.get("alpha_pct") or metadata.get("alpha_pct")
         meta_edge = extra_meta.get("edge_status") or metadata.get("edge_status")
-        if meta_edge == STATUS_EDGE_CONFIRMED or (meta_alpha is not None and float(meta_alpha) > EDGE_CHECK_MIN_ALPHA_PCT):
+        if meta_edge == STATUS_EDGE_CONFIRMED or (
+            meta_alpha is not None and float(meta_alpha) > EDGE_CHECK_MIN_ALPHA_PCT
+        ):
             is_edge_confirmed = True
             edge_status = EDGE_STATUS_CONFIRMED
         elif meta_edge is not None:

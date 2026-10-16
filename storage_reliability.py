@@ -398,6 +398,7 @@ def safe_iso_timestamp(val: Any, default: str | None = None) -> str:
                 val = val.replace(tzinfo=UTC)
             return val.isoformat()
         import pandas as pd
+
         ts = pd.Timestamp(val)
         if ts.tzinfo is None:
             ts = ts.tz_localize(UTC)

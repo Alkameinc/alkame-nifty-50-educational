@@ -102,6 +102,7 @@ class Backtester:
     def predictor(self):
         if self._predictor is None:
             from predictor import Predictor
+
             self._predictor = Predictor(
                 ensemble_manager=self.ensemble_manager,
                 runtime_validator=self.runtime_validator,
@@ -816,7 +817,9 @@ class Backtester:
 
         is_live_worthy = bool(gate.safe_to_show_calibrated_confidence and gate.safe_to_treat_as_live_edge)
         gate_reasons = list(gate.reasons)
-        if is_live_worthy and (edge_result.strategy_cumulative_return_pct <= 0.0 or sim_report.cumulative_net_return_pct <= 0.0):
+        if is_live_worthy and (
+            edge_result.strategy_cumulative_return_pct <= 0.0 or sim_report.cumulative_net_return_pct <= 0.0
+        ):
             is_live_worthy = False
             gate_reasons.append(
                 "Strategy is non-viable after friction: net return is negative after slippage and transaction costs."
@@ -893,9 +896,7 @@ class Backtester:
 
             f_corp = [e for e in corporate_events if _avail(e)] if corporate_events else None
             f_news = [e for e in news_articles if _avail(e)] if news_articles else None
-            f_macro = (
-                [e for e in macro_events if (isinstance(e, dict) and _avail(e))] if macro_events else macro_events
-            )
+            f_macro = [e for e in macro_events if (isinstance(e, dict) and _avail(e))] if macro_events else macro_events
 
             signal_live = self.predictor.generate_signal(
                 symbol=symbol,
@@ -925,76 +926,92 @@ class Backtester:
 
             # Check action match
             if signal_live.action != signal_replay.action:
-                mismatches.append({
-                    "timestamp": str(ts),
-                    "dimension": "action",
-                    "live": signal_live.action,
-                    "replay": signal_replay.action,
-                })
+                mismatches.append(
+                    {
+                        "timestamp": str(ts),
+                        "dimension": "action",
+                        "live": signal_live.action,
+                        "replay": signal_replay.action,
+                    }
+                )
 
             # Check model predicted class match
             if signal_live.model_predicted_class != signal_replay.model_predicted_class:
-                mismatches.append({
-                    "timestamp": str(ts),
-                    "dimension": "model_predicted_class",
-                    "live": signal_live.model_predicted_class,
-                    "replay": signal_replay.model_predicted_class,
-                })
+                mismatches.append(
+                    {
+                        "timestamp": str(ts),
+                        "dimension": "model_predicted_class",
+                        "live": signal_live.model_predicted_class,
+                        "replay": signal_replay.model_predicted_class,
+                    }
+                )
 
             # Check raw confidence
             if abs(signal_live.raw_confidence - signal_replay.raw_confidence) > tolerance:
-                mismatches.append({
-                    "timestamp": str(ts),
-                    "dimension": "raw_confidence",
-                    "live": signal_live.raw_confidence,
-                    "replay": signal_replay.raw_confidence,
-                })
+                mismatches.append(
+                    {
+                        "timestamp": str(ts),
+                        "dimension": "raw_confidence",
+                        "live": signal_live.raw_confidence,
+                        "replay": signal_replay.raw_confidence,
+                    }
+                )
 
             # Check risk adjusted confidence
             if abs(signal_live.risk_adjusted_confidence - signal_replay.risk_adjusted_confidence) > tolerance:
-                mismatches.append({
-                    "timestamp": str(ts),
-                    "dimension": "risk_adjusted_confidence",
-                    "live": signal_live.risk_adjusted_confidence,
-                    "replay": signal_replay.risk_adjusted_confidence,
-                })
+                mismatches.append(
+                    {
+                        "timestamp": str(ts),
+                        "dimension": "risk_adjusted_confidence",
+                        "live": signal_live.risk_adjusted_confidence,
+                        "replay": signal_replay.risk_adjusted_confidence,
+                    }
+                )
 
             # Check calibrated confidence
             l_cal = signal_live.calibrated_confidence
             r_cal = signal_replay.calibrated_confidence
             if (l_cal is None) != (r_cal is None):
-                mismatches.append({
-                    "timestamp": str(ts),
-                    "dimension": "calibrated_confidence_presence",
-                    "live": l_cal,
-                    "replay": r_cal,
-                })
-            elif l_cal is not None and r_cal is not None:
-                if abs(l_cal - r_cal) > tolerance:
-                    mismatches.append({
+                mismatches.append(
+                    {
                         "timestamp": str(ts),
-                        "dimension": "calibrated_confidence_value",
+                        "dimension": "calibrated_confidence_presence",
                         "live": l_cal,
                         "replay": r_cal,
-                    })
+                    }
+                )
+            elif l_cal is not None and r_cal is not None:
+                if abs(l_cal - r_cal) > tolerance:
+                    mismatches.append(
+                        {
+                            "timestamp": str(ts),
+                            "dimension": "calibrated_confidence_value",
+                            "live": l_cal,
+                            "replay": r_cal,
+                        }
+                    )
 
             # Check suppression match
             if signal_live.suppressed != signal_replay.suppressed:
-                mismatches.append({
-                    "timestamp": str(ts),
-                    "dimension": "suppressed",
-                    "live": signal_live.suppressed,
-                    "replay": signal_replay.suppressed,
-                })
+                mismatches.append(
+                    {
+                        "timestamp": str(ts),
+                        "dimension": "suppressed",
+                        "live": signal_live.suppressed,
+                        "replay": signal_replay.suppressed,
+                    }
+                )
 
             # Check contributing events match
             if len(signal_live.contributing_events) != len(signal_replay.contributing_events):
-                mismatches.append({
-                    "timestamp": str(ts),
-                    "dimension": "contributing_events_count",
-                    "live": len(signal_live.contributing_events),
-                    "replay": len(signal_replay.contributing_events),
-                })
+                mismatches.append(
+                    {
+                        "timestamp": str(ts),
+                        "dimension": "contributing_events_count",
+                        "live": len(signal_live.contributing_events),
+                        "replay": len(signal_replay.contributing_events),
+                    }
+                )
 
         return {
             "is_equivalent": len(mismatches) == 0,
@@ -1079,8 +1096,7 @@ class Backtester:
         )
 
         strat_diff = (
-            biased_report["portfolio_avg_strategy_return_pct"]
-            - bias_free_report["portfolio_avg_strategy_return_pct"]
+            biased_report["portfolio_avg_strategy_return_pct"] - bias_free_report["portfolio_avg_strategy_return_pct"]
         )
         alpha_diff = biased_report["portfolio_avg_alpha_pct"] - bias_free_report["portfolio_avg_alpha_pct"]
         trades_diff = biased_report["total_trades_taken"] - bias_free_report["total_trades_taken"]

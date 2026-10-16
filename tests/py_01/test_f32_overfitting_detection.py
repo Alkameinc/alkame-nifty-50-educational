@@ -38,17 +38,12 @@ from overfitting_detector import OverfitSeverity, OverfittingDetector, Overfitti
 # Test Suite 1: Basic Overfitting Detection
 # ============================================================================
 
+
 @pytest.fixture
 def synthetic_data():
     """Generate synthetic classification dataset."""
     X, y = make_classification(
-        n_samples=1000,
-        n_features=20,
-        n_informative=15,
-        n_redundant=3,
-        n_classes=3,
-        class_sep=1.5,
-        random_state=42
+        n_samples=1000, n_features=20, n_informative=15, n_redundant=3, n_classes=3, class_sep=1.5, random_state=42
     )
 
     split = int(0.7 * len(X))
@@ -99,41 +94,25 @@ def test_f32_no_false_positive_on_good_model(synthetic_data):
 
 def test_f32_threshold_calibration():
     """F32-3: Verify threshold boundaries work correctly."""
-    detector = OverfittingDetector(
-        mild_threshold=0.05,
-        moderate_threshold=0.10,
-        severe_threshold=0.15
-    )
+    detector = OverfittingDetector(mild_threshold=0.05, moderate_threshold=0.10, severe_threshold=0.15)
 
     # Test NONE (gap < 5%)
-    metrics_none = detector.evaluate_from_metrics(
-        train_accuracy=0.80,
-        test_accuracy=0.77
-    )
+    metrics_none = detector.evaluate_from_metrics(train_accuracy=0.80, test_accuracy=0.77)
     assert metrics_none.severity == OverfitSeverity.NONE
     assert not metrics_none.is_overfit
 
     # Test MILD (5% <= gap < 10%)
-    metrics_mild = detector.evaluate_from_metrics(
-        train_accuracy=0.80,
-        test_accuracy=0.72
-    )
+    metrics_mild = detector.evaluate_from_metrics(train_accuracy=0.80, test_accuracy=0.72)
     assert metrics_mild.severity == OverfitSeverity.MILD
     assert metrics_mild.is_overfit
 
     # Test MODERATE (10% <= gap < 15%)
-    metrics_moderate = detector.evaluate_from_metrics(
-        train_accuracy=0.85,
-        test_accuracy=0.73
-    )
+    metrics_moderate = detector.evaluate_from_metrics(train_accuracy=0.85, test_accuracy=0.73)
     assert metrics_moderate.severity == OverfitSeverity.MODERATE
     assert metrics_moderate.is_overfit
 
     # Test SEVERE (gap >= 15%)
-    metrics_severe = detector.evaluate_from_metrics(
-        train_accuracy=0.95,
-        test_accuracy=0.75
-    )
+    metrics_severe = detector.evaluate_from_metrics(train_accuracy=0.95, test_accuracy=0.75)
     assert metrics_severe.severity == OverfitSeverity.SEVERE
     assert metrics_severe.is_overfit
 
@@ -144,21 +123,19 @@ def test_f32_threshold_calibration():
 # Test Suite 2: Perfect Train + Poor Test Pattern
 # ============================================================================
 
+
 def test_f32_perfect_train_poor_test_pattern():
     """F32-4: Detect perfect training with poor test (classic overfitting)."""
     detector = OverfittingDetector()
 
     # Perfect train (98%), poor test (65%)
-    metrics = detector.evaluate_from_metrics(
-        train_accuracy=0.98,
-        test_accuracy=0.65
-    )
+    metrics = detector.evaluate_from_metrics(train_accuracy=0.98, test_accuracy=0.65)
 
     assert metrics.is_overfit
     assert metrics.severity == OverfitSeverity.SEVERE
     # Check that warning mentions either the gap or the severe nature
     warnings_text = " ".join(metrics.warnings).lower()
-    assert 'severe' in warnings_text or 'gap' in warnings_text
+    assert "severe" in warnings_text or "gap" in warnings_text
 
     print("✓ F32-4: Detected perfect-train-poor-test pattern")
 
@@ -168,10 +145,7 @@ def test_f32_high_train_acceptable_test_no_flag():
     detector = OverfittingDetector()
 
     # High train (92%), acceptable test (85%)
-    metrics = detector.evaluate_from_metrics(
-        train_accuracy=0.92,
-        test_accuracy=0.85
-    )
+    metrics = detector.evaluate_from_metrics(train_accuracy=0.92, test_accuracy=0.85)
 
     # Should be NONE or MILD, not SEVERE from perfect-train pattern
     assert metrics.severity in [OverfitSeverity.NONE, OverfitSeverity.MILD]
@@ -183,6 +157,7 @@ def test_f32_high_train_acceptable_test_no_flag():
 # Test Suite 3: Fold Variance Detection
 # ============================================================================
 
+
 def test_f32_high_fold_variance_detection():
     """F32-6: Detect high variance across cross-validation folds."""
     detector = OverfittingDetector(high_variance_threshold=0.05)
@@ -190,15 +165,11 @@ def test_f32_high_fold_variance_detection():
     # Low train-test gap but high fold variance
     fold_accuracies = [0.75, 0.82, 0.68, 0.79, 0.71]  # std ~0.055
 
-    metrics = detector.evaluate_from_metrics(
-        train_accuracy=0.78,
-        test_accuracy=0.75,
-        fold_accuracies=fold_accuracies
-    )
+    metrics = detector.evaluate_from_metrics(train_accuracy=0.78, test_accuracy=0.75, fold_accuracies=fold_accuracies)
 
     assert metrics.fold_variance is not None
     assert metrics.fold_variance > 0.05
-    assert any('variance' in w.lower() for w in metrics.warnings)
+    assert any("variance" in w.lower() for w in metrics.warnings)
 
     print(f"✓ F32-6: Detected high fold variance ({metrics.fold_variance:.1%})")
 
@@ -210,14 +181,10 @@ def test_f32_low_fold_variance_acceptable():
     # Low variance folds
     fold_accuracies = [0.80, 0.81, 0.79, 0.82, 0.80]  # std ~0.012
 
-    metrics = detector.evaluate_from_metrics(
-        train_accuracy=0.82,
-        test_accuracy=0.80,
-        fold_accuracies=fold_accuracies
-    )
+    metrics = detector.evaluate_from_metrics(train_accuracy=0.82, test_accuracy=0.80, fold_accuracies=fold_accuracies)
 
     assert metrics.fold_variance < 0.05
-    assert not any('HIGH variance' in w for w in metrics.warnings)
+    assert not any("HIGH variance" in w for w in metrics.warnings)
 
     print(f"✓ F32-7: Low fold variance ({metrics.fold_variance:.1%}) acceptable")
 
@@ -226,16 +193,14 @@ def test_f32_low_fold_variance_acceptable():
 # Test Suite 4: Metrics-Only Evaluation
 # ============================================================================
 
+
 def test_f32_metrics_only_no_model_required():
     """F32-8: Can evaluate overfitting from metrics alone (no model needed)."""
     detector = OverfittingDetector()
 
     # No model required
     metrics = detector.evaluate_from_metrics(
-        train_accuracy=0.88,
-        test_accuracy=0.75,
-        train_balanced_accuracy=0.87,
-        test_balanced_accuracy=0.74
+        train_accuracy=0.88, test_accuracy=0.75, train_balanced_accuracy=0.87, test_balanced_accuracy=0.74
     )
 
     assert metrics.is_overfit
@@ -257,9 +222,7 @@ def test_f32_convenience_function():
     model.fit(X_train, y_train)
 
     # Use convenience function
-    is_overfit, metrics = check_overfitting(
-        model, X_train, y_train, X_test, y_test, verbose=False
-    )
+    is_overfit, metrics = check_overfitting(model, X_train, y_train, X_test, y_test, verbose=False)
 
     assert isinstance(is_overfit, bool)
     assert isinstance(metrics, OverfittingMetrics)
@@ -272,6 +235,7 @@ def test_f32_convenience_function():
 # Test Suite 5: Report Generation
 # ============================================================================
 
+
 def test_f32_report_generation():
     """F32-10: Verify report generation works and contains key information."""
     detector = OverfittingDetector()
@@ -281,7 +245,7 @@ def test_f32_report_generation():
         test_accuracy=0.75,
         train_balanced_accuracy=0.91,
         test_balanced_accuracy=0.74,
-        fold_accuracies=[0.75, 0.78, 0.72, 0.76, 0.74]
+        fold_accuracies=[0.75, 0.78, 0.72, 0.76, 0.74],
     )
 
     report = detector.generate_report(metrics)
@@ -323,15 +287,13 @@ def test_f32_report_colors_by_severity():
 # Test Suite 6: Edge Cases
 # ============================================================================
 
+
 def test_f32_negative_gap_handled():
     """F32-12: Handle case where test > train (underfitting or good generalization)."""
     detector = OverfittingDetector()
 
     # Test accuracy higher than train (rare but possible)
-    metrics = detector.evaluate_from_metrics(
-        train_accuracy=0.75,
-        test_accuracy=0.78
-    )
+    metrics = detector.evaluate_from_metrics(train_accuracy=0.75, test_accuracy=0.78)
 
     assert not metrics.is_overfit
     assert metrics.severity == OverfitSeverity.NONE
@@ -344,10 +306,7 @@ def test_f32_zero_gap_handled():
     """F32-13: Handle perfect equality between train and test."""
     detector = OverfittingDetector()
 
-    metrics = detector.evaluate_from_metrics(
-        train_accuracy=0.80,
-        test_accuracy=0.80
-    )
+    metrics = detector.evaluate_from_metrics(train_accuracy=0.80, test_accuracy=0.80)
 
     assert not metrics.is_overfit
     assert metrics.severity == OverfitSeverity.NONE
@@ -360,10 +319,7 @@ def test_f32_extreme_overfitting():
     """F32-14: Handle extreme overfitting (100% train, 33% test)."""
     detector = OverfittingDetector()
 
-    metrics = detector.evaluate_from_metrics(
-        train_accuracy=1.00,
-        test_accuracy=0.33
-    )
+    metrics = detector.evaluate_from_metrics(train_accuracy=1.00, test_accuracy=0.33)
 
     assert metrics.is_overfit
     assert metrics.severity == OverfitSeverity.SEVERE
@@ -377,14 +333,11 @@ def test_f32_extreme_overfitting():
 # Test Suite 7: Custom Thresholds
 # ============================================================================
 
+
 def test_f32_custom_thresholds_work():
     """F32-15: Custom thresholds can be configured."""
     # Stricter thresholds
-    strict_detector = OverfittingDetector(
-        mild_threshold=0.03,
-        moderate_threshold=0.06,
-        severe_threshold=0.10
-    )
+    strict_detector = OverfittingDetector(mild_threshold=0.03, moderate_threshold=0.06, severe_threshold=0.10)
 
     metrics = strict_detector.evaluate_from_metrics(0.80, 0.76)  # 4% gap
 
@@ -403,17 +356,13 @@ def test_f32_custom_thresholds_work():
 # Test Suite 8: Integration with GradientBoostingClassifier
 # ============================================================================
 
+
 def test_f32_gradient_boosting_integration(synthetic_data):
     """F32-16: Works with GradientBoostingClassifier (used in production)."""
     X_train, X_test, y_train, y_test = synthetic_data
 
     # Train GradientBoosting (same as production)
-    model = GradientBoostingClassifier(
-        n_estimators=100,
-        max_depth=3,
-        learning_rate=0.1,
-        random_state=42
-    )
+    model = GradientBoostingClassifier(n_estimators=100, max_depth=3, learning_rate=0.1, random_state=42)
     model.fit(X_train, y_train)
 
     detector = OverfittingDetector()
@@ -437,21 +386,13 @@ def test_f32_production_model_parameters():
     # MODEL_MAX_DEPTH = 3
     # MODEL_LEARNING_RATE = 0.1
 
-    X, y = make_classification(
-        n_samples=1000, n_features=20, n_informative=15,
-        n_classes=3, random_state=42
-    )
+    X, y = make_classification(n_samples=1000, n_features=20, n_informative=15, n_classes=3, random_state=42)
 
     split = 700
     X_train, X_test = X[:split], X[split:]
     y_train, y_test = y[:split], y[split:]
 
-    model = GradientBoostingClassifier(
-        n_estimators=100,
-        max_depth=3,
-        learning_rate=0.1,
-        random_state=42
-    )
+    model = GradientBoostingClassifier(n_estimators=100, max_depth=3, learning_rate=0.1, random_state=42)
     model.fit(X_train, y_train)
 
     detector = OverfittingDetector()
@@ -466,13 +407,16 @@ def test_f32_production_model_parameters():
     if metrics.is_overfit:
         assert len(metrics.recommendations) > 0
 
-    print(f"✓ F32-17: Production parameters result in {metrics.severity.value} overfitting "
-          f"(gap={metrics.train_test_gap:.1%}, detectable={metrics.is_overfit})")
+    print(
+        f"✓ F32-17: Production parameters result in {metrics.severity.value} overfitting "
+        f"(gap={metrics.train_test_gap:.1%}, detectable={metrics.is_overfit})"
+    )
 
 
 # ============================================================================
 # Test Suite 9: Recommendations Quality
 # ============================================================================
+
 
 def test_f32_recommendations_are_actionable():
     """F32-18: Recommendations are specific and actionable."""
@@ -486,10 +430,22 @@ def test_f32_recommendations_are_actionable():
     recommendations_text = " ".join(metrics.recommendations).lower()
 
     # Should mention at least one concrete action
-    has_action = any(keyword in recommendations_text for keyword in [
-        'reduce', 'increase', 'add', 'use', 'consider', 'regularization',
-        'complexity', 'data', 'dropout', 'validation', 'ensemble'
-    ])
+    has_action = any(
+        keyword in recommendations_text
+        for keyword in [
+            "reduce",
+            "increase",
+            "add",
+            "use",
+            "consider",
+            "regularization",
+            "complexity",
+            "data",
+            "dropout",
+            "validation",
+            "ensemble",
+        ]
+    )
 
     assert has_action, "Recommendations should contain actionable advice"
 
@@ -507,9 +463,9 @@ def test_f32_warnings_explain_severity():
     warnings_text = " ".join(metrics.warnings).lower()
 
     # Should explain the issue
-    has_explanation = any(keyword in warnings_text for keyword in [
-        'overfitting', 'gap', 'train', 'test', 'severe', 'moderate', 'mild'
-    ])
+    has_explanation = any(
+        keyword in warnings_text for keyword in ["overfitting", "gap", "train", "test", "severe", "moderate", "mild"]
+    )
 
     assert has_explanation, "Warnings should explain the issue"
 
@@ -519,6 +475,7 @@ def test_f32_warnings_explain_severity():
 # ============================================================================
 # Test Suite 10: Confidence Score
 # ============================================================================
+
 
 def test_f32_confidence_score_reasonable():
     """F32-20: Confidence scores are in valid range and make sense."""

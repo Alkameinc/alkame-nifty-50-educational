@@ -39,6 +39,7 @@ class SchedulerMetrics:
     SCHED-001: Explicit tracking of operational metrics, timestamps, and error states.
     Ensures process liveness is not conflated with scheduler health.
     """
+
     consecutive_failures: int = 0
     total_cycles: int = 0
     successful_cycles: int = 0
@@ -88,9 +89,7 @@ class SchedulerCircuitBreaker:
         max_failures: int | None = None,
         degraded_failures: int | None = None,
     ):
-        self.max_failures = (
-            max_failures if max_failures is not None else SCHEDULER_CIRCUIT_BREAKER_MAX_FAILURES
-        )
+        self.max_failures = max_failures if max_failures is not None else SCHEDULER_CIRCUIT_BREAKER_MAX_FAILURES
         self.degraded_failures = (
             degraded_failures if degraded_failures is not None else SCHEDULER_CIRCUIT_BREAKER_DEGRADED_FAILURES
         )

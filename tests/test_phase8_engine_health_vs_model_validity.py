@@ -151,6 +151,7 @@ class TestModelValidityStates(unittest.TestCase):
         content = b"valid_ensemble_payload"
         model_file.write_bytes(content)
         import hashlib
+
         h = hashlib.sha256(content).hexdigest()
         meta = {
             "model_id": f"{symbol}_{horizon}_v1",
@@ -166,10 +167,12 @@ class TestModelValidityStates(unittest.TestCase):
         mock_em._ensemble_metadata_path.return_value = meta_file
 
         # Adversarial calibration data: constant confidence (zero resolution)
-        adv_df = pd.DataFrame({
-            "confidence": [0.60] * 50,
-            "correct": [1, 0] * 25,
-        })
+        adv_df = pd.DataFrame(
+            {
+                "confidence": [0.60] * 50,
+                "correct": [1, 0] * 25,
+            }
+        )
 
         res = evaluate_model_validity(
             symbol=symbol,
@@ -190,6 +193,7 @@ class TestModelValidityStates(unittest.TestCase):
         content = b"infy_payload"
         model_file.write_bytes(content)
         import hashlib
+
         h = hashlib.sha256(content).hexdigest()
 
         old_date = (datetime.now(UTC) - timedelta(days=45)).isoformat()
@@ -227,6 +231,7 @@ class TestModelValidityStates(unittest.TestCase):
         content = b"hdfc_payload"
         model_file.write_bytes(content)
         import hashlib
+
         h = hashlib.sha256(content).hexdigest()
 
         fresh_date = datetime.now(UTC).isoformat()
@@ -259,6 +264,7 @@ class TestModelValidityStates(unittest.TestCase):
         content = b"sbin_payload"
         model_file.write_bytes(content)
         import hashlib
+
         h = hashlib.sha256(content).hexdigest()
 
         fresh_date = datetime.now(UTC).isoformat()
@@ -294,6 +300,7 @@ class TestModelValidityStates(unittest.TestCase):
         content = b"itc_payload"
         model_file.write_bytes(content)
         import hashlib
+
         h = hashlib.sha256(content).hexdigest()
 
         fresh_date = datetime.now(UTC).isoformat()
@@ -329,6 +336,7 @@ class TestModelValidityStates(unittest.TestCase):
         content = b"wipro_payload"
         model_file.write_bytes(content)
         import hashlib
+
         h = hashlib.sha256(content).hexdigest()
 
         fresh_date = datetime.now(UTC).isoformat()
@@ -368,7 +376,14 @@ class TestCoreInvariantDecoupledHealthAndValidity(unittest.TestCase):
     def test_healthy_engine_does_not_permit_untrained_model(self):
         engine_health = EngineHealthResult(
             status=ENGINE_HEALTH_HEALTHY,
-            checks={"api": "HEALTHY", "data": "HEALTHY", "events": "HEALTHY", "scheduler": "HEALTHY", "storage": "HEALTHY", "model_file_availability": "HEALTHY"},
+            checks={
+                "api": "HEALTHY",
+                "data": "HEALTHY",
+                "events": "HEALTHY",
+                "scheduler": "HEALTHY",
+                "storage": "HEALTHY",
+                "model_file_availability": "HEALTHY",
+            },
             components=[],
             summary="Engine 100% operational",
             reasons=[],
@@ -388,7 +403,14 @@ class TestCoreInvariantDecoupledHealthAndValidity(unittest.TestCase):
     def test_healthy_engine_does_not_permit_calibrated_only_model(self):
         engine_health = EngineHealthResult(
             status=ENGINE_HEALTH_HEALTHY,
-            checks={"api": "HEALTHY", "data": "HEALTHY", "events": "HEALTHY", "scheduler": "HEALTHY", "storage": "HEALTHY", "model_file_availability": "HEALTHY"},
+            checks={
+                "api": "HEALTHY",
+                "data": "HEALTHY",
+                "events": "HEALTHY",
+                "scheduler": "HEALTHY",
+                "storage": "HEALTHY",
+                "model_file_availability": "HEALTHY",
+            },
             components=[],
             summary="Engine 100% operational",
             reasons=[],
@@ -407,7 +429,14 @@ class TestCoreInvariantDecoupledHealthAndValidity(unittest.TestCase):
     def test_healthy_engine_does_not_permit_stale_or_invalid_model(self):
         engine_health = EngineHealthResult(
             status=ENGINE_HEALTH_HEALTHY,
-            checks={"api": "HEALTHY", "data": "HEALTHY", "events": "HEALTHY", "scheduler": "HEALTHY", "storage": "HEALTHY", "model_file_availability": "HEALTHY"},
+            checks={
+                "api": "HEALTHY",
+                "data": "HEALTHY",
+                "events": "HEALTHY",
+                "scheduler": "HEALTHY",
+                "storage": "HEALTHY",
+                "model_file_availability": "HEALTHY",
+            },
             components=[],
             summary="Engine 100% operational",
             reasons=[],
@@ -435,7 +464,14 @@ class TestCoreInvariantDecoupledHealthAndValidity(unittest.TestCase):
     def test_failed_engine_blocks_even_live_eligible_model(self):
         engine_health = EngineHealthResult(
             status=ENGINE_HEALTH_FAILED,
-            checks={"api": "HEALTHY", "data": "FAILED", "events": "HEALTHY", "scheduler": "HEALTHY", "storage": "HEALTHY", "model_file_availability": "HEALTHY"},
+            checks={
+                "api": "HEALTHY",
+                "data": "FAILED",
+                "events": "HEALTHY",
+                "scheduler": "HEALTHY",
+                "storage": "HEALTHY",
+                "model_file_availability": "HEALTHY",
+            },
             components=[],
             summary="Data feed offline",
             reasons=["Market data provider offline."],
@@ -455,7 +491,14 @@ class TestCoreInvariantDecoupledHealthAndValidity(unittest.TestCase):
     def test_live_eligible_model_serves_when_engine_healthy(self):
         engine_health = EngineHealthResult(
             status=ENGINE_HEALTH_HEALTHY,
-            checks={"api": "HEALTHY", "data": "HEALTHY", "events": "HEALTHY", "scheduler": "HEALTHY", "storage": "HEALTHY", "model_file_availability": "HEALTHY"},
+            checks={
+                "api": "HEALTHY",
+                "data": "HEALTHY",
+                "events": "HEALTHY",
+                "scheduler": "HEALTHY",
+                "storage": "HEALTHY",
+                "model_file_availability": "HEALTHY",
+            },
             components=[],
             summary="Operational",
             reasons=[],
@@ -517,6 +560,7 @@ class TestApiHealthAndValidityEndpoints(unittest.TestCase):
     @patch("api.scheduler")
     def test_signal_endpoint_forces_hold_when_model_not_live_eligible(self, mock_scheduler):
         from predictor import MultiHorizonSignal, PredictionSignal
+
         dummy_sig = PredictionSignal(
             symbol="RELIANCE",
             timestamp=datetime.now(UTC),
@@ -548,7 +592,9 @@ class TestApiHealthAndValidityEndpoints(unittest.TestCase):
         mock_ctx = MagicMock()
         mock_ctx.market_data = pd.DataFrame({"Close": [2500.0]})
         mock_ctx.index_data = pd.DataFrame({"Close": [22000.0]})
-        mock_scheduler.get_event_context.return_value = MagicMock(macro_events=[], corporate_events=[], news_articles=[])
+        mock_scheduler.get_event_context.return_value = MagicMock(
+            macro_events=[], corporate_events=[], news_articles=[]
+        )
         mock_scheduler.build_prediction_context.return_value = mock_ctx
         mock_scheduler.run_one_cycle_for_symbol.return_value = MagicMock(signal=multi_sig)
 
@@ -572,6 +618,7 @@ class TestApiHealthAndValidityEndpoints(unittest.TestCase):
     @patch("api.scheduler")
     def test_signal_endpoint_preserves_action_when_live_eligible(self, mock_scheduler):
         from predictor import MultiHorizonSignal, PredictionSignal
+
         dummy_sig = PredictionSignal(
             symbol="RELIANCE",
             timestamp=datetime.now(UTC),
@@ -603,7 +650,9 @@ class TestApiHealthAndValidityEndpoints(unittest.TestCase):
         mock_ctx = MagicMock()
         mock_ctx.market_data = pd.DataFrame({"Close": [2500.0]})
         mock_ctx.index_data = pd.DataFrame({"Close": [22000.0]})
-        mock_scheduler.get_event_context.return_value = MagicMock(macro_events=[], corporate_events=[], news_articles=[])
+        mock_scheduler.get_event_context.return_value = MagicMock(
+            macro_events=[], corporate_events=[], news_articles=[]
+        )
         mock_scheduler.build_prediction_context.return_value = mock_ctx
         mock_scheduler.run_one_cycle_for_symbol.return_value = MagicMock(signal=multi_sig)
 

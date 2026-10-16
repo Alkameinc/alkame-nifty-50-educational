@@ -195,9 +195,7 @@ def test_f27_failure_bar_interval_mismatch():
     # All multi-day horizons should use '1d' interval
     for horizon in [HORIZON_3D, HORIZON_7D, HORIZON_30D, HORIZON_3M, HORIZON_6M, HORIZON_1Y]:
         config = HORIZON_CONFIG[horizon]
-        assert config["bar_interval"] == "1d", (
-            f"{horizon} should use '1d' interval, got '{config['bar_interval']}'"
-        )
+        assert config["bar_interval"] == "1d", f"{horizon} should use '1d' interval, got '{config['bar_interval']}'"
 
     print("✓ FAILURE case passed: All multi-day horizons correctly use '1d' interval")
 
@@ -221,21 +219,15 @@ def test_f27_integration_trading_days_counting():
 
     # Count 7 calendar days (should be 5 trading days: Mon-Fri)
     trading_days_7 = validator.count_trading_days(start_date, 7)
-    assert 4 <= trading_days_7 <= 5, (
-        f"7 calendar days from Monday should have 4-5 trading days, got {trading_days_7}"
-    )
+    assert 4 <= trading_days_7 <= 5, f"7 calendar days from Monday should have 4-5 trading days, got {trading_days_7}"
 
     # Count 30 calendar days (should be ~21-22 trading days)
     trading_days_30 = validator.count_trading_days(start_date, 30)
-    assert 19 <= trading_days_30 <= 23, (
-        f"30 calendar days should have ~21 trading days, got {trading_days_30}"
-    )
+    assert 19 <= trading_days_30 <= 23, f"30 calendar days should have ~21 trading days, got {trading_days_30}"
 
     # Count 365 calendar days (should be ~250-255 trading days)
     trading_days_365 = validator.count_trading_days(start_date, 365)
-    assert 240 <= trading_days_365 <= 260, (
-        f"365 calendar days should have ~252 trading days, got {trading_days_365}"
-    )
+    assert 240 <= trading_days_365 <= 260, f"365 calendar days should have ~252 trading days, got {trading_days_365}"
 
     print("✓ INTEGRATION passed: Trading day counts match calendar reality")
     print(f"  7 days: {trading_days_7} trading days")
@@ -257,9 +249,7 @@ def test_f27_integration_weekend_holiday_handling():
     # Fri (trading), Sat (weekend), Sun (weekend), Mon (holiday) = 1 trading day
 
     trading_days = validator.count_trading_days(start, 4)
-    assert trading_days == 1, (
-        f"Fri-Sat-Sun-RepublicDay should have 1 trading day, got {trading_days}"
-    )
+    assert trading_days == 1, f"Fri-Sat-Sun-RepublicDay should have 1 trading day, got {trading_days}"
 
     print("✓ INTEGRATION passed: Weekend and holiday correctly excluded")
 
@@ -305,12 +295,12 @@ def test_f27_integration_expected_bars_calculation():
 
     # Test various horizon labels
     test_cases = [
-        ("3D", 2, 3),       # 3 calendar days ~ 2 trading days
-        ("7D", 5, 7),       # 7 calendar days ~ 5 trading days
-        ("30D", 21, 30),    # 30 calendar days ~ 21 trading days
-        ("3M", 63, 90),     # 3 months ~ 63 trading days
-        ("6M", 126, 180),   # 6 months ~ 126 trading days
-        ("1Y", 252, 365),   # 1 year ~ 252 trading days
+        ("3D", 2, 3),  # 3 calendar days ~ 2 trading days
+        ("7D", 5, 7),  # 7 calendar days ~ 5 trading days
+        ("30D", 21, 30),  # 30 calendar days ~ 21 trading days
+        ("3M", 63, 90),  # 3 months ~ 63 trading days
+        ("6M", 126, 180),  # 6 months ~ 126 trading days
+        ("1Y", 252, 365),  # 1 year ~ 252 trading days
     ]
 
     for horizon_label, expected_bars, expected_cal_days in test_cases:
@@ -319,12 +309,10 @@ def test_f27_integration_expected_bars_calculation():
         assert cal_days is not None, f"{horizon_label} should have expected_calendar_days"
 
         # Allow some tolerance in the calculation
-        assert abs(bars - expected_bars) <= 5, (
-            f"{horizon_label}: expected ~{expected_bars} bars, calculated {bars}"
-        )
-        assert abs(cal_days - expected_cal_days) <= 30, (
-            f"{horizon_label}: expected ~{expected_cal_days} cal days, calculated {cal_days}"
-        )
+        assert abs(bars - expected_bars) <= 5, f"{horizon_label}: expected ~{expected_bars} bars, calculated {bars}"
+        assert (
+            abs(cal_days - expected_cal_days) <= 30
+        ), f"{horizon_label}: expected ~{expected_cal_days} cal days, calculated {cal_days}"
 
     print("✓ INTEGRATION passed: Expected bars calculation is reasonable")
 

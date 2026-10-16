@@ -490,9 +490,7 @@ class EnsembleManager:
                         f"for {symbol} at {ensemble_path}. Proceeding with caution."
                     )
 
-                logger.info(
-                    f"Loaded ensemble for {symbol} ({horizon}) from legacy flat path: {ensemble_path}"
-                )
+                logger.info(f"Loaded ensemble for {symbol} ({horizon}) from legacy flat path: {ensemble_path}")
                 return bundle["models"], bundle["classes"], metadata
 
             # TIER 3: Fall back to un-suffixed legacy flat path (pre-multi-horizon compatibility)
@@ -742,11 +740,15 @@ class EnsembleManager:
                 "filename_horizon": potential_horizon,
                 "compatibility_status": status,
                 "recommendation": recommendation,
-                "metadata_snippet": {
-                    "model_version": metadata.get("model_version"),
-                    "trained_at": metadata.get("trained_at"),
-                    "code_commit_sha": metadata.get("code_commit_sha"),
-                } if metadata else None,
+                "metadata_snippet": (
+                    {
+                        "model_version": metadata.get("model_version"),
+                        "trained_at": metadata.get("trained_at"),
+                        "code_commit_sha": metadata.get("code_commit_sha"),
+                    }
+                    if metadata
+                    else None
+                ),
             }
 
         return inventory

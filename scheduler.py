@@ -122,8 +122,8 @@ class Scheduler:
         self.macro_calendar = macro_calendar or MacroCalendar()
         self.news_sentiment_fetcher = news_sentiment_fetcher or NewsSentimentFetcher()
         self.circuit_breaker = circuit_breaker or SchedulerCircuitBreaker()
-        self.concurrency_coordinator = (
-            concurrency_coordinator or PredictionConcurrencyCoordinator(history_manager=self.history_manager)
+        self.concurrency_coordinator = concurrency_coordinator or PredictionConcurrencyCoordinator(
+            history_manager=self.history_manager
         )
 
         self._live_worthiness_cache: dict[tuple[str, str], LiveWorthinessSnapshot] = {}
@@ -528,7 +528,9 @@ class Scheduler:
         event_status = "EVENTS_AVAILABLE"
         if macro_events is None and corporate_events is None and news_articles is None:
             try:
-                event_context = self.get_event_context(symbol, as_of=as_of) if as_of is not None else self.get_event_context(symbol)
+                event_context = (
+                    self.get_event_context(symbol, as_of=as_of) if as_of is not None else self.get_event_context(symbol)
+                )
             except TypeError:
                 event_context = self.get_event_context(symbol)
             macro_events = event_context.macro_events
@@ -627,7 +629,11 @@ class Scheduler:
 
             bar_ts = (
                 stock_df.index[-1]
-                if (stock_df is not None and not stock_df.empty and isinstance(stock_df.index[-1], (pd.Timestamp, datetime)))
+                if (
+                    stock_df is not None
+                    and not stock_df.empty
+                    and isinstance(stock_df.index[-1], (pd.Timestamp, datetime))
+                )
                 else None
             )
 
@@ -661,6 +667,7 @@ class Scheduler:
                     "edge_check_results": context.edge_check_results,
                 }
                 import inspect
+
                 sig_params = inspect.signature(self.predictor.generate_multi_horizon_signal).parameters
                 if "as_of" in sig_params:
                     kwargs["as_of"] = context.as_of or context.timestamp
@@ -776,6 +783,7 @@ class Scheduler:
                 return 0
 
             from config import HORIZON_CONFIG
+
             trainer = ModelTrainer()
             bars = stock_df.copy()
             bars = bars[~bars.index.duplicated(keep="last")].sort_index()
@@ -956,9 +964,7 @@ class Scheduler:
             # Evaluate cycle success: at least one symbol succeeded and no circuit breaker halts
             successful_symbols = [s for s, r in cycle_results.items() if r.success]
             if not successful_symbols and cycle_results:
-                raise RuntimeError(
-                    f"All {len(cycle_results)} symbol cycle runs failed or had unavailable data."
-                )
+                raise RuntimeError(f"All {len(cycle_results)} symbol cycle runs failed or had unavailable data.")
 
             self.circuit_breaker.record_success()
             try:

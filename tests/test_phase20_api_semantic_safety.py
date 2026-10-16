@@ -77,12 +77,14 @@ def test_api_003_uncalibrated_confidence_is_null_not_raw_score(mock_empty_event_
     stock_df = _synthetic_bars()
     index_df = _synthetic_bars()
 
-    with patch("api.scheduler.data_fetcher.fetch_ohlcv", return_value=stock_df), \
-         patch("api.scheduler.data_fetcher.fetch_nifty_index", return_value=index_df), \
-         patch("api.scheduler.data_fetcher.check_staleness", return_value=False), \
-         patch("api.scheduler.get_event_context", return_value=mock_empty_event_context), \
-         patch("api.scheduler.resolve_pending_outcomes", return_value=None), \
-         patch("api.scheduler.predictor.data_fetcher.check_staleness", return_value=False):
+    with (
+        patch("api.scheduler.data_fetcher.fetch_ohlcv", return_value=stock_df),
+        patch("api.scheduler.data_fetcher.fetch_nifty_index", return_value=index_df),
+        patch("api.scheduler.data_fetcher.check_staleness", return_value=False),
+        patch("api.scheduler.get_event_context", return_value=mock_empty_event_context),
+        patch("api.scheduler.resolve_pending_outcomes", return_value=None),
+        patch("api.scheduler.predictor.data_fetcher.check_staleness", return_value=False),
+    ):
 
         response = client.get("/api/v1/signal/RELIANCE")
         assert response.status_code == 200
@@ -130,13 +132,15 @@ def test_api_003_calibration_status_correct_when_calibrated(mock_empty_event_con
     )
     cycle_res = CycleResult(success=True, status="SUCCESS", symbol="RELIANCE", signal=multi_sig)
 
-    with patch("api.scheduler.data_fetcher.fetch_ohlcv", return_value=stock_df), \
-         patch("api.scheduler.data_fetcher.fetch_nifty_index", return_value=index_df), \
-         patch("api.scheduler.data_fetcher.check_staleness", return_value=False), \
-         patch("api.scheduler.get_event_context", return_value=mock_empty_event_context), \
-         patch("api.scheduler.resolve_pending_outcomes", return_value=None), \
-         patch("api.scheduler.run_one_cycle_for_symbol", return_value=cycle_res), \
-         patch("api.evaluate_model_validity") as mock_validity:
+    with (
+        patch("api.scheduler.data_fetcher.fetch_ohlcv", return_value=stock_df),
+        patch("api.scheduler.data_fetcher.fetch_nifty_index", return_value=index_df),
+        patch("api.scheduler.data_fetcher.check_staleness", return_value=False),
+        patch("api.scheduler.get_event_context", return_value=mock_empty_event_context),
+        patch("api.scheduler.resolve_pending_outcomes", return_value=None),
+        patch("api.scheduler.run_one_cycle_for_symbol", return_value=cycle_res),
+        patch("api.evaluate_model_validity") as mock_validity,
+    ):
 
         val_res = MagicMock()
         val_res.is_live_eligible = True
@@ -159,11 +163,13 @@ def test_api_003_calibration_status_unavailable_when_not_calibrated(mock_empty_e
     stock_df = _synthetic_bars()
     index_df = _synthetic_bars()
 
-    with patch("api.scheduler.data_fetcher.fetch_ohlcv", return_value=stock_df), \
-         patch("api.scheduler.data_fetcher.fetch_nifty_index", return_value=index_df), \
-         patch("api.scheduler.data_fetcher.check_staleness", return_value=False), \
-         patch("api.scheduler.get_event_context", return_value=mock_empty_event_context), \
-         patch("api.scheduler.resolve_pending_outcomes", return_value=None):
+    with (
+        patch("api.scheduler.data_fetcher.fetch_ohlcv", return_value=stock_df),
+        patch("api.scheduler.data_fetcher.fetch_nifty_index", return_value=index_df),
+        patch("api.scheduler.data_fetcher.check_staleness", return_value=False),
+        patch("api.scheduler.get_event_context", return_value=mock_empty_event_context),
+        patch("api.scheduler.resolve_pending_outcomes", return_value=None),
+    ):
 
         response = client.get("/api/v1/signal/TCS")
         assert response.status_code == 200
@@ -179,11 +185,13 @@ def test_api_004_no_directive_trading_language_in_verdict_text(mock_empty_event_
     stock_df = _synthetic_bars()
     index_df = _synthetic_bars()
 
-    with patch("api.scheduler.data_fetcher.fetch_ohlcv", return_value=stock_df), \
-         patch("api.scheduler.data_fetcher.fetch_nifty_index", return_value=index_df), \
-         patch("api.scheduler.data_fetcher.check_staleness", return_value=False), \
-         patch("api.scheduler.get_event_context", return_value=mock_empty_event_context), \
-         patch("api.scheduler.resolve_pending_outcomes", return_value=None):
+    with (
+        patch("api.scheduler.data_fetcher.fetch_ohlcv", return_value=stock_df),
+        patch("api.scheduler.data_fetcher.fetch_nifty_index", return_value=index_df),
+        patch("api.scheduler.data_fetcher.check_staleness", return_value=False),
+        patch("api.scheduler.get_event_context", return_value=mock_empty_event_context),
+        patch("api.scheduler.resolve_pending_outcomes", return_value=None),
+    ):
 
         response = client.get("/api/v1/signal/INFY")
         assert response.status_code == 200
@@ -217,15 +225,19 @@ def test_api_004_verdict_uses_analytical_framing(mock_empty_event_context):
     stock_df = _synthetic_bars()
     index_df = _synthetic_bars()
 
-    with patch("api.scheduler.data_fetcher.fetch_ohlcv", return_value=stock_df), \
-         patch("api.scheduler.data_fetcher.fetch_nifty_index", return_value=index_df), \
-         patch("api.scheduler.data_fetcher.check_staleness", return_value=False), \
-         patch("api.scheduler.get_event_context", return_value=mock_empty_event_context), \
-         patch("api.scheduler.resolve_pending_outcomes", return_value=None):
+    with (
+        patch("api.scheduler.data_fetcher.fetch_ohlcv", return_value=stock_df),
+        patch("api.scheduler.data_fetcher.fetch_nifty_index", return_value=index_df),
+        patch("api.scheduler.data_fetcher.check_staleness", return_value=False),
+        patch("api.scheduler.get_event_context", return_value=mock_empty_event_context),
+        patch("api.scheduler.resolve_pending_outcomes", return_value=None),
+    ):
 
         response = client.get("/api/v1/signal/HDFCBANK")
         assert response.status_code == 200
         payload = response.json()
         for hor, sig in payload["signals"].items():
             v_text = sig["verdict_text"]
-            assert any(term in v_text for term in ["Model", "Holding", "neutral", "classified", "withheld", "Statistical"])
+            assert any(
+                term in v_text for term in ["Model", "Holding", "neutral", "classified", "withheld", "Statistical"]
+            )

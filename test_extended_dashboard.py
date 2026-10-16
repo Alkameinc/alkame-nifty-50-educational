@@ -6,6 +6,7 @@ from playwright.async_api import async_playwright
 ARTIFACT_DIR = r"C:\Users\user\.gemini\antigravity\brain\d24f186c-c599-4d8c-8bb6-088b44880ad4"
 DASHBOARD_URL = "http://localhost:8000/dashboard"
 
+
 async def test_extended_dashboard():
     print("Launching Playwright Chromium...")
     async with async_playwright() as p:
@@ -40,7 +41,7 @@ async def test_extended_dashboard():
         # 3. Switch to Screen 2: Deep Predictive Charts
         print("Switching to Screen 2: Deep Predictive Charts...")
         await page.locator("#tab-screen-charts").click()
-        await asyncio.sleep(2) # Let auto-updating stream step a couple ticks
+        await asyncio.sleep(2)  # Let auto-updating stream step a couple ticks
         sc2_path = os.path.join(ARTIFACT_DIR, "dashboard_night_charts.png")
         await page.screenshot(path=sc2_path, full_page=False)
         print(f"Saved: {sc2_path}")
@@ -109,6 +110,7 @@ async def test_extended_dashboard():
 
         print("All 6 screens, interactions, and night mode contrast verified successfully!")
         await browser.close()
+
 
 if __name__ == "__main__":
     asyncio.run(test_extended_dashboard())

@@ -149,4 +149,3 @@ class RiskState(Base):
     updated_at = Column(String, nullable=False)
     changed_by = Column(String, default="system")
     version = Column(Integer, nullable=False, default=1)
-

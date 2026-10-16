@@ -5,6 +5,7 @@ from playwright.sync_api import sync_playwright
 
 sys.stdout.reconfigure(encoding="utf-8")
 
+
 def verify():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -72,7 +73,9 @@ def verify():
         atr_maruti = page.inner_text("#indicator-atr-val")
         vwap_maruti = page.inner_text("#indicator-vwap-val")
         print(f"MARUTI Indicators: ATR={atr_maruti}, VWAP={vwap_maruti}")
-        assert "12,4" in vwap_maruti or "124" in vwap_maruti, f"VWAP should scale to ~12450 for MARUTI, got {vwap_maruti}"
+        assert (
+            "12,4" in vwap_maruti or "124" in vwap_maruti
+        ), f"VWAP should scale to ~12450 for MARUTI, got {vwap_maruti}"
         assert float(atr_maruti.replace("₹", "").strip()) > 150, f"ATR should be ~196 for MARUTI, got {atr_maruti}"
 
         page.screenshot(path="docs/images/maruti_continuity_chart_verified.png")
@@ -85,7 +88,9 @@ def verify():
         vwap_tatasteel = page.inner_text("#indicator-vwap-val")
         print(f"TATASTEEL Indicators: ATR={atr_tatasteel}, VWAP={vwap_tatasteel}")
         assert "15" in vwap_tatasteel, f"VWAP should scale to ~158 for TATASTEEL, got {vwap_tatasteel}"
-        assert float(atr_tatasteel.replace("₹", "").strip()) < 5.0, f"ATR should be ~2.50 for TATASTEEL, got {atr_tatasteel}"
+        assert (
+            float(atr_tatasteel.replace("₹", "").strip()) < 5.0
+        ), f"ATR should be ~2.50 for TATASTEEL, got {atr_tatasteel}"
 
         page.screenshot(path="docs/images/tatasteel_continuity_chart_verified.png")
 
@@ -96,6 +101,7 @@ def verify():
 
         browser.close()
         print("ALL VERIFICATIONS COMPLETED SUCCESSFULLY!")
+
 
 if __name__ == "__main__":
     verify()

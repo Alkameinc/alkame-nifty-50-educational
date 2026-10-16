@@ -7,8 +7,10 @@ console_warnings = []
 page_errors = []
 failed_requests = []
 
+
 def safe(s):
     return str(s).encode("ascii", "replace").decode("ascii")
+
 
 async def run_audit():
     print("=" * 70)
@@ -23,15 +25,24 @@ async def run_audit():
         page = await context.new_page()
 
         # Listeners
-        page.on("console", lambda msg: (
-            console_errors.append(f"[{msg.type}] {msg.text}") if msg.type == "error"
-            else (console_warnings.append(f"[{msg.type}] {msg.text}") if msg.type == "warning" else None)
-        ))
+        page.on(
+            "console",
+            lambda msg: (
+                console_errors.append(f"[{msg.type}] {msg.text}")
+                if msg.type == "error"
+                else (console_warnings.append(f"[{msg.type}] {msg.text}") if msg.type == "warning" else None)
+            ),
+        )
         page.on("pageerror", lambda err: page_errors.append(str(err)))
         page.on("requestfailed", lambda req: failed_requests.append(f"{req.method} {req.url}: {req.failure}"))
-        page.on("response", lambda resp: (
-            failed_requests.append(f"{resp.request.method} {resp.url}: HTTP {resp.status}") if resp.status >= 400 else None
-        ))
+        page.on(
+            "response",
+            lambda resp: (
+                failed_requests.append(f"{resp.request.method} {resp.url}: HTTP {resp.status}")
+                if resp.status >= 400
+                else None
+            ),
+        )
 
         print(f"\nNavigating to {url}...")
         await page.goto(url, wait_until="networkidle")
@@ -63,16 +74,22 @@ async def run_audit():
         cmp_text = await page.text_content("#stock-cmp")
         target_p = await page.text_content("#target-price")
         stop_p = await page.text_content("#stop-loss-price")
-        print(f"    Selected via search: {sym} | CMP: {safe(cmp_text)} | Target: {safe(target_p)} | Stop: {safe(stop_p)}")
+        print(
+            f"    Selected via search: {sym} | CMP: {safe(cmp_text)} | Target: {safe(target_p)} | Stop: {safe(stop_p)}"
+        )
         assert sym == "ICICIBANK"
         assert "1,245" in cmp_text or "1245" in cmp_text or "1,395" in cmp_text
 
         # 1.3 Dual-Boundary Gate Expander
         print("  Testing Dual-Boundary Gate Expander...")
-        details_hidden_before = await page.evaluate("document.getElementById('gate-details-content').classList.contains('hidden')")
+        details_hidden_before = await page.evaluate(
+            "document.getElementById('gate-details-content').classList.contains('hidden')"
+        )
         await page.click("div[onclick='toggleSafetyGateDetails()']")
         await page.wait_for_timeout(200)
-        details_hidden_after = await page.evaluate("document.getElementById('gate-details-content').classList.contains('hidden')")
+        details_hidden_after = await page.evaluate(
+            "document.getElementById('gate-details-content').classList.contains('hidden')"
+        )
         print(f"    Expander toggled: before={details_hidden_before}, after={details_hidden_after}")
         assert details_hidden_before != details_hidden_after, "Expander failed to toggle"
 
@@ -100,7 +117,9 @@ async def run_audit():
         # Test Cadence button
         await page.click("button[data-cadence='2']")
         await page.wait_for_timeout(200)
-        active_cadence = await page.evaluate("document.querySelector('button[data-cadence=\"2\"]').classList.contains('bg-blue-600')")
+        active_cadence = await page.evaluate(
+            "document.querySelector('button[data-cadence=\"2\"]').classList.contains('bg-blue-600')"
+        )
         assert active_cadence, "Cadence 2s was not highlighted"
         # Test Stream Pause/Resume
         await page.click("#btn-stream-toggle")
@@ -108,7 +127,7 @@ async def run_audit():
         btn_text = await page.text_content("#stream-toggle-text")
         print(f"    Stream button after toggle: {btn_text}")
         assert "Resume" in btn_text or "Pause" in btn_text
-        await page.click("#btn-stream-toggle") # resume
+        await page.click("#btn-stream-toggle")  # resume
         # Test Reset Funnel
         await page.click("button:has-text('Reset Funnel')")
         await page.wait_for_timeout(200)
@@ -191,7 +210,10 @@ async def run_audit():
         # Audited Override
         await page.select_option("#override-action-select", "BUY")
         await page.fill("#override-trader-id", "lead_quant_42")
-        await page.fill("#override-reason-input", "Statistical divergence confirmed against sector index benchmark with favorable 2.2x R:R ratio.")
+        await page.fill(
+            "#override-reason-input",
+            "Statistical divergence confirmed against sector index benchmark with favorable 2.2x R:R ratio.",
+        )
         await page.click("button[onclick='submitOverride()']")
         await page.wait_for_timeout(400)
         override_text = await page.text_content("#active-override-text")
@@ -276,10 +298,12 @@ async def run_audit():
         audio_text = await page.text_content("#audio-alert-text")
         print(f"    Audio alerts state: {audio_text}")
         assert "Alerts: OFF" in audio_text or "Alerts: ON" in audio_text
-        await page.click("#audio-alert-btn") # toggle back on
+        await page.click("#audio-alert-btn")  # toggle back on
 
         # Screenshot Cycle 1
-        shot1 = r"C:\Users\user\.gemini\antigravity\brain\d24f186c-c599-4d8c-8bb6-088b44880ad4\cycle1_audit_verified.png"
+        shot1 = (
+            r"C:\Users\user\.gemini\antigravity\brain\d24f186c-c599-4d8c-8bb6-088b44880ad4\cycle1_audit_verified.png"
+        )
         await page.screenshot(path=shot1, full_page=True)
         print(f"  Captured Cycle 1 full-page screenshot: {shot1}")
 
@@ -294,7 +318,9 @@ async def run_audit():
         target2 = await page.text_content("#target-price")
         stop2 = await page.text_content("#stop-loss-price")
         mcap2 = await page.text_content("#val-mcap")
-        print(f"    Selected Sector: AUTOMOBILE | Symbol: {sym2} | CMP: {safe(cmp2)} | Target: {safe(target2)} | Stop: {safe(stop2)}")
+        print(
+            f"    Selected Sector: AUTOMOBILE | Symbol: {sym2} | CMP: {safe(cmp2)} | Target: {safe(target2)} | Stop: {safe(stop2)}"
+        )
         assert sym2 in ["MARUTI", "BAJAJ-AUTO", "TATAMOTORS", "M&M", "HEROMOTOCO", "EICHERMOT"]
 
         # Directly load MARUTI
@@ -305,7 +331,9 @@ async def run_audit():
         stop_maruti = await page.text_content("#stop-loss-price")
         mcap_maruti = await page.text_content("#val-mcap")
         gate_maruti = await page.text_content("#gate-specific-reason")
-        print(f"    MARUTI CMP: {safe(cmp_maruti)} | Target: {safe(target_maruti)} | Stop: {safe(stop_maruti)} | Mcap: {safe(mcap_maruti)}")
+        print(
+            f"    MARUTI CMP: {safe(cmp_maruti)} | Target: {safe(target_maruti)} | Stop: {safe(stop_maruti)} | Mcap: {safe(mcap_maruti)}"
+        )
         assert "12,450" in cmp_maruti
         assert "12," in target_maruti
         assert "12," in stop_maruti
@@ -322,7 +350,9 @@ async def run_audit():
         assert float(hud_cmp_clean) >= 12000, f"Expected MARUTI CMP >= 12000, got {hud_cmp}"
 
         # Screenshot Cycle 2
-        shot2 = r"C:\Users\user\.gemini\antigravity\brain\d24f186c-c599-4d8c-8bb6-088b44880ad4\cycle2_maruti_verified.png"
+        shot2 = (
+            r"C:\Users\user\.gemini\antigravity\brain\d24f186c-c599-4d8c-8bb6-088b44880ad4\cycle2_maruti_verified.png"
+        )
         await page.screenshot(path=shot2, full_page=True)
         print(f"  Captured Cycle 2 full-page screenshot: {shot2}")
 
@@ -341,7 +371,9 @@ async def run_audit():
         stop3 = await page.text_content("#stop-loss-price")
         sec3 = await page.text_content("#stock-sector")
         gate3 = await page.text_content("#gate-specific-reason")
-        print(f"    TATASTEEL: Symbol={sym3} | CMP={safe(cmp3)} | Target={safe(target3)} | Stop={safe(stop3)} | Sector={sec3}")
+        print(
+            f"    TATASTEEL: Symbol={sym3} | CMP={safe(cmp3)} | Target={safe(target3)} | Stop={safe(stop3)} | Sector={sec3}"
+        )
         assert sym3 == "TATASTEEL"
         assert "158" in cmp3 or "175" in cmp3
         assert "TATASTEEL" in gate3
@@ -377,9 +409,12 @@ async def run_audit():
         print(f"  [FAILED REQ] {safe(r)}")
 
     if len(page_errors) == 0 and len(console_errors) == 0:
-        print("\n[SUCCESS] PERFECT AUDIT SCORE: 0 ERRORS, 0 UNCAUGHT EXCEPTIONS, ALL INTERACTIVE CONTROLS FULLY OPERATIONAL!")
+        print(
+            "\n[SUCCESS] PERFECT AUDIT SCORE: 0 ERRORS, 0 UNCAUGHT EXCEPTIONS, ALL INTERACTIVE CONTROLS FULLY OPERATIONAL!"
+        )
     else:
         print(f"\n[NOTE] Completed with {len(console_errors)} console notices.")
+
 
 if __name__ == "__main__":
     asyncio.run(run_audit())

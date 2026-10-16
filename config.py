@@ -104,10 +104,14 @@ DEFAULT_DEV_READONLY_KEY = "dev-alkame-readonly-key"
 
 if IS_PRODUCTION:
     if not API_AUTH_ENABLED:
-        raise RuntimeError("CRITICAL SECURITY ERROR (SEC-001): ALKAME_API_AUTH_ENABLED cannot be disabled in production!")
+        raise RuntimeError(
+            "CRITICAL SECURITY ERROR (SEC-001): ALKAME_API_AUTH_ENABLED cannot be disabled in production!"
+        )
     _admin_env = os.environ.get("ALKAME_ADMIN_KEY", "")
     if not _admin_env or _admin_env == DEFAULT_DEV_ADMIN_KEY:
-        raise RuntimeError("CRITICAL SECURITY ERROR (SEC-002): Production requires an explicit, non-default ALKAME_ADMIN_KEY secret!")
+        raise RuntimeError(
+            "CRITICAL SECURITY ERROR (SEC-002): Production requires an explicit, non-default ALKAME_ADMIN_KEY secret!"
+        )
     API_ADMIN_KEY = _admin_env
     API_READONLY_KEY = os.environ.get("ALKAME_READONLY_KEY", "")
 else:
@@ -140,7 +144,9 @@ CORS_ALLOWED_ORIGINS = [
 ]
 CORS_ALLOW_CREDENTIALS = True
 if CORS_ALLOW_CREDENTIALS and "*" in CORS_ALLOWED_ORIGINS:
-    raise RuntimeError("CRITICAL SECURITY ERROR (SEC-008): Wildcard '*' origin is prohibited when CORS credentials are enabled!")
+    raise RuntimeError(
+        "CRITICAL SECURITY ERROR (SEC-008): Wildcard '*' origin is prohibited when CORS credentials are enabled!"
+    )
 
 CORS_ALLOWED_METHODS = ["GET", "POST", "OPTIONS"]
 CORS_ALLOWED_HEADERS = ["Content-Type", "Authorization", "X-API-Key", "X-Correlation-ID"]

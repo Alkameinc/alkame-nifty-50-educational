@@ -593,9 +593,7 @@ class DataFetcher:
             logger.error(f"Failed daily staleness check for {ticker}: {e}")
             return True
 
-    def check_alignment(
-        self, stock_df: pd.DataFrame, index_df: pd.DataFrame, min_ratio: float = 0.95
-    ):
+    def check_alignment(self, stock_df: pd.DataFrame, index_df: pd.DataFrame, min_ratio: float = 0.95):
         """DATA-003: Check stock-to-index timestamp alignment coverage."""
         from feature_engineer import FeatureEngineer
 

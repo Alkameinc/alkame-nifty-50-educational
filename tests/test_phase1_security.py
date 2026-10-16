@@ -98,7 +98,9 @@ def test_sec_002_production_startup_fails_with_default_secret(monkeypatch):
         if os.environ.get("ENVIRONMENT") == "production":
             admin_key = os.environ.get("ALKAME_ADMIN_KEY", "")
             if not admin_key or admin_key == config.DEFAULT_DEV_ADMIN_KEY:
-                raise RuntimeError("CRITICAL SECURITY ERROR (SEC-002): Production requires an explicit, non-default ALKAME_ADMIN_KEY secret!")
+                raise RuntimeError(
+                    "CRITICAL SECURITY ERROR (SEC-002): Production requires an explicit, non-default ALKAME_ADMIN_KEY secret!"
+                )
 
 
 # ============================================================================
@@ -206,7 +208,10 @@ def test_sec_009_fail_closed_on_audit_failure(client):
             headers={"X-API-Key": "dev-alkame-admin-key"},
         )
         assert res.status_code == 500
-        assert "Audit logging failed" in res.json().get("detail", "") or "mutation aborted" in res.json().get("detail", "").lower()
+        assert (
+            "Audit logging failed" in res.json().get("detail", "")
+            or "mutation aborted" in res.json().get("detail", "").lower()
+        )
 
 
 # ============================================================================

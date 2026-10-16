@@ -66,6 +66,7 @@ class HealthRegistry:
             from sqlalchemy.orm import sessionmaker
 
             from models import Base
+
             engine_url = f"sqlite:///{db_path}" if db_path != ":memory:" else "sqlite://"
             engine = create_engine(engine_url, connect_args={"check_same_thread": False})
             Base.metadata.create_all(bind=engine)
@@ -165,7 +166,11 @@ class HealthRegistry:
                 for row in rows:
                     comp_name = str(row.component)
                     # Filter out test artifacts in production registry mode
-                    if self._db_path is None and component is None and (comp_name.startswith("test_") or comp_name.startswith("comp")):
+                    if (
+                        self._db_path is None
+                        and component is None
+                        and (comp_name.startswith("test_") or comp_name.startswith("comp"))
+                    ):
                         continue
                     statuses.append(
                         HealthStatus(
@@ -287,8 +292,7 @@ class HealthRegistry:
         # Overall Status Resolution:
         # Critical checks: api, data, storage, model_file_availability
         critical_failed = any(
-            checks.get(c) == ENGINE_HEALTH_FAILED
-            for c in ["api", "data", "storage", "model_file_availability"]
+            checks.get(c) == ENGINE_HEALTH_FAILED for c in ["api", "data", "storage", "model_file_availability"]
         )
 
         check_vals = list(checks.values())

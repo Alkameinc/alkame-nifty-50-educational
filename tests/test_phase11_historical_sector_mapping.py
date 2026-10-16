@@ -37,7 +37,11 @@ def test_sector_history_csv_integrity():
         sec = str(row["sector"]).strip()
         ind = str(row["industry"]).strip()
         eff_from = str(row["effective_from"]).strip()
-        eff_to = str(row["effective_to"]).strip() if pd.notna(row["effective_to"]) and str(row["effective_to"]).strip() else None
+        eff_to = (
+            str(row["effective_to"]).strip()
+            if pd.notna(row["effective_to"]) and str(row["effective_to"]).strip()
+            else None
+        )
 
         assert sym and sym != "nan", f"Row {idx}: missing symbol"
         assert sec and sec != "nan", f"Row {idx} ({sym}): missing sector"
@@ -66,7 +70,9 @@ def test_historical_point_in_time_sector_lookups():
     hdfc_sec_2021 = sector_map_provider.get_sector("HDFC", as_of="2021-06-01")
     assert hdfc_sec_2021 == "NBFC", f"Expected HDFC in 2021 to be NBFC, got {hdfc_sec_2021}"
     hdfc_ind_2021 = sector_map_provider.get_industry("HDFC", as_of="2021-06-01")
-    assert "Housing" in hdfc_ind_2021 or "Finance" in hdfc_ind_2021, f"Expected Housing Finance for HDFC, got {hdfc_ind_2021}"
+    assert (
+        "Housing" in hdfc_ind_2021 or "Finance" in hdfc_ind_2021
+    ), f"Expected Housing Finance for HDFC, got {hdfc_ind_2021}"
 
     # In 2024, HDFC is no longer an active constituent in sector history
     hdfc_sec_2024 = sector_map_provider.get_sector("HDFC", as_of="2024-01-01")
@@ -101,7 +107,9 @@ def test_reclassification_transitions():
     """DATA-007: Test handling of corporate restructuring and sector reclassifications."""
     # TATACONSUM: In 2020 was Beverages/Tea, in 2021+ expanded to FMCG / Consumer Staples
     ind_2020 = sector_map_provider.get_industry("TATACONSUM", as_of="2020-03-01")
-    assert "Tea" in ind_2020 or "Coffee" in ind_2020 or "Beverages" in ind_2020, f"Expected Tea/Beverages, got {ind_2020}"
+    assert (
+        "Tea" in ind_2020 or "Coffee" in ind_2020 or "Beverages" in ind_2020
+    ), f"Expected Tea/Beverages, got {ind_2020}"
 
     ind_2023 = sector_map_provider.get_industry("TATACONSUM", as_of="2023-01-01")
     assert "Staples" in ind_2023 or "Consumer" in ind_2023, f"Expected Consumer Staples, got {ind_2023}"

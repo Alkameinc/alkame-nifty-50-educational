@@ -123,9 +123,9 @@ def test_feat_001_adversarial_mutation_volume():
         mut_feat = fe.engineer_features_for_horizon(mutated_stock, index_df, horizon=HORIZON_INTRADAY)
         diff = (orig_feat.iloc[:j][ml_safe_cols] - mut_feat.iloc[:j][ml_safe_cols]).abs()
         max_diff = diff.max().max()
-        assert np.isnan(max_diff) or max_diff < 1e-7, (
-            f"FEAT-001 Violation: Volume mutation at j={j} leaked into features before j! Max diff: {max_diff}"
-        )
+        assert (
+            np.isnan(max_diff) or max_diff < 1e-7
+        ), f"FEAT-001 Violation: Volume mutation at j={j} leaked into features before j! Max diff: {max_diff}"
 
 
 def test_feat_001_adversarial_mutation_index():
@@ -143,9 +143,9 @@ def test_feat_001_adversarial_mutation_index():
         mut_feat = fe.engineer_features_for_horizon(stock_df, mutated_index, horizon=HORIZON_INTRADAY)
         diff = (orig_feat.iloc[:j][ml_safe_cols] - mut_feat.iloc[:j][ml_safe_cols]).abs()
         max_diff = diff.max().max()
-        assert np.isnan(max_diff) or max_diff < 1e-7, (
-            f"FEAT-001 Violation: Index mutation at j={j} leaked into features before j! Max diff: {max_diff}"
-        )
+        assert (
+            np.isnan(max_diff) or max_diff < 1e-7
+        ), f"FEAT-001 Violation: Index mutation at j={j} leaked into features before j! Max diff: {max_diff}"
 
 
 # ============================================================================
@@ -374,9 +374,7 @@ def test_feat_005_split_isolation_and_purge_default():
     test_start_pos = len(X) - len(X_te)
     gap = test_start_pos - train_end_pos
 
-    assert gap >= horizon_bars, (
-        f"FEAT-005 Violation: Purge gap ({gap}) is less than horizon bars ({horizon_bars})!"
-    )
+    assert gap >= horizon_bars, f"FEAT-005 Violation: Purge gap ({gap}) is less than horizon bars ({horizon_bars})!"
 
     # Validate temporal isolation helper
     is_isolated, msg = trainer.validate_split_isolation(X_tr, X_te, horizon_bars=horizon_bars)

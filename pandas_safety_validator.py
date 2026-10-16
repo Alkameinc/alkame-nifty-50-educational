@@ -44,7 +44,7 @@ class PandasSafetyIssue:
         severity: str,
         description: str,
         code_snippet: str,
-        recommendation: str
+        recommendation: str,
     ):
         self.filepath = filepath
         self.line_number = line_number
@@ -56,11 +56,9 @@ class PandasSafetyIssue:
         self.recommendation = recommendation
 
     def __repr__(self):
-        severity_color = {
-            self.SEVERITY_CRITICAL: RED,
-            self.SEVERITY_WARNING: YELLOW,
-            self.SEVERITY_INFO: BLUE
-        }.get(self.severity, RESET)
+        severity_color = {self.SEVERITY_CRITICAL: RED, self.SEVERITY_WARNING: YELLOW, self.SEVERITY_INFO: BLUE}.get(
+            self.severity, RESET
+        )
 
         return (
             f"{severity_color}{BOLD}{self.severity}{RESET} | "
@@ -99,7 +97,7 @@ class PandasSafetyValidator:
         self.issues = []
 
         try:
-            with open(filepath, encoding='utf-8') as f:
+            with open(filepath, encoding="utf-8") as f:
                 content = f.read()
                 lines = content.splitlines()
 
@@ -136,34 +134,35 @@ class PandasSafetyValidator:
         # Pattern: DataFrame-like variable_name[something][something_else] =
         # Specifically target common DataFrame variable names
         pattern = re.compile(
-            r'\b(df|dataframe|data_?frame|_df|filtered|subset|timeseries|ts_data)\s*'
-            r'\[[^\]]+\]\s*\[[^\]]+\]\s*='
+            r"\b(df|dataframe|data_?frame|_df|filtered|subset|timeseries|ts_data)\s*" r"\[[^\]]+\]\s*\[[^\]]+\]\s*="
         )
 
         for line_num, line in enumerate(lines, start=1):
             # Skip comments
-            if line.strip().startswith('#'):
+            if line.strip().startswith("#"):
                 continue
 
             match = pattern.search(line)
             if match:
-                self.issues.append(PandasSafetyIssue(
-                    filepath=str(filepath),
-                    line_number=line_num,
-                    column=match.start(),
-                    issue_type="CHAINED_ASSIGNMENT",
-                    severity=PandasSafetyIssue.SEVERITY_CRITICAL,
-                    description=(
-                        "Chained assignment df[x][y] = value can fail silently. "
-                        "The first bracket may return a view or copy unpredictably, "
-                        "causing SettingWithCopyWarning or silent data loss."
-                    ),
-                    code_snippet=line.strip(),
-                    recommendation=(
-                        "Use df.loc[x, y] = value or df.at[x, y] = value for single values. "
-                        "For bulk assignment: temp = df.copy(); temp[col] = values; df = temp"
+                self.issues.append(
+                    PandasSafetyIssue(
+                        filepath=str(filepath),
+                        line_number=line_num,
+                        column=match.start(),
+                        issue_type="CHAINED_ASSIGNMENT",
+                        severity=PandasSafetyIssue.SEVERITY_CRITICAL,
+                        description=(
+                            "Chained assignment df[x][y] = value can fail silently. "
+                            "The first bracket may return a view or copy unpredictably, "
+                            "causing SettingWithCopyWarning or silent data loss."
+                        ),
+                        code_snippet=line.strip(),
+                        recommendation=(
+                            "Use df.loc[x, y] = value or df.at[x, y] = value for single values. "
+                            "For bulk assignment: temp = df.copy(); temp[col] = values; df = temp"
+                        ),
                     )
-                ))
+                )
 
     def _check_inplace_usage(self, filepath: Path, lines: list[str]):
         """
@@ -175,30 +174,32 @@ class PandasSafetyValidator:
         3. It makes code harder to debug
         4. It can be confusing with views vs copies
         """
-        pattern = re.compile(r'\binplace\s*=\s*True\b')
+        pattern = re.compile(r"\binplace\s*=\s*True\b")
 
         for line_num, line in enumerate(lines, start=1):
-            if line.strip().startswith('#'):
+            if line.strip().startswith("#"):
                 continue
 
             match = pattern.search(line)
             if match:
-                self.issues.append(PandasSafetyIssue(
-                    filepath=str(filepath),
-                    line_number=line_num,
-                    column=match.start(),
-                    issue_type="INPLACE_TRUE",
-                    severity=PandasSafetyIssue.SEVERITY_WARNING,
-                    description=(
-                        "inplace=True is discouraged in modern pandas. "
-                        "It's often not faster and prevents method chaining."
-                    ),
-                    code_snippet=line.strip(),
-                    recommendation=(
-                        "Replace 'df.drop(columns=cols, inplace=True)' with "
-                        "'df = df.drop(columns=cols)'. More explicit and chainable."
+                self.issues.append(
+                    PandasSafetyIssue(
+                        filepath=str(filepath),
+                        line_number=line_num,
+                        column=match.start(),
+                        issue_type="INPLACE_TRUE",
+                        severity=PandasSafetyIssue.SEVERITY_WARNING,
+                        description=(
+                            "inplace=True is discouraged in modern pandas. "
+                            "It's often not faster and prevents method chaining."
+                        ),
+                        code_snippet=line.strip(),
+                        recommendation=(
+                            "Replace 'df.drop(columns=cols, inplace=True)' with "
+                            "'df = df.drop(columns=cols)'. More explicit and chainable."
+                        ),
                     )
-                ))
+                )
 
     def _check_chained_assignment_ast(self, filepath: Path, tree: ast.AST, lines: list[str]):
         """
@@ -208,6 +209,7 @@ class PandasSafetyValidator:
         Focuses on DataFrame-like variable names to avoid false positives
         on dictionary chained assignments (which are safe).
         """
+
         class ChainedAssignmentVisitor(ast.NodeVisitor):
             def __init__(self, validator, filepath, lines):
                 self.validator = validator
@@ -215,8 +217,16 @@ class PandasSafetyValidator:
                 self.lines = lines
                 # Common DataFrame variable name patterns
                 self.dataframe_names = {
-                    'df', 'dataframe', 'data_frame', '_df', 'filtered',
-                    'subset', 'timeseries', 'ts_data', 'stock_df', 'index_df'
+                    "df",
+                    "dataframe",
+                    "data_frame",
+                    "_df",
+                    "filtered",
+                    "subset",
+                    "timeseries",
+                    "ts_data",
+                    "stock_df",
+                    "index_df",
                 }
 
             def visit_Assign(self, node):
@@ -230,22 +240,24 @@ class PandasSafetyValidator:
                                 line_num = node.lineno
                                 code_snippet = self.lines[line_num - 1].strip() if line_num <= len(self.lines) else ""
 
-                                self.validator.issues.append(PandasSafetyIssue(
-                                    filepath=str(self.filepath),
-                                    line_number=line_num,
-                                    column=node.col_offset,
-                                    issue_type="CHAINED_SUBSCRIPT_ASSIGNMENT",
-                                    severity=PandasSafetyIssue.SEVERITY_CRITICAL,
-                                    description=(
-                                        "Chained subscript assignment detected on DataFrame-like variable. "
-                                        "This is unsafe and may not work as expected."
-                                    ),
-                                    code_snippet=code_snippet,
-                                    recommendation=(
-                                        "Use .loc[] or .at[] for proper indexing. "
-                                        "Example: df.loc[row_indexer, col_indexer] = value"
+                                self.validator.issues.append(
+                                    PandasSafetyIssue(
+                                        filepath=str(self.filepath),
+                                        line_number=line_num,
+                                        column=node.col_offset,
+                                        issue_type="CHAINED_SUBSCRIPT_ASSIGNMENT",
+                                        severity=PandasSafetyIssue.SEVERITY_CRITICAL,
+                                        description=(
+                                            "Chained subscript assignment detected on DataFrame-like variable. "
+                                            "This is unsafe and may not work as expected."
+                                        ),
+                                        code_snippet=code_snippet,
+                                        recommendation=(
+                                            "Use .loc[] or .at[] for proper indexing. "
+                                            "Example: df.loc[row_indexer, col_indexer] = value"
+                                        ),
                                     )
-                                ))
+                                )
 
                 self.generic_visit(node)
 
@@ -255,21 +267,17 @@ class PandasSafetyValidator:
                     name_lower = node.id.lower()
                     # Check exact matches or contains common DataFrame patterns
                     return (
-                        name_lower in self.dataframe_names or
-                        'df' in name_lower or
-                        'dataframe' in name_lower or
-                        'timeseries' in name_lower
+                        name_lower in self.dataframe_names
+                        or "df" in name_lower
+                        or "dataframe" in name_lower
+                        or "timeseries" in name_lower
                     )
                 return False
 
         visitor = ChainedAssignmentVisitor(self, filepath, lines)
         visitor.visit(tree)
 
-    def validate_directory(
-        self,
-        directory: Path,
-        exclude_patterns: list[str] | None = None
-    ) -> list[PandasSafetyIssue]:
+    def validate_directory(self, directory: Path, exclude_patterns: list[str] | None = None) -> list[PandasSafetyIssue]:
         """
         Validate all Python files in a directory.
 
@@ -281,17 +289,11 @@ class PandasSafetyValidator:
             Aggregated list of all issues found
         """
         if exclude_patterns is None:
-            exclude_patterns = [
-                '**/test_*.py',
-                '**/.venv/**',
-                '**/venv/**',
-                '**/__pycache__/**',
-                '**/site-packages/**'
-            ]
+            exclude_patterns = ["**/test_*.py", "**/.venv/**", "**/venv/**", "**/__pycache__/**", "**/site-packages/**"]
 
         all_issues = []
 
-        for py_file in directory.rglob('*.py'):
+        for py_file in directory.rglob("*.py"):
             # Check if file matches any exclude pattern
             excluded = any(py_file.match(pattern) for pattern in exclude_patterns)
             if excluded:
@@ -315,11 +317,7 @@ class PandasSafetyValidator:
         if not issues:
             return f"{GREEN}{BOLD}✓ NO PANDAS SAFETY ISSUES FOUND{RESET}\n"
 
-        report_lines = [
-            f"\n{'=' * 80}",
-            f"{BOLD}PANDAS SAFETY VALIDATION REPORT{RESET}",
-            f"{'=' * 80}\n"
-        ]
+        report_lines = [f"\n{'=' * 80}", f"{BOLD}PANDAS SAFETY VALIDATION REPORT{RESET}", f"{'=' * 80}\n"]
 
         # Group by severity
         critical = [i for i in issues if i.severity == PandasSafetyIssue.SEVERITY_CRITICAL]
@@ -370,27 +368,27 @@ def verify_pandas_copy_semantics():
     checks_passed = []
 
     # Check 1: .copy() creates independent DataFrame
-    df_original = pd.DataFrame({'A': [1, 2, 3], 'B': [4, 5, 6]})
+    df_original = pd.DataFrame({"A": [1, 2, 3], "B": [4, 5, 6]})
     df_copy = df_original.copy()
-    df_copy.loc[0, 'A'] = 999
+    df_copy.loc[0, "A"] = 999
 
-    check1 = df_original.loc[0, 'A'] == 1  # Original should be unchanged
+    check1 = df_original.loc[0, "A"] == 1  # Original should be unchanged
     checks_passed.append(("Copy independence", check1))
 
     # Check 2: Assignment without .copy() for filtering
-    df_base = pd.DataFrame({'X': [1, 2, 3, 4, 5], 'Y': [10, 20, 30, 40, 50]})
-    df_filtered = df_base[df_base['X'] > 2].copy()  # Proper way
-    df_filtered.loc[:, 'Y'] = 999
+    df_base = pd.DataFrame({"X": [1, 2, 3, 4, 5], "Y": [10, 20, 30, 40, 50]})
+    df_filtered = df_base[df_base["X"] > 2].copy()  # Proper way
+    df_filtered.loc[:, "Y"] = 999
 
     # Original should be unchanged
-    check2 = df_base['Y'].tolist() == [10, 20, 30, 40, 50]
+    check2 = df_base["Y"].tolist() == [10, 20, 30, 40, 50]
     checks_passed.append(("Filtered copy independence", check2))
 
     # Check 3: .drop() returns new DataFrame (doesn't modify original)
-    df_test = pd.DataFrame({'A': [1, 2], 'B': [3, 4], 'C': [5, 6]})
-    df_dropped = df_test.drop(columns=['C'])
+    df_test = pd.DataFrame({"A": [1, 2], "B": [3, 4], "C": [5, 6]})
+    df_dropped = df_test.drop(columns=["C"])
 
-    check3 = 'C' in df_test.columns and 'C' not in df_dropped.columns
+    check3 = "C" in df_test.columns and "C" not in df_dropped.columns
     checks_passed.append((".drop() returns new DataFrame", check3))
 
     all_passed = all(passed for _, passed in checks_passed)
@@ -432,13 +430,13 @@ def main():
     issues = validator.validate_directory(
         project_root,
         exclude_patterns=[
-            '**/test_*.py',
-            '**/.venv/**',
-            '**/venv/**',
-            '**/site-packages/**',
-            '**/__pycache__/**',
-            '**/pandas_safety_validator.py',  # Don't check self
-        ]
+            "**/test_*.py",
+            "**/.venv/**",
+            "**/venv/**",
+            "**/site-packages/**",
+            "**/__pycache__/**",
+            "**/pandas_safety_validator.py",  # Don't check self
+        ],
     )
 
     # Generate report
@@ -461,4 +459,5 @@ def main():
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

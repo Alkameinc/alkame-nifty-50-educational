@@ -1,11 +1,11 @@
 import re
 
-content = open('alkame_dashboard.html', encoding='utf-8').read()
+content = open("alkame_dashboard.html", encoding="utf-8").read()
 handlers = re.findall(r'on[a-z]+\s*=\s*["\']([^"\']+)["\']', content)
 print(f"Total inline event handlers found: {len(handlers)}")
 funcs = set()
 for h in handlers:
-    m = re.match(r'([a-zA-Z0-9_]+)\s*\(', h.strip())
+    m = re.match(r"([a-zA-Z0-9_]+)\s*\(", h.strip())
     if m:
         funcs.add(m.group(1))
 

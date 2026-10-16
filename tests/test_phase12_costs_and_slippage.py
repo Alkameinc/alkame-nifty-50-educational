@@ -89,9 +89,7 @@ def _build_synthetic_intraday_ohlcv(
             rows.append([open_p, high_p, low_p, close_p, vol])
             timestamps.append(ts)
             recent_closes.append(close_p)
-    return pd.DataFrame(
-        rows, columns=["Open", "High", "Low", "Close", "Volume"], index=pd.DatetimeIndex(timestamps)
-    )
+    return pd.DataFrame(rows, columns=["Open", "High", "Low", "Close", "Volume"], index=pd.DatetimeIndex(timestamps))
 
 
 # ---------------------------------------------------------------------------
@@ -353,7 +351,13 @@ def test_gross_profitable_net_negative_rejected_from_live():
     if result.net_cumulative_return_pct <= 0.0:
         assert result.is_live_worthy is False, "Gross-only or negative net strategy must have is_live_worthy=False"
         assert result.is_viable_after_friction is False
-        assert any("net" in reason.lower() or "cost" in reason.lower() or "friction" in reason.lower() or "edge" in reason.lower() for reason in result.gate_reasons)
+        assert any(
+            "net" in reason.lower()
+            or "cost" in reason.lower()
+            or "friction" in reason.lower()
+            or "edge" in reason.lower()
+            for reason in result.gate_reasons
+        )
 
 
 def test_backtester_populates_stress_scenarios_and_breakdown():

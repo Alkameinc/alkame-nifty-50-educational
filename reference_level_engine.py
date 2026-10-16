@@ -27,11 +27,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 class ReferenceLevelError(Exception):
     """Base exception for ReferenceLevelEngine."""
+
     pass
 
 
 class InsufficientDataError(ReferenceLevelError):
     """Raised when data has insufficient bars or missing price series."""
+
     pass
 
 
@@ -44,6 +46,7 @@ class ReferenceLevels:
     REF-001: Absolute reference levels.
     When status is UNAVAILABLE, band values must be None rather than manufactured fallbacks.
     """
+
     symbol: str
     as_of: datetime
     current_price: float

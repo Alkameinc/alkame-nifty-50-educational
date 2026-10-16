@@ -195,4 +195,3 @@ class StressTestResponse(BaseModel):
     var_99_pct: float
     risk_regime: str
     factor_sensitivities: dict[str, float]
-

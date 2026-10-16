@@ -6,6 +6,7 @@ from playwright.async_api import async_playwright
 ARTIFACT_DIR = r"C:\Users\user\.gemini\antigravity\brain\d24f186c-c599-4d8c-8bb6-088b44880ad4"
 DASHBOARD_URL = "http://localhost:8000/dashboard"
 
+
 async def test_dashboard():
     print("Launching Playwright Chromium...")
     async with async_playwright() as p:
@@ -76,7 +77,9 @@ async def test_dashboard():
         print(f"Saved telemetry modal screenshot: {telemetry_path}")
 
         # Close Telemetry modal
-        close_telemetry = page.locator("#modal-health button:has-text('Close'), #modal-health button:has-text('×')").first
+        close_telemetry = page.locator(
+            "#modal-health button:has-text('Close'), #modal-health button:has-text('×')"
+        ).first
         if await close_telemetry.count() > 0:
             await close_telemetry.click()
             await asyncio.sleep(0.5)
@@ -100,7 +103,9 @@ async def test_dashboard():
         print("Adding analyst note...")
         note_textarea = page.locator("#analyst-note-input").first
         if await note_textarea.count() > 0:
-            await note_textarea.fill("Automated Playwright verification test note: Quant parameters verified with point-in-time calibration.")
+            await note_textarea.fill(
+                "Automated Playwright verification test note: Quant parameters verified with point-in-time calibration."
+            )
             save_note_btn = page.locator("button:has-text('Save Note')").first
             await save_note_btn.click()
             await asyncio.sleep(1)
@@ -117,6 +122,7 @@ async def test_dashboard():
 
         print("All Playwright interactive dashboard checks completed successfully!")
         await browser.close()
+
 
 if __name__ == "__main__":
     asyncio.run(test_dashboard())

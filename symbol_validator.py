@@ -93,9 +93,7 @@ class SymbolValidator:
         """
         if not symbol or not isinstance(symbol, str):
             if raise_error:
-                raise SymbolValidationError(
-                    f"Invalid symbol type: expected string, got {type(symbol).__name__}"
-                )
+                raise SymbolValidationError(f"Invalid symbol type: expected string, got {type(symbol).__name__}")
             return False
 
         symbol_upper = symbol.strip().upper()
@@ -219,9 +217,7 @@ class SymbolValidator:
                     try:
                         self.validate(symbol, raise_error=True)
                     except SymbolValidationError as e:
-                        logger.error(
-                            f"Symbol validation failed in {func.__name__}('{symbol}'): {e}"
-                        )
+                        logger.error(f"Symbol validation failed in {func.__name__}('{symbol}'): {e}")
                         raise
 
                 # Call original function

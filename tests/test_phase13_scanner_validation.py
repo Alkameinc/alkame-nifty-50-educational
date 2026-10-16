@@ -301,9 +301,7 @@ def test_friction_failure_gate():
     for t in range(10):
         period_ts = base_ts + pd.Timedelta(f"{t}h")
         periods.append(
-            _build_mock_scan_period(
-                period_ts, symbols, hit_prob=0.85, avg_gain=0.05, avg_loss=0.01, seed=200 + t
-            )
+            _build_mock_scan_period(period_ts, symbols, hit_prob=0.85, avg_gain=0.05, avg_loss=0.01, seed=200 + t)
         )
 
     report = validator.evaluate_scan_history(periods, top_n=3)
@@ -334,7 +332,9 @@ def test_regime_sensitivity_evaluation():
     # 3. HIGH_VOLATILITY
     for t in range(8, 12):
         period_ts = base_ts + pd.Timedelta(f"{t}h")
-        periods.append(_build_mock_scan_period(period_ts, symbols, hit_prob=0.50, regime="HIGH_VOLATILITY", seed=300 + t))
+        periods.append(
+            _build_mock_scan_period(period_ts, symbols, hit_prob=0.50, regime="HIGH_VOLATILITY", seed=300 + t)
+        )
 
     report = validator.evaluate_scan_history(periods, top_n=3)
 

@@ -210,9 +210,7 @@ class UniverseProvider:
             return [rec for rec in self._membership_history if rec.symbol == sym_upper]
         return list(self._membership_history)
 
-    def get_membership_changes(
-        self, start_date: Any = None, end_date: Any = None
-    ) -> list[dict[str, Any]]:
+    def get_membership_changes(self, start_date: Any = None, end_date: Any = None) -> list[dict[str, Any]]:
         """
         Return chronological changelog of reconstitution events (additions and exclusions).
         """
@@ -317,4 +315,3 @@ if __name__ == "__main__":
     assert provider.is_member("SHRIRAMFIN", "2024-06-01") is True
 
     print("STATUS: PASS")
-

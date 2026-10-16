@@ -172,11 +172,13 @@ def test_event_source_partial_propagates_to_api():
         errors=["Feed latency elevated"],
     )
 
-    with patch("api.scheduler.get_event_context", return_value=mock_event_ctx), \
-         patch("api.scheduler.data_fetcher.fetch_ohlcv", return_value=stock_df), \
-         patch("api.scheduler.data_fetcher.fetch_nifty_index", return_value=index_df), \
-         patch("api.scheduler.data_fetcher.check_staleness", return_value=False), \
-         patch("api.scheduler.predictor.data_fetcher.check_staleness", return_value=False):
+    with (
+        patch("api.scheduler.get_event_context", return_value=mock_event_ctx),
+        patch("api.scheduler.data_fetcher.fetch_ohlcv", return_value=stock_df),
+        patch("api.scheduler.data_fetcher.fetch_nifty_index", return_value=index_df),
+        patch("api.scheduler.data_fetcher.check_staleness", return_value=False),
+        patch("api.scheduler.predictor.data_fetcher.check_staleness", return_value=False),
+    ):
 
         response = client.get("/api/v1/signal/TCS")
         assert response.status_code == 200

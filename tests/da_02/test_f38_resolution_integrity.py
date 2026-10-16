@@ -62,11 +62,7 @@ def test_f38_resolved_prediction_is_not_returned_as_unresolved():
         only_unresolved=False,
     )
 
-    record = next(
-        record
-        for record in all_records
-        if record.id == prediction_id
-    )
+    record = next(record for record in all_records if record.id == prediction_id)
 
     assert record.outcome_resolved is True
     assert record.outcome_actual_class == "UP"

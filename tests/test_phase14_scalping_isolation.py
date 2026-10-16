@@ -54,13 +54,15 @@ def _generate_synthetic_1m_ohlcv(n_bars: int = 300, seed: int = 42, drift: float
         open_ = price
         volume = int(rng.uniform(500, 3000))
 
-        records.append({
-            "Open": open_,
-            "High": high,
-            "Low": low,
-            "Close": close,
-            "Volume": volume,
-        })
+        records.append(
+            {
+                "Open": open_,
+                "High": high,
+                "Low": low,
+                "Close": close,
+                "Volume": volume,
+            }
+        )
         price = close
 
     return pd.DataFrame(records, index=timestamps)
@@ -139,14 +141,16 @@ def test_scalping_model_isolation():
     model = ScalpModel(random_state=42)
     assert not model.is_trained
 
-    dummy_X = pd.DataFrame({
-        "micro_spread_bps": [1.0],
-        "tick_volatility_pct": [0.1],
-        "order_imbalance_proxy": [0.0],
-        "micro_momentum_1b": [0.0],
-        "micro_momentum_2b": [0.0],
-        "volume_surge": [1.0],
-    })
+    dummy_X = pd.DataFrame(
+        {
+            "micro_spread_bps": [1.0],
+            "tick_volatility_pct": [0.1],
+            "order_imbalance_proxy": [0.0],
+            "micro_momentum_1b": [0.0],
+            "micro_momentum_2b": [0.0],
+            "volume_surge": [1.0],
+        }
+    )
     with pytest.raises(RuntimeError):
         model.predict(dummy_X)
 
@@ -227,7 +231,7 @@ def test_scalping_calibration_independent():
     np.random.seed(42)
     n = 100
     confs = np.linspace(0.5, 0.9, n)
-    hits = (np.random.rand(n) < confs)
+    hits = np.random.rand(n) < confs
 
     cal_res = validator.evaluate_calibration(confs, hits, n_bins=5)
     assert cal_res.status == "SUFFICIENT"
@@ -260,7 +264,9 @@ def test_scalping_edge_validation_vs_zero_drift():
     conf_s = pd.Series(confs, index=df.index)
 
     edge_res = validator.simulate_scalp_backtest(
-        df, pred_s, conf_s,
+        df,
+        pred_s,
+        conf_s,
         latency_cfg=ScalpLatencyConfig(50.0),
         cost_scenario=SCALPING_COST_SCENARIOS["SCALP_BASE"],
         horizon_bars=2,

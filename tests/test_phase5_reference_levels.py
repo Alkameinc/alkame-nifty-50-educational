@@ -21,7 +21,9 @@ from reference_level_engine import (
 )
 
 
-def _build_test_price_df(n_bars: int = 150, base_price: float = 1000.0, trend: float = 0.5, seed: int = 42) -> pd.DataFrame:
+def _build_test_price_df(
+    n_bars: int = 150, base_price: float = 1000.0, trend: float = 0.5, seed: int = 42
+) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     dates = pd.date_range("2026-01-01 09:15", periods=n_bars, freq="5min", tz="UTC")
     closes = [base_price]
@@ -114,7 +116,9 @@ def test_ref_002_structured_logging_on_insufficient_data(caplog):
     # Verify structured logging occurred
     assert any("REF-002" in record.message for record in caplog.records)
     # Check that exception_type or InsufficientDataError is mentioned
-    assert any("InsufficientDataError" in record.message or hasattr(record, "exception_type") for record in caplog.records)
+    assert any(
+        "InsufficientDataError" in record.message or hasattr(record, "exception_type") for record in caplog.records
+    )
 
 
 def test_ref_002_corrupted_data_types_handled_gracefully():

@@ -63,11 +63,7 @@ def test_f52_unresolved_records_are_preserved():
         only_unresolved=True,
     )
 
-    record = next(
-        record
-        for record in records
-        if record.id == prediction_id
-    )
+    record = next(record for record in records if record.id == prediction_id)
 
     assert record.outcome_resolved is False
     assert record.entry_price == 100.0

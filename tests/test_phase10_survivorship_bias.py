@@ -51,9 +51,7 @@ def _build_synthetic_intraday_ohlcv(
             rows.append([open_p, high_p, low_p, close_p, vol])
             timestamps.append(ts)
             recent_closes.append(close_p)
-    return pd.DataFrame(
-        rows, columns=["Open", "High", "Low", "Close", "Volume"], index=pd.DatetimeIndex(timestamps)
-    )
+    return pd.DataFrame(rows, columns=["Open", "High", "Low", "Close", "Volume"], index=pd.DatetimeIndex(timestamps))
 
 
 # ---------------------------------------------------------------------------
@@ -221,9 +219,9 @@ class TestPhase10SurvivorshipBias:
         assert res_bias_free.success is True, f"Bias-free run failed: {res_bias_free.error}"
         assert res_bias_free.enforce_universe is True
         assert res_bias_free.n_universe_excluded_bars > 0
-        assert res_bias_free.n_trades_taken == 0, (
-            "Expected 0 trades taken because TATACONSUM was not in NIFTY 50 during 2020"
-        )
+        assert (
+            res_bias_free.n_trades_taken == 0
+        ), "Expected 0 trades taken because TATACONSUM was not in NIFTY 50 during 2020"
         assert res_bias_free.strategy_cumulative_return_pct == 0.0
 
     def test_replay_point_in_time_signal_universe_gate(self):
@@ -234,7 +232,9 @@ class TestPhase10SurvivorshipBias:
         index_df.index = stock_df.index
 
         # Train model so predictor can generate signal
-        backtester.ensemble_manager.train_ensemble_for_symbol("TATACONSUM", stock_df, index_df, horizon=HORIZON_INTRADAY)
+        backtester.ensemble_manager.train_ensemble_for_symbol(
+            "TATACONSUM", stock_df, index_df, horizon=HORIZON_INTRADAY
+        )
 
         ts = stock_df.index[-1]
 
@@ -257,7 +257,9 @@ class TestPhase10SurvivorshipBias:
 
         assert sig_constrained.action == "HOLD"
         assert sig_constrained.suppressed is True
-        all_reasons = (getattr(sig_constrained, "suppression_reasons", []) or []) + (getattr(sig_constrained, "reasoning", []) or [])
+        all_reasons = (getattr(sig_constrained, "suppression_reasons", []) or []) + (
+            getattr(sig_constrained, "reasoning", []) or []
+        )
         assert any("SURVIVORSHIP_BIAS_GATE" in reason for reason in all_reasons)
 
     def test_multi_asset_universe_backtest_quantifies_survivorship_bias(self):

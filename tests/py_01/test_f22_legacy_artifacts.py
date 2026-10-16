@@ -147,16 +147,13 @@ def test_f22_boundary_legacy_unsuffixed_model_with_metadata(
 
     # Check for appropriate warning
     assert any(
-        "LEGACY" in record.message and "unsuffixed" in record.message.lower()
-        for record in caplog.records
+        "LEGACY" in record.message and "unsuffixed" in record.message.lower() for record in caplog.records
     ), "Should warn about legacy unsuffixed artifact"
 
     print(f"✓ BOUNDARY case passed: {legacy_artifact.name} loaded with legacy warning")
 
 
-def test_f22_boundary_legacy_unsuffixed_without_metadata(
-    temp_models_dir, mock_ensemble_bundle, caplog
-):
+def test_f22_boundary_legacy_unsuffixed_without_metadata(temp_models_dir, mock_ensemble_bundle, caplog):
     """
     BOUNDARY: Legacy unsuffixed model WITHOUT horizon metadata loads with provenance warning.
 
@@ -187,8 +184,7 @@ def test_f22_boundary_legacy_unsuffixed_without_metadata(
 
     # Check for provenance warning
     assert any(
-        "PROVENANCE UNKNOWN" in record.message
-        for record in caplog.records
+        "PROVENANCE UNKNOWN" in record.message for record in caplog.records
     ), "Should warn about unknown provenance"
 
     print(f"✓ BOUNDARY case passed: {legacy_artifact.name} loaded with provenance warning")
@@ -228,8 +224,7 @@ def test_f22_boundary_horizon_mismatch(temp_models_dir, mock_ensemble_bundle, ca
 
     # Check for compatibility warning
     assert any(
-        "COMPATIBILITY WARNING" in record.message and metadata_horizon in record.message
-        for record in caplog.records
+        "COMPATIBILITY WARNING" in record.message and metadata_horizon in record.message for record in caplog.records
     ), "Should warn about horizon mismatch"
 
     print(f"✓ BOUNDARY case passed: Horizon mismatch ({requested_horizon} vs {metadata_horizon}) detected")
@@ -415,8 +410,7 @@ def test_f22_cache_boundary_legacy_unsuffixed(temp_cache_dir, caplog):
 
     # Check for compatibility warning
     assert any(
-        "LEGACY CACHE COMPATIBILITY" in record.message
-        for record in caplog.records
+        "LEGACY CACHE COMPATIBILITY" in record.message for record in caplog.records
     ), "Should warn about legacy unsuffixed cache"
 
     print(f"✓ BOUNDARY cache case passed: {legacy_cache.name} loaded with legacy warning")

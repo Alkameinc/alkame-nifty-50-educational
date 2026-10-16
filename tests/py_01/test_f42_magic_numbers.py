@@ -63,6 +63,7 @@ from magic_numbers_config import (
 # Test Suite 1: Time Constants
 # ============================================================================
 
+
 def test_f42_time_conversion_constants():
     """F42-1: Time conversion constants are correct."""
     assert MINUTES_PER_HOUR == 60
@@ -86,6 +87,7 @@ def test_f42_trading_days_constants():
 # Test Suite 2: Technical Indicator Constants
 # ============================================================================
 
+
 def test_f42_rsi_neutral_value():
     """F42-3: RSI neutral value is 50 (middle of 0-100 range)."""
     assert RSI_NEUTRAL_VALUE == 50.0
@@ -103,6 +105,7 @@ def test_f42_default_ma_period():
 # ============================================================================
 # Test Suite 3: Lookback Period Constants
 # ============================================================================
+
 
 def test_f42_lookback_periods_defined():
     """F42-5: All horizon lookback periods are defined."""
@@ -142,6 +145,7 @@ def test_f42_horizon_lookback_map():
 # ============================================================================
 # Test Suite 4: Support/Resistance Constants
 # ============================================================================
+
 
 def test_f42_quantiles_valid_range():
     """F42-8: All quantiles are in valid [0, 1] range."""
@@ -184,6 +188,7 @@ def test_f42_resistance_band_thresholds():
 # Test Suite 5: Test/Validation Constants
 # ============================================================================
 
+
 def test_f42_mutation_test_constants():
     """F42-11: Mutation test constants are defined."""
     assert MUTATION_TEST_PRICE_DELTA == 500.0
@@ -212,6 +217,7 @@ def test_f42_synthetic_data_constants():
 # ============================================================================
 # Test Suite 6: Utility Functions
 # ============================================================================
+
 
 def test_f42_get_horizon_lookback_function():
     """F42-13: get_horizon_lookback() returns correct values."""
@@ -273,6 +279,7 @@ def test_f42_validate_quantile_error_handling():
 # Test Suite 7: Integration with feature_engineer.py
 # ============================================================================
 
+
 def test_f42_feature_engineer_imports_constants():
     """F42-18: feature_engineer.py imports magic_numbers_config."""
     feature_engineer_path = Path(__file__).parent.parent.parent / "feature_engineer.py"
@@ -303,16 +310,15 @@ def test_f42_no_hardcoded_rsi_neutral():
 
     # Check for hardcoded 50.0 in RSI context (excluding imports and comments)
     for i, line in enumerate(lines, 1):
-        if line.strip().startswith('#'):
+        if line.strip().startswith("#"):
             continue
-        if 'import' in line.lower():
+        if "import" in line.lower():
             continue
 
         # Look for patterns like ", 50.0)" in RSI context
-        if '50.0' in line and 'rsi' in line.lower():
+        if "50.0" in line and "rsi" in line.lower():
             # Should use RSI_NEUTRAL_VALUE instead
-            assert 'RSI_NEUTRAL_VALUE' in line, \
-                f"Line {i} has hardcoded 50.0 in RSI context: {line.strip()}"
+            assert "RSI_NEUTRAL_VALUE" in line, f"Line {i} has hardcoded 50.0 in RSI context: {line.strip()}"
 
     print("✓ F42-19: No hardcoded RSI neutral value")
 
@@ -329,14 +335,13 @@ def test_f42_no_hardcoded_lookback_map():
 
     # Should not have hardcoded lookback_map = {"30D": 60, ...}
     # Look for the pattern but allow it in comments
-    lines = [line for line in content.split('\n') if not line.strip().startswith('#')]
-    code_content = '\n'.join(lines)
+    lines = [line for line in content.split("\n") if not line.strip().startswith("#")]
+    code_content = "\n".join(lines)
 
     # Pattern: lookback_map = {
-    if 'lookback_map = {' in code_content:
+    if "lookback_map = {" in code_content:
         # If it exists, should use HORIZON_LOOKBACK_MAP
-        assert 'HORIZON_LOOKBACK_MAP' in content, \
-            "Should use HORIZON_LOOKBACK_MAP from magic_numbers_config"
+        assert "HORIZON_LOOKBACK_MAP" in content, "Should use HORIZON_LOOKBACK_MAP from magic_numbers_config"
 
     print("✓ F42-20: No hardcoded lookback map")
 
@@ -344,6 +349,7 @@ def test_f42_no_hardcoded_lookback_map():
 # ============================================================================
 # Test Suite 8: Documentation Quality
 # ============================================================================
+
 
 def test_f42_constants_have_docstrings():
     """F42-21: Constants have documentation."""
@@ -374,6 +380,7 @@ def test_f42_functions_have_docstrings():
 # ============================================================================
 # Test Suite 9: Consistency Checks
 # ============================================================================
+
 
 def test_f42_trading_days_consistency():
     """F42-23: Trading days constants are internally consistent."""

@@ -85,4 +85,3 @@ def test_scalping_engine_find_opportunities():
         assert setups[0].action == "BUY"
         assert setups[0].validation_report is not None
         assert setups[0].validation_report.is_scalp_valid is True
-

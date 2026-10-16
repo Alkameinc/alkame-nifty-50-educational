@@ -532,9 +532,7 @@ class TestCAL003SeparateValidationDatasets:
 
         # Negative fraction
         with pytest.raises(ValueError, match="strictly positive"):
-            ModelTrainer.chronological_4way_split(
-                X, y, train_frac=-0.1, cal_frac=0.5, edge_frac=0.3, holdout_frac=0.3
-            )
+            ModelTrainer.chronological_4way_split(X, y, train_frac=-0.1, cal_frac=0.5, edge_frac=0.3, holdout_frac=0.3)
 
         # Mismatched length
         with pytest.raises(ValueError, match="equal length"):

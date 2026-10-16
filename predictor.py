@@ -150,7 +150,6 @@ class PredictionContext:
             )
 
 
-
 # ---------------------------------------------------------------------------
 # 6. Classes and functions
 # ---------------------------------------------------------------------------
@@ -235,7 +234,9 @@ class Predictor:
                     )
 
             # 4. Macro & Event Catalysts
-            negative_events = [e for e in contributing_events if e.sentiment_score is not None and e.sentiment_score < 0]
+            negative_events = [
+                e for e in contributing_events if e.sentiment_score is not None and e.sentiment_score < 0
+            ]
             if negative_events:
                 labels = "; ".join(f"'{e.headline_or_label}'" for e in negative_events[:2])
                 parts.append(f"Specific headwinds affecting this counter: {labels}.")
@@ -305,7 +306,9 @@ class Predictor:
                 )
 
             # 4. Positive Event Catalysts
-            positive_events = [e for e in contributing_events if e.sentiment_score is not None and e.sentiment_score > 0]
+            positive_events = [
+                e for e in contributing_events if e.sentiment_score is not None and e.sentiment_score > 0
+            ]
             if positive_events:
                 labels = "; ".join(f"'{e.headline_or_label}'" for e in positive_events[:2])
                 parts.append(f"Tailwinds supporting sentiment: {labels}.")
@@ -716,12 +719,17 @@ class Predictor:
                     model_version=ensemble_pred.model_version,
                     feature_version=ensemble_pred.feature_version,
                     raw_confidence=ensemble_pred.confidence,
-                    risk_adjusted_confidence=risk_adjusted_confidence if "risk_adjusted_confidence" in locals() else ensemble_pred.confidence,
+                    risk_adjusted_confidence=(
+                        risk_adjusted_confidence if "risk_adjusted_confidence" in locals() else ensemble_pred.confidence
+                    ),
                     calibrated_confidence=None,
                     agreement_fraction=ensemble_pred.agreement_fraction,
                     downside_summary=f"Signal became non-actionable after a late processing failure: {failure_reason}",
                     upside_summary="Not available because the prediction pipeline did not complete.",
-                    reasoning=[f"Original model forecast preserved: {ensemble_pred.predicted_class} with raw confidence {ensemble_pred.confidence:.4f}.",f"Forced HOLD because the prediction pipeline failed after inference: {failure_reason}"],
+                    reasoning=[
+                        f"Original model forecast preserved: {ensemble_pred.predicted_class} with raw confidence {ensemble_pred.confidence:.4f}.",
+                        f"Forced HOLD because the prediction pipeline failed after inference: {failure_reason}",
+                    ],
                     suppressed=True,
                     suppression_reasons=[failure_reason],
                     is_safe_to_trade_live=False,
@@ -733,6 +741,7 @@ class Predictor:
             return self._suppressed_signal(
                 symbol, now, f"Prediction unavailable: {e}", horizon=horizon, stock_df=stock_df
             )
+
     def generate_multi_horizon_stream(
         self,
         symbol: str,

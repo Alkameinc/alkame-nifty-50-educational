@@ -343,11 +343,13 @@ def test_integration_api_response_schema_valid(fixed_market_data, fixed_index_da
         errors=[],
     )
 
-    with patch("api.scheduler.data_fetcher.fetch_ohlcv", return_value=fixed_market_data), \
-         patch("api.scheduler.data_fetcher.fetch_nifty_index", return_value=fixed_index_data), \
-         patch("api.scheduler.data_fetcher.check_staleness", return_value=False), \
-         patch("api.scheduler.get_event_context", return_value=mock_event_ctx), \
-         patch("api.scheduler.resolve_pending_outcomes", return_value=None):
+    with (
+        patch("api.scheduler.data_fetcher.fetch_ohlcv", return_value=fixed_market_data),
+        patch("api.scheduler.data_fetcher.fetch_nifty_index", return_value=fixed_index_data),
+        patch("api.scheduler.data_fetcher.check_staleness", return_value=False),
+        patch("api.scheduler.get_event_context", return_value=mock_event_ctx),
+        patch("api.scheduler.resolve_pending_outcomes", return_value=None),
+    ):
 
         response = client.get("/api/v1/signal/RELIANCE")
         assert response.status_code == 200

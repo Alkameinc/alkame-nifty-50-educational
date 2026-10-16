@@ -290,16 +290,14 @@ def run_recording():
 
         def scroll_main(top_px: int, smooth: bool = True):
             behavior = "smooth" if smooth else "auto"
-            page.evaluate(
-                f"""() => {{
+            page.evaluate(f"""() => {{
                 const el = document.querySelector('[data-testid="stMain"]') || document.querySelector('section.main') || window;
                 if (el.scrollTo) {{
                     el.scrollTo({{ top: {top_px}, behavior: '{behavior}' }});
                 }} else {{
                     window.scrollTo(0, {top_px});
                 }}
-            }}"""
-            )
+            }}""")
 
         print("\n--- SCENE 1: Introduction & Platform Architecture ---")
         page.goto("http://localhost:8501", timeout=60000)
@@ -414,9 +412,7 @@ def run_recording():
         try:
             textarea = page.locator('textarea[aria-label="Add a note"]')
             if textarea.count() > 0:
-                textarea.fill(
-                    "Institutional accumulation detected; RSI oversold reversal pattern confirmed."
-                )
+                textarea.fill("Institutional accumulation detected; RSI oversold reversal pattern confirmed.")
                 time.sleep(1.5)
                 save_btn = page.locator('button:has-text("Save note")')
                 if save_btn.count() > 0:
@@ -463,7 +459,7 @@ def run_recording():
 
         # Expand /api/v1/health in Swagger
         try:
-            health_op = page.locator('.opblock-summary-path').filter(has_text="/api/v1/health")
+            health_op = page.locator(".opblock-summary-path").filter(has_text="/api/v1/health")
             if health_op.count() > 0:
                 health_op.first.click()
                 time.sleep(2.5)
@@ -519,4 +515,3 @@ if __name__ == "__main__":
         print("\n[SUCCESS] DEMO VIDEO RECORDING COMPLETED SUCCESSFULLY!")
     else:
         print("\n[FAILED] DEMO VIDEO RECORDING FAILED!")
-

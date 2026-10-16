@@ -7,16 +7,18 @@ from scheduler import Scheduler
 
 
 def _bars():
-    index = pd.to_datetime([
-        "2026-09-04 15:30",
-        "2026-09-07 09:15",
-        "2026-09-07 09:20",
-        "2026-09-07 09:25",
-        "2026-09-07 09:30",
-        "2026-09-07 09:35",
-        "2026-09-07 09:40",
-        "2026-09-07 09:45",
-    ])
+    index = pd.to_datetime(
+        [
+            "2026-09-04 15:30",
+            "2026-09-07 09:15",
+            "2026-09-07 09:20",
+            "2026-09-07 09:25",
+            "2026-09-07 09:30",
+            "2026-09-07 09:35",
+            "2026-09-07 09:40",
+            "2026-09-07 09:45",
+        ]
+    )
 
     closes = [
         100.0,
@@ -85,11 +87,7 @@ def test_f12_equal_threshold_is_flat():
 
         assert resolved == 1
 
-        record = next(
-            record
-            for record in hm.get_predictions("TCS")
-            if record.id == prediction_id
-        )
+        record = next(record for record in hm.get_predictions("TCS") if record.id == prediction_id)
 
         assert record.outcome_resolved is True
         assert record.outcome_actual_class == "FLAT"

@@ -219,29 +219,20 @@ async def correlation_id_middleware(request: Request, call_next):
 
 
 # Prometheus custom domain metrics (OBS-002)
-PREDICTIONS_TOTAL = (
-    REGISTRY._names_to_collectors.get("nifty50_predictions_total")
-    or Counter(
-        "nifty50_predictions_total",
-        "Total prediction signals generated",
-        ["symbol", "horizon", "action"],
-    )
+PREDICTIONS_TOTAL = REGISTRY._names_to_collectors.get("nifty50_predictions_total") or Counter(
+    "nifty50_predictions_total",
+    "Total prediction signals generated",
+    ["symbol", "horizon", "action"],
 )
-SYSTEM_HEALTH_STATUS = (
-    REGISTRY._names_to_collectors.get("nifty50_health_status")
-    or Gauge(
-        "nifty50_health_status",
-        "Current health status by component (1=OK, 0=FAIL/DEGRADED)",
-        ["component"],
-    )
+SYSTEM_HEALTH_STATUS = REGISTRY._names_to_collectors.get("nifty50_health_status") or Gauge(
+    "nifty50_health_status",
+    "Current health status by component (1=OK, 0=FAIL/DEGRADED)",
+    ["component"],
 )
-MODEL_INFERENCE_SECONDS = (
-    REGISTRY._names_to_collectors.get("nifty50_model_inference_seconds")
-    or Histogram(
-        "nifty50_model_inference_seconds",
-        "Model inference latency in seconds",
-        ["symbol"],
-    )
+MODEL_INFERENCE_SECONDS = REGISTRY._names_to_collectors.get("nifty50_model_inference_seconds") or Histogram(
+    "nifty50_model_inference_seconds",
+    "Model inference latency in seconds",
+    ["symbol"],
 )
 
 try:
@@ -425,11 +416,20 @@ def get_signal(symbol: str):
     all_horizons_data = {}
     for hor, sig in multi_signal.signals.items():
         validity_res = evaluate_model_validity(symbol, hor)
-        cached_snap = scheduler.get_cached_live_worthiness(symbol, hor) if hasattr(scheduler, "get_cached_live_worthiness") else None
+        cached_snap = (
+            scheduler.get_cached_live_worthiness(symbol, hor)
+            if hasattr(scheduler, "get_cached_live_worthiness")
+            else None
+        )
         if isinstance(cached_snap, LiveWorthinessSnapshot):
             cal = getattr(cached_snap, "calibration_result", None)
             edge = getattr(cached_snap, "edge_check_result", None)
-            if cal and edge and getattr(cal, "is_well_calibrated", False) and getattr(edge, "status", None) == "EDGE_CONFIRMED":
+            if (
+                cal
+                and edge
+                and getattr(cal, "is_well_calibrated", False)
+                and getattr(edge, "status", None) == "EDGE_CONFIRMED"
+            ):
                 validity_res = ModelValidityResult(
                     symbol=symbol,
                     horizon=hor,
@@ -449,21 +449,31 @@ def get_signal(symbol: str):
             calibrated_conf = None
             raw_reasoning.extend(serve_reasons)
             if getattr(sig, "suppressed", False):
-                verdict_text = "Model lean withheld: Statistical pattern does not yet meet baseline historical significance."
+                verdict_text = (
+                    "Model lean withheld: Statistical pattern does not yet meet baseline historical significance."
+                )
             elif not validity_res.is_live_eligible:
-                verdict_text = f"Holding: Model for {hor} is {validity_res.validity_status} and not eligible for live execution."
+                verdict_text = (
+                    f"Holding: Model for {hor} is {validity_res.validity_status} and not eligible for live execution."
+                )
             else:
                 verdict_text = "Holding: Engine health is FAILED; live execution halted."
         else:
             if sig_action == "BUY":
-                verdict_text = "Model classified this observation as a probable upward move (UP) with calibrated confidence."
+                verdict_text = (
+                    "Model classified this observation as a probable upward move (UP) with calibrated confidence."
+                )
             elif sig_action == "SELL":
                 verdict_text = "Model classified this observation as a probable downward move (DOWN)."
             else:
                 if sig.suppressed:
-                    verdict_text = "Model lean withheld: Statistical pattern does not yet meet baseline historical significance."
+                    verdict_text = (
+                        "Model lean withheld: Statistical pattern does not yet meet baseline historical significance."
+                    )
                 else:
-                    verdict_text = "Model classified this observation as neutral/consolidation without directional edge."
+                    verdict_text = (
+                        "Model classified this observation as neutral/consolidation without directional edge."
+                    )
 
         PREDICTIONS_TOTAL.labels(symbol=symbol, horizon=hor, action=sig_action).inc()
 
@@ -556,21 +566,27 @@ def stream_signal(symbol: str):
                 calibrated_conf = None
                 raw_reasoning.extend(serve_reasons)
                 if getattr(sig, "suppressed", False):
-                    verdict_text = "Model lean withheld: Statistical pattern does not yet meet baseline historical significance."
+                    verdict_text = (
+                        "Model lean withheld: Statistical pattern does not yet meet baseline historical significance."
+                    )
                 elif not validity_res.is_live_eligible:
                     verdict_text = f"Holding: Model for {sig.horizon} is {validity_res.validity_status} and not eligible for live execution."
                 else:
                     verdict_text = "Holding: Engine health is FAILED; live execution halted."
             else:
                 if sig_action == "BUY":
-                    verdict_text = "Model classified this observation as a probable upward move (UP) with calibrated confidence."
+                    verdict_text = (
+                        "Model classified this observation as a probable upward move (UP) with calibrated confidence."
+                    )
                 elif sig_action == "SELL":
                     verdict_text = "Model classified this observation as a probable downward move (DOWN)."
                 else:
                     if getattr(sig, "suppressed", False):
                         verdict_text = "Model lean withheld: Statistical pattern does not yet meet baseline historical significance."
                     else:
-                        verdict_text = "Model classified this observation as neutral/consolidation without directional edge."
+                        verdict_text = (
+                            "Model classified this observation as neutral/consolidation without directional edge."
+                        )
 
             events = []
             if getattr(sig, "contributing_events", None):
@@ -603,9 +619,7 @@ def stream_signal(symbol: str):
                 "live_eligible": is_live_eligible_val,
                 "confidence": calibrated_conf,
                 "raw_confidence": raw_score,
-                "risk_adjusted_confidence": getattr(
-                    sig, "risk_adjusted_confidence", raw_score
-                ),
+                "risk_adjusted_confidence": getattr(sig, "risk_adjusted_confidence", raw_score),
                 "calibrated_confidence": calibrated_conf,
                 "current_price": float(stock_df["Close"].iloc[-1]) if not stock_df.empty else None,
                 "target_price": getattr(sig, "target_price", None),
@@ -1136,11 +1150,26 @@ def stress_test(payload: StressTestPayload):
 
     if not cmp_val or cmp_val <= 0:
         FALLBACK_PRICES = {
-            "ADANIENT": 2701.00, "TCS": 3920.00, "ICICIBANK": 1245.00, "HDFCBANK": 1680.20,
-            "RELIANCE": 2985.40, "INFY": 1890.50, "MARUTI": 12450.00, "TATASTEEL": 158.00,
-            "LT": 3580.00, "SBIN": 815.00, "BAJAJ-AUTO": 9800.00, "AXISBANK": 1195.00,
-            "KOTAKBANK": 1820.00, "BHARTIARTL": 1680.00, "ITC": 505.00, "HINDUNILVR": 2780.00,
-            "TITAN": 3680.00, "SUNPHARMA": 1860.00, "NESTLEIND": 2480.00, "CIPLA": 1540.00
+            "ADANIENT": 2701.00,
+            "TCS": 3920.00,
+            "ICICIBANK": 1245.00,
+            "HDFCBANK": 1680.20,
+            "RELIANCE": 2985.40,
+            "INFY": 1890.50,
+            "MARUTI": 12450.00,
+            "TATASTEEL": 158.00,
+            "LT": 3580.00,
+            "SBIN": 815.00,
+            "BAJAJ-AUTO": 9800.00,
+            "AXISBANK": 1195.00,
+            "KOTAKBANK": 1820.00,
+            "BHARTIARTL": 1680.00,
+            "ITC": 505.00,
+            "HINDUNILVR": 2780.00,
+            "TITAN": 3680.00,
+            "SUNPHARMA": 1860.00,
+            "NESTLEIND": 2480.00,
+            "CIPLA": 1540.00,
         }
         cmp_val = FALLBACK_PRICES.get(symbol, 2500.0)
 
@@ -1153,9 +1182,7 @@ def stress_test(payload: StressTestPayload):
     inr_beta = 0.40 if is_it else -0.15
 
     pnl_pct = (
-        (payload.crude_shock_pct * crude_beta)
-        + (payload.vix_shock_pct * vix_beta)
-        + (payload.inr_shock_pct * inr_beta)
+        (payload.crude_shock_pct * crude_beta) + (payload.vix_shock_pct * vix_beta) + (payload.inr_shock_pct * inr_beta)
     )
 
     daily_vol = 0.018
@@ -1163,11 +1190,7 @@ def stress_test(payload: StressTestPayload):
     var_99 = round(2.326 * daily_vol * 100, 2)
 
     estimated_cmp = round(float(cmp_val) * (1 + (pnl_pct / 100.0)), 2)
-    regime = (
-        "ELEVATED_STRESS"
-        if abs(pnl_pct) > 2.5
-        else ("MODERATE_STRESS" if abs(pnl_pct) > 1.0 else "BENIGN")
-    )
+    regime = "ELEVATED_STRESS" if abs(pnl_pct) > 2.5 else ("MODERATE_STRESS" if abs(pnl_pct) > 1.0 else "BENIGN")
 
     return StressTestResponse(
         symbol=symbol,
@@ -1197,7 +1220,6 @@ def serve_dashboard():
 def read_root():
     """Welcome endpoint."""
     return {"message": "Welcome to Nifty50 API. Visit /docs for Swagger UI, or /dashboard for the frontend."}
-
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@ class ScannerSignal:
     Represents a single stock evaluation within a scanner sweep.
     Contains model predictions, conviction ranking score, realized outcome, and regime context.
     """
+
     timestamp: pd.Timestamp
     symbol: str
     sector: str = "Unknown"
@@ -49,6 +50,7 @@ class ScannerCohortMetrics:
     Independent statistical metrics evaluated for a cohort of signals
     (e.g., ALL_ELIGIBLE vs TOP_N).
     """
+
     cohort_name: str
     n_signals: int
     hit_rate_pct: float
@@ -68,6 +70,7 @@ class ScannerCohortMetrics:
 @dataclass
 class ScannerTurnoverMetrics:
     """Turnover and rank stability metrics for top-N selections over consecutive scans."""
+
     top_n: int
     n_periods: int
     mean_turnover_pct: float
@@ -80,6 +83,7 @@ class ScannerTurnoverMetrics:
 @dataclass
 class ScannerRegimeMetrics:
     """Comparative performance breakdown for a specific market regime."""
+
     regime_name: str
     n_periods: int
     all_eligible_count: int
@@ -98,6 +102,7 @@ class ScannerValidationReport:
     SCAN-001: Comprehensive validation report comparing all eligible signals
     against selected top-N signals across calibration, edge, turnover, costs, and regimes.
     """
+
     top_n: int
     n_scan_periods: int
     all_eligible_metrics: ScannerCohortMetrics
@@ -217,7 +222,9 @@ class ScannerValidator:
 
             ret = float((recent.iloc[-1] - recent.iloc[0]) / recent.iloc[0])
             pct_changes = recent.pct_change().dropna()
-            vol = float(pct_changes.std() * np.sqrt(252 * 75)) if len(pct_changes) > 1 else 0.0  # Approx intraday ann vol
+            vol = (
+                float(pct_changes.std() * np.sqrt(252 * 75)) if len(pct_changes) > 1 else 0.0
+            )  # Approx intraday ann vol
 
             # Volatility check: High annualized intraday vol > 28%
             if vol > 0.28:
@@ -306,7 +313,11 @@ class ScannerValidator:
         cum_net_base = float(sum(r - base_cost_pct for r in returns)) if returns else 0.0
 
         # Mandated Phase 12 Scenarios: BASE, +25% cost, +50% cost, +100% cost, HIGH_SLIPPAGE, LOW_LIQUIDITY
-        scenario_list = PHASE12_MANDATORY_SCENARIOS if all(s in scenarios for s in PHASE12_MANDATORY_SCENARIOS) else list(scenarios.keys())
+        scenario_list = (
+            PHASE12_MANDATORY_SCENARIOS
+            if all(s in scenarios for s in PHASE12_MANDATORY_SCENARIOS)
+            else list(scenarios.keys())
+        )
         for sc_name in scenario_list:
             if sc_name in scenarios:
                 sc = scenarios[sc_name]
@@ -558,10 +569,7 @@ class ScannerValidator:
                 period_regime = self.detect_regime(idx_slice)
 
             # Filter for eligible signals (actionable & live-safe)
-            eligible = [
-                s for s in period_signals
-                if s.is_eligible and s.is_safe_to_trade_live and s.action == "BUY"
-            ]
+            eligible = [s for s in period_signals if s.is_eligible and s.is_safe_to_trade_live and s.action == "BUY"]
 
             # Populate sector and regime on each signal
             for s in eligible:
@@ -613,7 +621,9 @@ class ScannerValidator:
         # Comparison summary dictionary
         comparison_summary = {
             "hit_rate_delta_pct": round(top_n_metrics.hit_rate_pct - all_eligible_metrics.hit_rate_pct, 2),
-            "avg_return_delta_pct": round(top_n_metrics.average_return_pct - all_eligible_metrics.average_return_pct, 3),
+            "avg_return_delta_pct": round(
+                top_n_metrics.average_return_pct - all_eligible_metrics.average_return_pct, 3
+            ),
             "ece_delta": (
                 round(top_n_metrics.ece - all_eligible_metrics.ece, 4)
                 if top_n_metrics.ece is not None and all_eligible_metrics.ece is not None

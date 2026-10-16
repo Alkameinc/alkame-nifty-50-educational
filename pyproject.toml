@@ -17,6 +17,7 @@ build-backend = "setuptools.build_meta"
 [tool.pytest.ini_options]
 testpaths = ["."]
 python_files = "test_*.py"
+pythonpath = ["."]
 markers = [
     "self_test: converted module self-tests",
 ]

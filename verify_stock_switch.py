@@ -55,7 +55,9 @@ async def main():
         assert "2706" not in target_p, f"Target still hardcoded to ADANIENT: {target_p}"
         assert "2697" not in stop_p, f"Stop still hardcoded to ADANIENT: {stop_p}"
         assert "ICICIBANK" in gate_reason, f"Gate reason doesn't mention ICICIBANK: {gate_reason}"
-        assert "ICICIBANK" in downside or "financial services" in downside.lower(), "Downside text doesn't mention ICICIBANK/sector"
+        assert (
+            "ICICIBANK" in downside or "financial services" in downside.lower()
+        ), "Downside text doesn't mention ICICIBANK/sector"
         assert "ICICIBANK" in upside, "Upside text doesn't mention ICICIBANK"
         assert "ICICIBANK" in reasoning, "Reasoning doesn't mention ICICIBANK"
         assert "8,74,500" in mcap or "874500" in mcap, f"Unexpected market cap for ICICIBANK: {mcap}"
@@ -94,7 +96,9 @@ async def main():
         assert "TCS" in upside_tcs
 
         # Capture TCS screenshot
-        screenshot_tcs = r"C:\Users\user\.gemini\antigravity\brain\d24f186c-c599-4d8c-8bb6-088b44880ad4\tcs_dynamic_verified.png"
+        screenshot_tcs = (
+            r"C:\Users\user\.gemini\antigravity\brain\d24f186c-c599-4d8c-8bb6-088b44880ad4\tcs_dynamic_verified.png"
+        )
         await page.screenshot(path=screenshot_tcs, full_page=True)
         print(f"Saved TCS screenshot: {screenshot_tcs}")
 
@@ -110,10 +114,13 @@ async def main():
             print(f"Active Horizon: {active_h}")
             print(f"Target Price on NEXT_DAY: {safe(target_next)}")
             assert active_h == "NEXT_DAY", f"Expected NEXT_DAY, got {active_h}"
-            assert "3,949" in target_next or "3949" in target_next or "3,950" in target_next, f"Unexpected NEXT_DAY target: {target_next}"
+            assert (
+                "3,949" in target_next or "3949" in target_next or "3,950" in target_next
+            ), f"Unexpected NEXT_DAY target: {target_next}"
 
         await browser.close()
         print("\nALL DYNAMIC MULTI-STOCK ASSERTIONS PASSED 100%!")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

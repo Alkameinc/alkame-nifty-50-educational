@@ -90,4 +90,9 @@ def test_monsoon_deficit_matches_fmcg_auto_sectors():
 
     assert evt.scope == "SECTOR"
     # Rural consumption affects FMCG/Auto
-    assert "ITC" in evt.affected_tickers or "HINDUNILVR" in evt.affected_tickers or "MARUTI" in evt.affected_tickers or "M&M" in evt.affected_tickers
+    assert (
+        "ITC" in evt.affected_tickers
+        or "HINDUNILVR" in evt.affected_tickers
+        or "MARUTI" in evt.affected_tickers
+        or "M&M" in evt.affected_tickers
+    )

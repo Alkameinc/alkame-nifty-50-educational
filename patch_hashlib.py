@@ -1,5 +1,4 @@
-﻿
-file_path = "ensemble_manager.py"
+﻿file_path = "ensemble_manager.py"
 with open(file_path, encoding="utf-8") as f:
     content = f.read()
 

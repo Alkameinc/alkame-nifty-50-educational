@@ -232,7 +232,9 @@ class HorizonValidator:
 
         # Check bar_interval appropriateness
         if bar_interval != "1d" and expected_calendar_days and expected_calendar_days >= 3:
-            discrepancy = (discrepancy or "") + f" | bar_interval='{bar_interval}' should be '1d' for multi-day horizons"
+            discrepancy = (
+                discrepancy or ""
+            ) + f" | bar_interval='{bar_interval}' should be '1d' for multi-day horizons"
             is_valid = False
 
         return HorizonValidationResult(
