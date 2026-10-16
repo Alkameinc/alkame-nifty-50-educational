@@ -2,10 +2,10 @@ import asyncio
 
 from playwright.async_api import async_playwright
 
-console_errors = []
-console_warnings = []
-page_errors = []
-failed_requests = []
+console_errors: list[str] = []
+console_warnings: list[str] = []
+page_errors: list[str] = []
+failed_requests: list[str] = []
 
 
 def safe(s):

@@ -57,7 +57,6 @@ from model_validity import (
     evaluate_model_validity,
 )
 from models import AuditLog
-from reference_level_engine import ReferenceLevelEngine
 from scalping import ScalpingEngine
 from scheduler import LiveWorthinessSnapshot, Scheduler
 
@@ -1133,20 +1132,13 @@ def stress_test(payload: StressTestPayload):
     symbol = payload.symbol.upper()
     cmp_val = None
     try:
-        ref_engine = ReferenceLevelEngine()
-        cmp_val = ref_engine.get_reference_level(symbol, "cmp")
+        yf_ticker = to_yfinance_ticker(symbol)
+        raw = scheduler.data_fetcher.fetch_ohlcv(yf_ticker, allow_stale=True)
+        df = getattr(raw, "df", raw)
+        if df is not None and hasattr(df, "empty") and not df.empty:
+            cmp_val = float(df["Close"].iloc[-1])
     except Exception:
         cmp_val = None
-
-    if not cmp_val or cmp_val <= 0:
-        try:
-            yf_ticker = to_yfinance_ticker(symbol)
-            raw = scheduler.data_fetcher.fetch_ohlcv(yf_ticker, allow_stale=True)
-            df = getattr(raw, "df", raw)
-            if df is not None and not df.empty:
-                cmp_val = float(df["Close"].iloc[-1])
-        except Exception:
-            pass
 
     if not cmp_val or cmp_val <= 0:
         FALLBACK_PRICES = {
