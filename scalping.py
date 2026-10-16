@@ -1,6 +1,6 @@
-from datetime import timezone
 import logging
 from dataclasses import dataclass
+from datetime import UTC
 from typing import Any, cast
 
 import pandas as pd
@@ -162,7 +162,7 @@ if __name__ == "__main__":
 
             return PredictionSignal(
                 symbol=symbol,
-                timestamp=pd.Timestamp.now(tz=timezone.utc),
+                timestamp=pd.Timestamp.now(tz=UTC),
                 horizon=HORIZON_SCALP,
                 action=ACTION_BUY if symbol == "RELIANCE" else ACTION_SELL,
                 model_predicted_class="UP",

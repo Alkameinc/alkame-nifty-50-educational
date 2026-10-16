@@ -40,10 +40,8 @@ from config import (
     ensure_directories,
 )
 from feature_engineer import (
-    CANONICAL_FEATURE_CATALOG,
     ML_SAFE_SUFFIX,
     FeatureEngineer,
-    FeatureSpec,
     validate_feature_contract,
 )
 

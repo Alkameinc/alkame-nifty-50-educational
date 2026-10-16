@@ -3,27 +3,36 @@ import logging
 import math
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from pathlib import Path
 
 import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, Security, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from prometheus_client import REGISTRY, Counter, Gauge, Histogram
 
 from api_schemas import (
     ErrorResponse,
+    FundamentalsResponse,
     HealthResponse,
+    HistoryResponse,
     ModelValidityOut,
     MultiHorizonSignalResponse,
+    NoteOut,
+    NotePayload,
+    NotesResponse,
+    OverrideRequest,
+    OverrideResponse,
+    PredictionRecordOut,
+    RiskReadingResponse,
+    StressTestPayload,
+    StressTestResponse,
     SymbolsResponse,
-)
-from model_validity import (
-    ModelValidityResult,
-    VALIDITY_LIVE_ELIGIBLE,
-    can_serve_live_signal,
-    evaluate_model_validity,
+    TaskOut,
+    TaskPayload,
+    TasksResponse,
 )
 from config import (
     API_AUTH_ENABLED,
@@ -39,8 +48,16 @@ from config import (
 from database import SessionLocal
 from health_monitor import registry as health_registry
 from history_manager import HistoryManager
+from human_insight_manager import HumanInsightManager
 from market_data_provider import DataStatus, MarketDataResult
+from model_validity import (
+    VALIDITY_LIVE_ELIGIBLE,
+    ModelValidityResult,
+    can_serve_live_signal,
+    evaluate_model_validity,
+)
 from models import AuditLog
+from reference_level_engine import ReferenceLevelEngine
 from scalping import ScalpingEngine
 from scheduler import LiveWorthinessSnapshot, Scheduler
 
@@ -133,9 +150,10 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://www.gstatic.com; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://www.gstatic.com; "
         "img-src 'self' data: https://fastapi.tiangolo.com; "
+        "connect-src 'self' http://localhost:8000 http://127.0.0.1:8000; "
         "frame-ancestors 'none';"
     )
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
@@ -156,7 +174,7 @@ def log_audit_event(
     try:
         with SessionLocal() as db:
             audit = AuditLog(
-                timestamp=datetime.now(timezone.utc).isoformat(),
+                timestamp=datetime.now(UTC).isoformat(),
                 client_key_prefix=key_prefix,
                 client_role=client.role,
                 action=action,
@@ -235,6 +253,7 @@ except Exception as err:
 
 scheduler = Scheduler()
 history_manager = HistoryManager()
+human_insight_manager = HumanInsightManager()
 scalping_engine = ScalpingEngine(scheduler.predictor, scheduler.data_fetcher, scheduler.predictor.feature_engineer)
 
 
@@ -250,6 +269,10 @@ def translate_health_message(component: str, status: str) -> str:
             "predictor": "Signal inference is operational.",
             "scheduler": "Periodic signal and outcome scheduling pipeline is operational.",
             "storage": "SQLite storage engine and WAL journal are healthy and verified.",
+            "event_classifier": "Event classification pipeline is operational.",
+            "corporate_events_fetcher": "Corporate event intelligence feed is operational.",
+            "news_sentiment_fetcher": "News sentiment analysis stream is active.",
+            "reference_level_engine": "Support/Resistance reference levels calculated.",
         }
         return messages.get(component, "Component is operational.")
     elif status == "DEGRADED":
@@ -263,28 +286,28 @@ def humanize_reasoning(reasons: list) -> list:
         if r.startswith("Ensemble model lean:"):
             # e.g. "Ensemble model lean: DOWN (raw confidence 0.47, model agreement 33%)."
             if "DOWN" in r:
-                humanized.append("The AI models are predicting a downward trend.")
+                humanized.append("The algorithmic models classify this observation as a probable downward move (DOWN).")
             elif "UP" in r:
-                humanized.append("The AI models are predicting an upward trend.")
+                humanized.append("The algorithmic models classify this observation as a probable upward move (UP).")
             else:
-                humanized.append("The AI models are predicting a flat or sideways trend.")
+                humanized.append("The algorithmic models classify this observation as neutral consolidation (FLAT).")
         elif r.startswith("Global risk level:"):
             if "NORMAL" in r:
-                humanized.append("Global risk is normal, so no penalties have been applied to this prediction.")
+                humanized.append("Systemic market risk is assessed as NORMAL; standard statistical bounds apply.")
             else:
                 humanized.append(
-                    "Global risk is elevated, so we've lowered our confidence in this prediction to keep you safe."
+                    "Systemic market risk is elevated; composite score discount has been applied to model confidence."
                 )
         elif "No specific events" in r:
-            humanized.append("We haven't detected any major breaking news or events affecting this stock right now.")
+            humanized.append("No active macro or corporate events are tagged as affecting this counter.")
         elif "No calibration or edge-check data" in r or "Model leaned" in r:
             if "forced to HOLD" in r:
                 humanized.append(
-                    "We forced a HOLD because this specific strategy hasn't proven itself against the NIFTY baseline yet. We prioritize safety over unproven trades."
+                    "Classification defaulted to HOLD because this model strategy has not demonstrated statistically significant alpha over the benchmark index."
                 )
             else:
                 humanized.append(
-                    "We don't have enough historical proof that this pattern works yet, so we are staying cautious."
+                    "Historical sample size for this pattern is currently insufficient for reliable calibration."
                 )
         else:
             humanized.append(r)
@@ -300,6 +323,8 @@ def get_health():
     diagnostic = []
     if statuses:
         for s in statuses:
+            if s.component.startswith("test_") or s.component.startswith("comp"):
+                continue
             SYSTEM_HEALTH_STATUS.labels(component=s.component).set(1.0 if s.status == "OK" else 0.0)
             diagnostic.append(
                 {
@@ -351,6 +376,11 @@ def get_symbols():
     "/api/v1/signal/{symbol}",
     response_model=MultiHorizonSignalResponse,
     responses={404: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+@app.get(
+    "/api/v1/predict/{symbol}",
+    response_model=MultiHorizonSignalResponse,
+    include_in_schema=False,
 )
 def get_signal(symbol: str):
     if symbol not in NIFTY50_SYMBOLS:
@@ -419,21 +449,21 @@ def get_signal(symbol: str):
             calibrated_conf = None
             raw_reasoning.extend(serve_reasons)
             if getattr(sig, "suppressed", False):
-                verdict_text = "Holding back: We don't have enough historical proof that this pattern works yet."
+                verdict_text = "Model lean withheld: Statistical pattern does not yet meet baseline historical significance."
             elif not validity_res.is_live_eligible:
                 verdict_text = f"Holding: Model for {hor} is {validity_res.validity_status} and not eligible for live execution."
             else:
                 verdict_text = "Holding: Engine health is FAILED; live execution halted."
         else:
             if sig_action == "BUY":
-                verdict_text = "Strong opportunity identified. Proceed with entry according to your risk parameters."
+                verdict_text = "Model classified this observation as a probable upward move (UP) with calibrated confidence."
             elif sig_action == "SELL":
-                verdict_text = "Warning: Downward pressure detected. Consider hedging or reducing exposure."
+                verdict_text = "Model classified this observation as a probable downward move (DOWN)."
             else:
                 if sig.suppressed:
-                    verdict_text = "Holding back: We don't have enough historical proof that this pattern works yet."
+                    verdict_text = "Model lean withheld: Statistical pattern does not yet meet baseline historical significance."
                 else:
-                    verdict_text = "No clear edge detected. Better to stay out and wait for a higher-probability setup."
+                    verdict_text = "Model classified this observation as neutral/consolidation without directional edge."
 
         PREDICTIONS_TOTAL.labels(symbol=symbol, horizon=hor, action=sig_action).inc()
 
@@ -441,15 +471,28 @@ def get_signal(symbol: str):
         for e in sig.contributing_events:
             events.append({"type": e.event_type, "label": e.headline_or_label, "sentiment": e.sentiment_score})
 
+        raw_score = float(getattr(sig, "raw_confidence", 0.0))
+        calib_status = (
+            "CALIBRATED"
+            if calibrated_conf is not None
+            else ("INSUFFICIENT_DATA" if getattr(sig, "suppressed", False) else "UNAVAILABLE")
+        )
+        edge_status_val = validity_res.edge_status if validity_res else "NOT_VALIDATED"
+        is_live_eligible_val = bool(can_serve and validity_res.is_live_eligible and calibrated_conf is not None)
+
         all_horizons_data[hor] = {
             "horizon": hor,
             "action": sig_action,
             "verdict_text": verdict_text,
+            "model_score": raw_score,
+            "calibrated_probability": calibrated_conf,
+            "calibration_status": calib_status,
+            "edge_status": edge_status_val,
+            "live_eligible": is_live_eligible_val,
             "confidence": calibrated_conf,
-            "raw_confidence": getattr(sig, "raw_confidence", 0.0),
-            "risk_adjusted_confidence": getattr(sig, "risk_adjusted_confidence", 0.0),
+            "raw_confidence": raw_score,
+            "risk_adjusted_confidence": getattr(sig, "risk_adjusted_confidence", raw_score),
             "calibrated_confidence": calibrated_conf,
-            "calibration_status": "VALID" if calibrated_conf is not None else "UNAVAILABLE",
             "current_price": float(stock_df["Close"].iloc[-1]) if not stock_df.empty else None,
             "target_price": sig.target_price,
             "stop_loss": sig.stop_loss,
@@ -459,6 +502,7 @@ def get_signal(symbol: str):
             "events": events,
             "reasoning": humanize_reasoning(raw_reasoning),
             "prediction_key": getattr(sig, "prediction_key", None),
+            "event_source_status": getattr(sig, "event_source_status", "UNKNOWN"),
         }
 
     return {
@@ -511,20 +555,22 @@ def stream_signal(symbol: str):
                 sig_action = "HOLD"
                 calibrated_conf = None
                 raw_reasoning.extend(serve_reasons)
-                if not validity_res.is_live_eligible:
+                if getattr(sig, "suppressed", False):
+                    verdict_text = "Model lean withheld: Statistical pattern does not yet meet baseline historical significance."
+                elif not validity_res.is_live_eligible:
                     verdict_text = f"Holding: Model for {sig.horizon} is {validity_res.validity_status} and not eligible for live execution."
                 else:
                     verdict_text = "Holding: Engine health is FAILED; live execution halted."
             else:
                 if sig_action == "BUY":
-                    verdict_text = "Strong opportunity identified. Proceed with entry according to your risk parameters."
+                    verdict_text = "Model classified this observation as a probable upward move (UP) with calibrated confidence."
                 elif sig_action == "SELL":
-                    verdict_text = "Warning: Downward pressure detected. Consider hedging or reducing exposure."
+                    verdict_text = "Model classified this observation as a probable downward move (DOWN)."
                 else:
                     if getattr(sig, "suppressed", False):
-                        verdict_text = "Holding back: We don't have enough historical proof that this pattern works yet."
+                        verdict_text = "Model lean withheld: Statistical pattern does not yet meet baseline historical significance."
                     else:
-                        verdict_text = "No clear edge detected. Better to stay out and wait for a higher-probability setup."
+                        verdict_text = "Model classified this observation as neutral/consolidation without directional edge."
 
             events = []
             if getattr(sig, "contributing_events", None):
@@ -537,19 +583,30 @@ def stream_signal(symbol: str):
                         }
                     )
 
+            raw_score = float(getattr(sig, "raw_confidence", 0.0))
+            calib_status = (
+                "CALIBRATED"
+                if calibrated_conf is not None
+                else ("INSUFFICIENT_DATA" if getattr(sig, "suppressed", False) else "UNAVAILABLE")
+            )
+            edge_status_val = validity_res.edge_status if validity_res else "NOT_VALIDATED"
+            is_live_eligible_val = bool(can_serve and validity_res.is_live_eligible and calibrated_conf is not None)
+
             data = {
                 "horizon": sig.horizon,
                 "action": sig_action,
                 "verdict_text": verdict_text,
+                "model_score": raw_score,
+                "calibrated_probability": calibrated_conf,
+                "calibration_status": calib_status,
+                "edge_status": edge_status_val,
+                "live_eligible": is_live_eligible_val,
                 "confidence": calibrated_conf,
-                "raw_confidence": getattr(sig, "raw_confidence", 0.0),
+                "raw_confidence": raw_score,
                 "risk_adjusted_confidence": getattr(
-                    sig, "risk_adjusted_confidence", getattr(sig, "raw_confidence", 0.0)
+                    sig, "risk_adjusted_confidence", raw_score
                 ),
                 "calibrated_confidence": calibrated_conf,
-                "calibration_status": (
-                    "VALID" if calibrated_conf is not None else "UNAVAILABLE"
-                ),
                 "current_price": float(stock_df["Close"].iloc[-1]) if not stock_df.empty else None,
                 "target_price": getattr(sig, "target_price", None),
                 "stop_loss": getattr(sig, "stop_loss", None),
@@ -558,6 +615,7 @@ def stream_signal(symbol: str):
                 "upside_summary": getattr(sig, "upside_summary", ""),
                 "events": events,
                 "reasoning": humanize_reasoning(raw_reasoning),
+                "event_source_status": getattr(sig, "event_source_status", "UNKNOWN"),
             }
             yield f"data: {json.dumps(data)}\n\n"
 
@@ -754,12 +812,6 @@ def reset_scheduler_circuit_breaker(request: Request, client: ClientAuth = Depen
     return {"status": "success", "scheduler": status_data}
 
 
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="127.0.0.1", port=8000)
-
-
 @app.get("/api/v1/admin/audit-logs", tags=["Admin"])
 def get_audit_logs(limit: int = 50, client: ClientAuth = Depends(require_role("ADMIN"))):
     try:
@@ -769,22 +821,386 @@ def get_audit_logs(limit: int = 50, client: ClientAuth = Depends(require_role("A
                 "status": "success",
                 "logs": [
                     {
-                        "id": l.id,
-                        "timestamp": l.timestamp,
-                        "action": l.action,
-                        "resource": l.resource,
-                        "status": l.status,
-                        "client_role": l.client_role,
-                        "ip_address": l.ip_address,
+                        "id": log_entry.id,
+                        "timestamp": log_entry.timestamp,
+                        "action": log_entry.action,
+                        "resource": log_entry.resource,
+                        "status": log_entry.status,
+                        "client_role": log_entry.client_role,
+                        "ip_address": log_entry.ip_address,
                     }
-                    for l in logs
+                    for log_entry in logs
                 ],
             }
     except Exception as e:
-        raise HTTPException(status_code=500, detail="Failed to fetch audit logs")
+        raise HTTPException(status_code=500, detail="Failed to fetch audit logs") from e
+
+
+@app.get("/api/v1/fundamentals/{symbol}", response_model=FundamentalsResponse, tags=["Fundamentals"])
+def get_fundamentals(symbol: str):
+    if symbol not in NIFTY50_SYMBOLS:
+        raise HTTPException(status_code=404, detail="Invalid symbol")
+    yf_ticker = to_yfinance_ticker(symbol)
+    fetcher = scheduler.data_fetcher
+    fundamentals = fetcher.fetch_stock_fundamentals(yf_ticker)
+    raw_stock = fetcher.fetch_ohlcv(yf_ticker, allow_stale=True)
+    stock_df = getattr(raw_stock, "df", raw_stock)
+    cmp = float(stock_df["Close"].iloc[-1]) if stock_df is not None and not stock_df.empty else 0.0
+    return FundamentalsResponse(symbol=symbol, cmp=cmp, fundamentals=fundamentals or {})
+
+
+@app.get("/api/v1/risk/reading", response_model=RiskReadingResponse, tags=["Risk"])
+def get_risk_reading():
+    risk_monitor = scheduler.predictor.global_risk_monitor
+    reading = risk_monitor.compute_composite_risk()
+    toggle_state = risk_monitor.get_toggle_state()
+    multiplier = float(risk_monitor.get_confidence_multiplier("ALL", reading))
+    driver_details = getattr(reading, "driver_details", {}) or {}
+    return RiskReadingResponse(
+        risk_level=reading.risk_level,
+        composite_score=float(getattr(reading, "composite_zscore", 0.0)),
+        confidence_multiplier=multiplier,
+        banner_message=reading.banner_message,
+        toggle_enabled=bool(toggle_state.enabled),
+        indicators=driver_details,
+    )
+
+
+@app.get("/api/v1/notes/{symbol}", response_model=NotesResponse, tags=["Analyst Insight"])
+def get_notes(symbol: str, limit: int = 20):
+    if symbol not in NIFTY50_SYMBOLS:
+        raise HTTPException(status_code=404, detail="Invalid symbol")
+    notes = human_insight_manager.get_notes(symbol, limit=limit)
+    return NotesResponse(
+        symbol=symbol,
+        notes=[
+            NoteOut(
+                id=n.id,
+                timestamp=n.timestamp,
+                note_text=n.note_text,
+                related_action=n.related_action,
+                created_by=n.created_by,
+            )
+            for n in notes
+        ],
+    )
+
+
+@app.post("/api/v1/notes/{symbol}", tags=["Analyst Insight"])
+def add_note(symbol: str, payload: NotePayload):
+    if symbol not in NIFTY50_SYMBOLS:
+        raise HTTPException(status_code=404, detail="Invalid symbol")
+    note_id = human_insight_manager.add_note(
+        symbol=symbol,
+        note_text=payload.note_text,
+        related_action=payload.related_action,
+        created_by=payload.created_by,
+    )
+    if note_id is None:
+        raise HTTPException(status_code=500, detail="Failed to save note")
+    return {"status": "success", "note_id": note_id}
+
+
+@app.get("/api/v1/override/{symbol}", tags=["Analyst Insight"])
+def get_override(symbol: str):
+    if symbol not in NIFTY50_SYMBOLS:
+        raise HTTPException(status_code=404, detail="Invalid symbol")
+    overrides = human_insight_manager.get_overrides(symbol, limit=1)
+    if not overrides:
+        return {"symbol": symbol, "active_override": None}
+    active = overrides[0]
+    return {
+        "symbol": symbol,
+        "active_override": {
+            "id": active.id,
+            "timestamp": active.timestamp,
+            "original_action": active.original_action,
+            "overridden_action": active.overridden_action,
+            "reason": active.reason,
+            "created_by": active.created_by,
+        },
+    }
+
+
+@app.post("/api/v1/override/{symbol}", response_model=OverrideResponse, tags=["Analyst Insight"])
+def create_override(symbol: str, payload: OverrideRequest):
+    if symbol not in NIFTY50_SYMBOLS:
+        raise HTTPException(status_code=404, detail="Invalid symbol")
+    override_id = human_insight_manager.record_override(
+        symbol=symbol,
+        original_action=payload.original_action,
+        overridden_action=payload.overridden_action,
+        reason=payload.reason,
+        created_by=payload.created_by,
+    )
+    if override_id is None:
+        raise HTTPException(status_code=500, detail="Failed to record override")
+    return OverrideResponse(
+        id=override_id,
+        symbol=symbol,
+        original_action=payload.original_action,
+        overridden_action=payload.overridden_action,
+        reason=payload.reason,
+        created_by=payload.created_by,
+    )
+
+
+@app.get("/api/v1/history/{symbol}", response_model=HistoryResponse, tags=["Prediction History"])
+def get_history(symbol: str, limit: int = 20):
+    if symbol not in NIFTY50_SYMBOLS:
+        raise HTTPException(status_code=404, detail="Invalid symbol")
+    history = history_manager.get_predictions(symbol, limit=limit)
+    records = []
+    for rec in history:
+        records.append(
+            PredictionRecordOut(
+                id=rec.id,
+                symbol=rec.symbol,
+                timestamp=rec.timestamp,
+                action=rec.action,
+                model_predicted_class=rec.model_predicted_class,
+                raw_confidence=rec.raw_confidence,
+                risk_adjusted_confidence=rec.risk_adjusted_confidence,
+                calibrated_confidence=rec.calibrated_confidence,
+                agreement_fraction=rec.agreement_fraction,
+                outcome_resolved=rec.outcome_resolved,
+                outcome_correct=rec.outcome_correct,
+                outcome_actual_class=rec.outcome_actual_class,
+                resolved_at=rec.resolved_at,
+                horizon=getattr(rec, "horizon", "INTRADAY") or "INTRADAY",
+                narrative=getattr(rec, "narrative", None),
+                dca_ladder=getattr(rec, "dca_ladder", None),
+                prediction_key=getattr(rec, "prediction_key", None),
+                event_source_status=getattr(rec, "event_source_status", "EVENTS_AVAILABLE") or "EVENTS_AVAILABLE",
+            )
+        )
+    return HistoryResponse(symbol=symbol, count=len(records), predictions=records)
+
+
+# --- Institutional Tasks Persistence ---
+TASKS_FILE = Path(__file__).resolve().parent / "data" / "institutional_tasks.json"
+_tasks_lock = threading.Lock()
+
+
+def _load_tasks() -> list[dict]:
+    with _tasks_lock:
+        if not TASKS_FILE.exists():
+            defaults = [
+                {
+                    "id": "task-001",
+                    "title": "Verify Brier calibration curve before removing PROBATION status",
+                    "priority": "P0",
+                    "category": "Calibration",
+                    "symbol": "ADANIENT",
+                    "due_date": "Today, 15:30 IST",
+                    "completed": False,
+                    "created_at": datetime.now(UTC).isoformat(),
+                },
+                {
+                    "id": "task-002",
+                    "title": "Audit macro discount factor against crude Brent volatility (+3.2%)",
+                    "priority": "P1",
+                    "category": "Risk Audit",
+                    "symbol": "GLOBAL",
+                    "due_date": "Today, 17:00 IST",
+                    "completed": False,
+                    "created_at": datetime.now(UTC).isoformat(),
+                },
+                {
+                    "id": "task-003",
+                    "title": "Review dual-boundary stop-loss threshold on NEXT_DAY horizon for RELIANCE",
+                    "priority": "P1",
+                    "category": "Execution",
+                    "symbol": "RELIANCE",
+                    "due_date": "Tomorrow, 09:15 IST",
+                    "completed": True,
+                    "created_at": datetime.now(UTC).isoformat(),
+                },
+                {
+                    "id": "task-004",
+                    "title": "Confirm zero lookahead leakage on board meeting corporate event stream",
+                    "priority": "P2",
+                    "category": "Compliance",
+                    "symbol": "TCS",
+                    "due_date": "End of Week",
+                    "completed": False,
+                    "created_at": datetime.now(UTC).isoformat(),
+                },
+                {
+                    "id": "task-005",
+                    "title": "Inspect 16-component subsystem telemetry health logs for SQLite WAL journal",
+                    "priority": "P2",
+                    "category": "Risk Audit",
+                    "symbol": "GLOBAL",
+                    "due_date": "End of Week",
+                    "completed": True,
+                    "created_at": datetime.now(UTC).isoformat(),
+                },
+            ]
+            try:
+                TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
+                TASKS_FILE.write_text(json.dumps(defaults, indent=2), encoding="utf-8")
+                return defaults
+            except Exception as e:
+                logger.warning(f"Failed to create default tasks file: {e}")
+                return defaults
+        try:
+            return json.loads(TASKS_FILE.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning(f"Failed to load tasks file: {e}")
+            return []
+
+
+def _save_tasks(tasks: list[dict]) -> None:
+    with _tasks_lock:
+        try:
+            TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            TASKS_FILE.write_text(json.dumps(tasks, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.error(f"Failed to write tasks file: {e}")
+
+
+@app.get("/api/v1/tasks/{symbol}", response_model=TasksResponse, tags=["Analyst Tasks"])
+def get_tasks(symbol: str):
+    all_tasks = _load_tasks()
+    if symbol.upper() == "GLOBAL":
+        filtered = all_tasks
+    else:
+        filtered = [t for t in all_tasks if t.get("symbol", "").upper() in (symbol.upper(), "GLOBAL")]
+    return TasksResponse(symbol=symbol, tasks=[TaskOut(**t) for t in filtered])
+
+
+@app.post("/api/v1/tasks/{symbol}", response_model=TaskOut, tags=["Analyst Tasks"])
+def add_task(symbol: str, payload: TaskPayload):
+    tasks = _load_tasks()
+    task_id = f"task-{uuid.uuid4().hex[:8]}"
+    new_task = {
+        "id": task_id,
+        "title": payload.title,
+        "priority": payload.priority,
+        "category": payload.category,
+        "symbol": symbol.upper(),
+        "due_date": payload.due_date,
+        "completed": payload.completed,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    tasks.insert(0, new_task)
+    _save_tasks(tasks)
+    return TaskOut(**new_task)
+
+
+@app.put("/api/v1/tasks/{task_id}/toggle", response_model=TaskOut, tags=["Analyst Tasks"])
+def toggle_task(task_id: str):
+    tasks = _load_tasks()
+    target = None
+    for t in tasks:
+        if t.get("id") == task_id:
+            t["completed"] = not t.get("completed", False)
+            target = t
+            break
+    if not target:
+        raise HTTPException(status_code=404, detail="Task not found")
+    _save_tasks(tasks)
+    return TaskOut(**target)
+
+
+@app.delete("/api/v1/tasks/{task_id}", tags=["Analyst Tasks"])
+def delete_task(task_id: str):
+    tasks = _load_tasks()
+    new_tasks = [t for t in tasks if t.get("id") != task_id]
+    if len(new_tasks) == len(tasks):
+        raise HTTPException(status_code=404, detail="Task not found")
+    _save_tasks(new_tasks)
+    return {"status": "success", "deleted_id": task_id}
+
+
+@app.post("/api/v1/risk/stress-test", response_model=StressTestResponse, tags=["Risk & Governance"])
+def stress_test(payload: StressTestPayload):
+    symbol = payload.symbol.upper()
+    cmp_val = None
+    try:
+        ref_engine = ReferenceLevelEngine()
+        cmp_val = ref_engine.get_reference_level(symbol, "cmp")
+    except Exception:
+        cmp_val = None
+
+    if not cmp_val or cmp_val <= 0:
+        try:
+            yf_ticker = to_yfinance_ticker(symbol)
+            raw = scheduler.data_fetcher.fetch_ohlcv(yf_ticker, allow_stale=True)
+            df = getattr(raw, "df", raw)
+            if df is not None and not df.empty:
+                cmp_val = float(df["Close"].iloc[-1])
+        except Exception:
+            pass
+
+    if not cmp_val or cmp_val <= 0:
+        FALLBACK_PRICES = {
+            "ADANIENT": 2701.00, "TCS": 3920.00, "ICICIBANK": 1245.00, "HDFCBANK": 1680.20,
+            "RELIANCE": 2985.40, "INFY": 1890.50, "MARUTI": 12450.00, "TATASTEEL": 158.00,
+            "LT": 3580.00, "SBIN": 815.00, "BAJAJ-AUTO": 9800.00, "AXISBANK": 1195.00,
+            "KOTAKBANK": 1820.00, "BHARTIARTL": 1680.00, "ITC": 505.00, "HINDUNILVR": 2780.00,
+            "TITAN": 3680.00, "SUNPHARMA": 1860.00, "NESTLEIND": 2480.00, "CIPLA": 1540.00
+        }
+        cmp_val = FALLBACK_PRICES.get(symbol, 2500.0)
+
+    is_energy = symbol in ("ADANIENT", "RELIANCE", "ONGC", "BPCL", "COALINDIA")
+    is_it = symbol in ("TCS", "INFY", "WIPRO", "HCLTECH", "TECHM")
+    is_bank = symbol in ("HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK")
+
+    crude_beta = 0.45 if is_energy else (-0.25 if is_bank else -0.10)
+    vix_beta = -0.35 if is_bank else -0.20
+    inr_beta = 0.40 if is_it else -0.15
+
+    pnl_pct = (
+        (payload.crude_shock_pct * crude_beta)
+        + (payload.vix_shock_pct * vix_beta)
+        + (payload.inr_shock_pct * inr_beta)
+    )
+
+    daily_vol = 0.018
+    var_95 = round(1.645 * daily_vol * 100, 2)
+    var_99 = round(2.326 * daily_vol * 100, 2)
+
+    estimated_cmp = round(float(cmp_val) * (1 + (pnl_pct / 100.0)), 2)
+    regime = (
+        "ELEVATED_STRESS"
+        if abs(pnl_pct) > 2.5
+        else ("MODERATE_STRESS" if abs(pnl_pct) > 1.0 else "BENIGN")
+    )
+
+    return StressTestResponse(
+        symbol=symbol,
+        base_cmp=float(cmp_val),
+        estimated_cmp=float(estimated_cmp),
+        estimated_pnl_pct=round(float(pnl_pct), 3),
+        var_95_pct=var_95,
+        var_99_pct=var_99,
+        risk_regime=regime,
+        factor_sensitivities={
+            "crude_beta": crude_beta,
+            "vix_beta": vix_beta,
+            "inr_beta": inr_beta,
+        },
+    )
+
+
+@app.get("/dashboard", response_class=HTMLResponse, tags=["Frontend"])
+def serve_dashboard():
+    dashboard_path = Path(__file__).resolve().parent / "alkame_dashboard.html"
+    if not dashboard_path.exists():
+        raise HTTPException(status_code=404, detail="Dashboard frontend not found")
+    return HTMLResponse(content=dashboard_path.read_text(encoding="utf-8"))
 
 
 @app.get("/", tags=["Root"])
 def read_root():
     """Welcome endpoint."""
-    return {"message": "Welcome to Nifty50 API. Visit /docs for Swagger UI."}
+    return {"message": "Welcome to Nifty50 API. Visit /docs for Swagger UI, or /dashboard for the frontend."}
+
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="127.0.0.1", port=8000)

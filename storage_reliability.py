@@ -16,21 +16,19 @@ Provides:
 import functools
 import json
 import logging
-import os
 import random
 import sqlite3
 import time
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, Generator, List, Optional, Tuple, TypeVar
+from typing import Any, TypeVar
 
 from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.exc import DBAPIError, OperationalError
-from sqlalchemy.orm import Session, sessionmaker
-
-from config import DB_PATH
+from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +37,7 @@ T = TypeVar("T")
 
 def configure_sqlite_engine(engine: Engine) -> None:
     """Configures SQLite engine with WAL mode, busy timeout, and integrity pragmas.
-    
+
     For SQLite connections:
     - PRAGMA journal_mode=WAL; (enables concurrent readers and writers)
     - PRAGMA synchronous=NORMAL; (reduces fsync bottlenecks while safe in WAL mode)
@@ -145,7 +143,7 @@ def with_db_retry(
 @contextmanager
 def atomic_transaction(session_factory: Callable[[], Session]) -> Generator[Session, None, None]:
     """Context manager providing strictly atomic transactions.
-    
+
     Commits on successful block completion.
     Automatically rolls back on any exception before re-raising.
     Always closes the session cleanly.
@@ -164,9 +162,9 @@ def atomic_transaction(session_factory: Callable[[], Session]) -> Generator[Sess
         session.close()
 
 
-def verify_database_integrity(engine: Engine) -> Tuple[bool, List[str]]:
+def verify_database_integrity(engine: Engine) -> tuple[bool, list[str]]:
     """Runs SQLite quick_check and integrity_check to verify database file health.
-    
+
     Returns:
         (True, []) if database passed integrity checks.
         (False, error_messages) if corruption was detected.
@@ -203,25 +201,25 @@ def verify_database_integrity(engine: Engine) -> Tuple[bool, List[str]]:
 class StorageRecoveryReport:
     timestamp: str
     wal_checkpointed: bool
-    checkpoint_log: Optional[str]
+    checkpoint_log: str | None
     integrity_ok: bool
-    integrity_messages: List[str]
+    integrity_messages: list[str]
     prediction_count: int
     unresolved_prediction_count: int
     stale_unresolved_count: int
     event_count: int
     backtest_metrics_count: int
     duration_ms: float
-    error: Optional[str] = None
+    error: str | None = None
 
 
 def run_storage_recovery(
     engine: Engine,
-    db_path: Optional[Path] = None,
+    db_path: Path | None = None,
     stale_unresolved_hours: int = 24,
 ) -> StorageRecoveryReport:
     """Executes startup storage recovery:
-    
+
     1. Forces WAL checkpoint (TRUNCATE mode to flush and reset WAL journal).
     2. Runs PRAGMA quick_check to verify schema and b-tree integrity.
     3. Audits database counts (predictions, events, backtest metrics).
@@ -229,12 +227,12 @@ def run_storage_recovery(
     5. Reports storage health to health registry.
     """
     start_t = time.perf_counter()
-    ts_now = datetime.now(timezone.utc).isoformat()
+    ts_now = datetime.now(UTC).isoformat()
 
     wal_ok = False
     checkpoint_log = None
     integrity_ok = True
-    integrity_msgs: List[str] = []
+    integrity_msgs: list[str] = []
     pred_count = 0
     unresolved_count = 0
     stale_unresolved_count = 0
@@ -286,7 +284,7 @@ def run_storage_recovery(
 
                 # Count stale unresolved predictions
                 try:
-                    cutoff = (datetime.now(timezone.utc) - timedelta(hours=stale_unresolved_hours)).isoformat()
+                    cutoff = (datetime.now(UTC) - timedelta(hours=stale_unresolved_hours)).isoformat()
                     stale_res = conn.execute(
                         text(
                             "SELECT COUNT(*) FROM predictions WHERE (outcome_resolved = 0 OR outcome_resolved IS NULL) "
@@ -390,19 +388,19 @@ def safe_float(val: Any, default: float = 0.0) -> float:
         return default
 
 
-def safe_iso_timestamp(val: Any, default: Optional[str] = None) -> str:
+def safe_iso_timestamp(val: Any, default: str | None = None) -> str:
     """Safely standardizes a timestamp string or object, returning an ISO string."""
     if val is None:
-        return default or datetime.now(timezone.utc).isoformat()
+        return default or datetime.now(UTC).isoformat()
     try:
         if isinstance(val, datetime):
             if val.tzinfo is None:
-                val = val.replace(tzinfo=timezone.utc)
+                val = val.replace(tzinfo=UTC)
             return val.isoformat()
         import pandas as pd
         ts = pd.Timestamp(val)
         if ts.tzinfo is None:
-            ts = ts.tz_localize(timezone.utc)
+            ts = ts.tz_localize(UTC)
         return ts.isoformat()
     except Exception:
         return default or str(val)

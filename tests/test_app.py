@@ -59,7 +59,7 @@ def test_app_helpers():
         event_id="test",
         source="NEWS",
         event_type="type",
-        timestamp=datetime.datetime.now(),
+        timestamp=datetime.datetime.now(datetime.UTC),
         scope="test",
         affected_tickers=["TCS"],
         headline_or_label="head",

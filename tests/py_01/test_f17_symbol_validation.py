@@ -12,15 +12,15 @@ Part of PY-01 Assignment (5 points, P1)
 """
 
 import pytest
+
 from symbol_validator import (
-    SymbolValidator,
     SymbolValidationError,
-    validate_symbol,
-    is_valid_symbol,
+    SymbolValidator,
     get_validator,
+    is_valid_symbol,
+    validate_symbol,
 )
 from universe_provider import UniverseProvider
-
 
 # ============================================================================
 # NORMAL CASES: Valid symbol operations
@@ -59,7 +59,7 @@ def test_f17_normal_case_insensitive_validation():
     for symbol in variations:
         assert validator.is_valid(symbol) is True, f"{symbol} should be valid (case-insensitive)"
 
-    print(f"✓ NORMAL case passed: Case-insensitive validation works")
+    print("✓ NORMAL case passed: Case-insensitive validation works")
 
 
 def test_f17_normal_valid_universe_size():
@@ -93,7 +93,7 @@ def test_f17_normal_convenience_functions():
     assert validate_symbol("RELIANCE", raise_error=False) is True
     assert validate_symbol("NOTREAL", raise_error=False) is False
 
-    print(f"✓ NORMAL case passed: Convenience functions working")
+    print("✓ NORMAL case passed: Convenience functions working")
 
 
 # ============================================================================
@@ -115,7 +115,7 @@ def test_f17_boundary_empty_and_whitespace_symbols():
     for inp in invalid_inputs:
         assert validator.is_valid(inp) is False, f"'{inp}' should be invalid"
 
-    print(f"✓ BOUNDARY case passed: Empty/whitespace handled")
+    print("✓ BOUNDARY case passed: Empty/whitespace handled")
 
 
 def test_f17_boundary_batch_validation_mixed():
@@ -156,7 +156,7 @@ def test_f17_boundary_symbol_with_spaces():
     assert validator.is_valid("TCS   ") is True
     assert validator.is_valid("   INFY") is True
 
-    print(f"✓ BOUNDARY case passed: Whitespace trimming works")
+    print("✓ BOUNDARY case passed: Whitespace trimming works")
 
 
 def test_f17_boundary_universe_provider_integration():
@@ -175,7 +175,7 @@ def test_f17_boundary_universe_provider_integration():
 
     assert validator_symbols == provider_symbols
 
-    print(f"✓ BOUNDARY case passed: Universe provider integration works")
+    print("✓ BOUNDARY case passed: Universe provider integration works")
 
 
 # ============================================================================
@@ -199,7 +199,7 @@ def test_f17_failure_invalid_symbol_raises_error():
     assert "INVALID_SYMBOL" in error_msg
     assert "not in NIFTY 50 universe" in error_msg
 
-    print(f"✓ FAILURE case passed: Invalid symbol raises error")
+    print("✓ FAILURE case passed: Invalid symbol raises error")
 
 
 def test_f17_failure_invalid_symbol_with_suggestion():
@@ -217,7 +217,7 @@ def test_f17_failure_invalid_symbol_with_suggestion():
     error_msg = str(exc_info.value)
     assert "Did you mean 'RELIANCE'?" in error_msg or "RELIANCE" in error_msg
 
-    print(f"✓ FAILURE case passed: Suggestion provided for similar symbol")
+    print("✓ FAILURE case passed: Suggestion provided for similar symbol")
 
 
 def test_f17_failure_batch_validation_raises_on_invalid():
@@ -236,7 +236,7 @@ def test_f17_failure_batch_validation_raises_on_invalid():
     assert "INVALID" in error_msg
     assert "Invalid symbols" in error_msg
 
-    print(f"✓ FAILURE case passed: Batch validation raises on invalid")
+    print("✓ FAILURE case passed: Batch validation raises on invalid")
 
 
 def test_f17_failure_non_string_symbol():
@@ -257,7 +257,7 @@ def test_f17_failure_non_string_symbol():
 
     assert "Invalid symbol type" in str(exc_info.value)
 
-    print(f"✓ FAILURE case passed: Non-string types handled")
+    print("✓ FAILURE case passed: Non-string types handled")
 
 
 # ============================================================================
@@ -305,7 +305,7 @@ def test_f17_integration_validator_caches_symbols():
     # Should be the same object (cached)
     assert symbols1 is symbols2, "Should use cached symbols"
 
-    print(f"✓ INTEGRATION passed: Symbol caching works")
+    print("✓ INTEGRATION passed: Symbol caching works")
 
 
 def test_f17_integration_global_validator_singleton():
@@ -320,7 +320,7 @@ def test_f17_integration_global_validator_singleton():
 
     assert validator1 is validator2, "Should be same validator instance"
 
-    print(f"✓ INTEGRATION passed: Global validator is singleton")
+    print("✓ INTEGRATION passed: Global validator is singleton")
 
 
 def test_f17_integration_decorator_validation():
@@ -354,7 +354,7 @@ def test_f17_integration_decorator_validation():
 
     assert function_called[0] is False, "Function should not have been called"
 
-    print(f"✓ INTEGRATION passed: Decorator validation works")
+    print("✓ INTEGRATION passed: Decorator validation works")
 
 
 def test_f17_integration_find_similar_symbols():
@@ -377,7 +377,7 @@ def test_f17_integration_find_similar_symbols():
         # Should suggest the expected symbol or something reasonable
         assert suggestion is not None, f"Should suggest something for '{typo}'"
 
-    print(f"✓ INTEGRATION passed: Similar symbol suggestions work")
+    print("✓ INTEGRATION passed: Similar symbol suggestions work")
 
 
 # ============================================================================
@@ -397,7 +397,7 @@ def test_f17_regression_universe_provider_unchanged():
     constituents = provider.get_constituents()
     assert len(constituents) == 50
 
-    print(f"✓ REGRESSION passed: UniverseProvider unchanged")
+    print("✓ REGRESSION passed: UniverseProvider unchanged")
 
 
 def test_f17_regression_empty_validator_initialization():
@@ -412,7 +412,7 @@ def test_f17_regression_empty_validator_initialization():
     # Should have valid symbols
     assert len(validator.get_valid_symbols()) == 50
 
-    print(f"✓ REGRESSION passed: Default initialization works")
+    print("✓ REGRESSION passed: Default initialization works")
 
 
 # ============================================================================
@@ -446,7 +446,7 @@ def test_f17_documentation_basic_usage():
     assert len(valid) == 2
     assert len(invalid) == 1
 
-    print(f"✓ DOCUMENTATION passed: Usage examples work")
+    print("✓ DOCUMENTATION passed: Usage examples work")
 
 
 def test_f17_documentation_decorator_usage():
@@ -469,7 +469,7 @@ def test_f17_documentation_decorator_usage():
     with pytest.raises(SymbolValidationError):
         generate_signal("INVALID", data=None)
 
-    print(f"✓ DOCUMENTATION passed: Decorator usage works")
+    print("✓ DOCUMENTATION passed: Decorator usage works")
 
 
 # ============================================================================

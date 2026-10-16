@@ -31,13 +31,9 @@ import config
 from ensemble_manager import EnsembleManager
 from model_lineage import (
     REQUIRED_LINEAGE_FIELDS,
-    build_lineage_metadata,
     compute_artifact_hash,
     compute_config_hash,
     compute_dataset_version,
-    compute_dependency_lock_hash,
-    compute_feature_schema_hash,
-    get_git_commit_sha,
     get_lineage_config_dict,
     verify_lineage_integrity,
 )

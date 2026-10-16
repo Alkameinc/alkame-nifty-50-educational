@@ -1,5 +1,6 @@
 # 1. Standard library imports
 import logging
+from dataclasses import asdict, is_dataclass
 
 import pandas as pd
 
@@ -70,7 +71,20 @@ def risk_banner_style(risk_level: str) -> str:
 def prediction_records_to_dataframe(records: list) -> pd.DataFrame:
     if not records:
         return pd.DataFrame()
-    return pd.DataFrame([r.__dict__ for r in records])
+    rows = []
+    for r in records:
+        if is_dataclass(r):
+            rows.append(asdict(r))
+        elif hasattr(r, "__dict__"):
+            rows.append(vars(r))
+        elif isinstance(r, dict):
+            rows.append(r)
+        else:
+            try:
+                rows.append(dict(r))
+            except Exception:
+                rows.append({"value": str(r)})
+    return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -136,8 +150,8 @@ def render_dashboard() -> None:
     # --- Fetch data for selected symbol ---
     yf_ticker = to_yfinance_ticker(symbol)
     with st.spinner(f"Fetching data for {symbol}..."):
-        raw_stock = scheduler.data_fetcher.fetch_ohlcv(yf_ticker)
-        raw_index = scheduler.data_fetcher.fetch_nifty_index()
+        raw_stock = scheduler.data_fetcher.fetch_ohlcv(yf_ticker, allow_stale=True)
+        raw_index = scheduler.data_fetcher.fetch_nifty_index(allow_stale=True)
 
     stock_df = getattr(raw_stock, "df", raw_stock)
     index_df = getattr(raw_index, "df", raw_index)
@@ -372,105 +386,104 @@ def render_dashboard() -> None:
 # 7. Self-test (pure logic only — safe to run via plain `python app.py`)
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    from datetime import datetime
-
-    configure_logging(log_filename="app_selftest.log")
-    logger.info("Running app.py self-test...")
-
-    try:
-        print("\n=== APP SELF-TEST RESULT ===")
-
-        # format_action_label
-        buy_label = format_action_label(ACTION_BUY)
-        sell_label = format_action_label(ACTION_SELL)
-        hold_label = format_action_label(ACTION_HOLD)
-        print(
-            f"Action labels: BUY='{buy_label.encode('ascii', 'ignore').decode()}', SELL='{sell_label.encode('ascii', 'ignore').decode()}', HOLD='{hold_label.encode('ascii', 'ignore').decode()}'"
-        )
-        assert "BUY" in buy_label and "SELL" in sell_label and "HOLD" in hold_label
-
-        # format_confidence_display — must never show a raw number when uncalibrated
-        signal_calibrated = PredictionSignal(
-            symbol="TEST",
-            timestamp=datetime.now(),
-            horizon="INTRADAY",
-            action=ACTION_BUY,
-            model_predicted_class="UP",
-            model_version="UNKNOWN",
-            feature_version="UNKNOWN",
-            raw_confidence=0.8,
-            risk_adjusted_confidence=0.8,
-            calibrated_confidence=0.75,
-            agreement_fraction=0.66,
-            downside_summary="d",
-            upside_summary="u",
-            reasoning=[],
-        )
-        signal_uncalibrated = PredictionSignal(
-            symbol="TEST",
-            timestamp=datetime.now(),
-            horizon="INTRADAY",
-            action=ACTION_BUY,
-            model_predicted_class="UP",
-            model_version="UNKNOWN",
-            feature_version="UNKNOWN",
-            raw_confidence=0.8,
-            risk_adjusted_confidence=0.8,
-            calibrated_confidence=None,
-            agreement_fraction=0.66,
-            downside_summary="d",
-            upside_summary="u",
-            reasoning=[],
-        )
-        calibrated_display = format_confidence_display(signal_calibrated)
-        uncalibrated_display = format_confidence_display(signal_uncalibrated)
-        print(f"Calibrated display: '{calibrated_display}'")
-        print(f"Uncalibrated display: '{uncalibrated_display}'")
-        assert "75%" in calibrated_display
-        assert "not yet calibrated" in uncalibrated_display
-        assert "0.8" not in uncalibrated_display  # the raw number must NEVER leak into the uncalibrated display
-
-        # format_events_for_table
-        test_event = Event(
-            event_id="E1",
-            source="NEWS",
-            event_type="NEWS_HEADLINE",
-            timestamp=datetime.now(),
-            scope="STOCK",
-            affected_tickers=["TEST"],
-            sector=None,
-            confidence_in_scope=1.0,
-            headline_or_label="Test headline",
-            sentiment_score=0.3,
-            magnitude_estimate="MEDIUM",
-        )
-        table_rows = format_events_for_table([test_event])
-        print(f"Events table row: {table_rows}")
-        assert len(table_rows) == 1 and table_rows[0]["label"] == "Test headline"
-
-        # risk_banner_style
-        styles = {level: risk_banner_style(level) for level in ["NORMAL", "ELEVATED", "CRISIS", "UNKNOWN"]}
-        print(f"Risk banner styles: {styles}")
-        assert styles["NORMAL"] == "success" and styles["ELEVATED"] == "warning" and styles["CRISIS"] == "error"
-
-        # prediction_records_to_dataframe — empty list must not crash
-        empty_df = prediction_records_to_dataframe([])
-        print(f"Empty history produces empty DataFrame without error: {empty_df.empty}")
-        assert empty_df.empty
-
-        print("STATUS: PASS")
-        logger.info("app.py self-test (pure logic) passed.")
-
-    except AssertionError as ae:
-        logger.error(f"app.py self-test assertion failed: {ae}")
-        print(f"STATUS: FAIL — {ae}")
-    except Exception as e:
-        logger.error(f"app.py self-test crashed: {e}")
-        print(f"STATUS: FAIL — {e}")
-
-    # Only render the real dashboard when actually launched via `streamlit run app.py`.
-    # Running this file with plain `python app.py` (as above) is for the self-test only.
     if st_runtime.exists():
         render_dashboard()
     else:
-        print("\n(Self-test complete. To actually use the dashboard, run: " "streamlit run app.py)")
+        from datetime import UTC, datetime
+
+        configure_logging(log_filename="app_selftest.log")
+        logger.info("Running app.py self-test...")
+
+        try:
+            print("\n=== APP SELF-TEST RESULT ===")
+
+            # format_action_label
+            buy_label = format_action_label(ACTION_BUY)
+            sell_label = format_action_label(ACTION_SELL)
+            hold_label = format_action_label(ACTION_HOLD)
+            print(
+                f"Action labels: BUY='{buy_label.encode('ascii', 'ignore').decode()}', SELL='{sell_label.encode('ascii', 'ignore').decode()}', HOLD='{hold_label.encode('ascii', 'ignore').decode()}'"
+            )
+            assert "BUY" in buy_label and "SELL" in sell_label and "HOLD" in hold_label
+
+            # format_confidence_display — must never show a raw number when uncalibrated
+            now_utc = datetime.now(UTC)
+            signal_calibrated = PredictionSignal(
+                symbol="TEST",
+                timestamp=now_utc,
+                horizon="INTRADAY",
+                action=ACTION_BUY,
+                model_predicted_class="UP",
+                model_version="UNKNOWN",
+                feature_version="UNKNOWN",
+                raw_confidence=0.8,
+                risk_adjusted_confidence=0.8,
+                calibrated_confidence=0.75,
+                agreement_fraction=0.66,
+                downside_summary="d",
+                upside_summary="u",
+                reasoning=[],
+            )
+            signal_uncalibrated = PredictionSignal(
+                symbol="TEST",
+                timestamp=now_utc,
+                horizon="INTRADAY",
+                action=ACTION_BUY,
+                model_predicted_class="UP",
+                model_version="UNKNOWN",
+                feature_version="UNKNOWN",
+                raw_confidence=0.8,
+                risk_adjusted_confidence=0.8,
+                calibrated_confidence=None,
+                agreement_fraction=0.66,
+                downside_summary="d",
+                upside_summary="u",
+                reasoning=[],
+            )
+            calibrated_display = format_confidence_display(signal_calibrated)
+            uncalibrated_display = format_confidence_display(signal_uncalibrated)
+            print(f"Calibrated display: '{calibrated_display}'")
+            print(f"Uncalibrated display: '{uncalibrated_display}'")
+            assert "75%" in calibrated_display
+            assert "not yet calibrated" in uncalibrated_display
+            assert "0.8" not in uncalibrated_display  # the raw number must NEVER leak into the uncalibrated display
+
+            # format_events_for_table
+            test_event = Event(
+                event_id="E1",
+                source="NEWS",
+                event_type="NEWS_HEADLINE",
+                timestamp=now_utc,
+                scope="STOCK",
+                affected_tickers=["TEST"],
+                sector=None,
+                confidence_in_scope=1.0,
+                headline_or_label="Test headline",
+                sentiment_score=0.3,
+                magnitude_estimate="MEDIUM",
+            )
+            table_rows = format_events_for_table([test_event])
+            print(f"Events table row: {table_rows}")
+            assert len(table_rows) == 1 and table_rows[0]["label"] == "Test headline"
+
+            # risk_banner_style
+            styles = {level: risk_banner_style(level) for level in ["NORMAL", "ELEVATED", "CRISIS", "UNKNOWN"]}
+            print(f"Risk banner styles: {styles}")
+            assert styles["NORMAL"] == "success" and styles["ELEVATED"] == "warning" and styles["CRISIS"] == "error"
+
+            # prediction_records_to_dataframe — empty list must not crash
+            empty_df = prediction_records_to_dataframe([])
+            print(f"Empty history produces empty DataFrame without error: {empty_df.empty}")
+            assert empty_df.empty
+
+            print("STATUS: PASS")
+            logger.info("app.py self-test (pure logic) passed.")
+
+        except AssertionError as ae:
+            logger.error(f"app.py self-test assertion failed: {ae}")
+            print(f"STATUS: FAIL — {ae}")
+        except Exception as e:
+            logger.error(f"app.py self-test crashed: {e}")
+            print(f"STATUS: FAIL — {e}")
+
+        print("\n(Self-test complete. To actually use the dashboard, run: streamlit run app.py)")

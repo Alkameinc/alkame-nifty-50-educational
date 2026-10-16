@@ -1,8 +1,6 @@
 # 1. Standard library imports
-from datetime import datetime, timezone
-from pathlib import Path
 import sys
-from typing import Any
+from pathlib import Path
 from unittest.mock import MagicMock
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -15,18 +13,13 @@ import pandas as pd
 import pytest
 
 # 3. Local imports
-from config import HORIZON_INTRADAY
 from execution_simulator import PHASE12_MANDATORY_SCENARIOS
 from predictor import MultiHorizonSignal, PredictionSignal
-from scanner import OpportunityScanner, ScanResult, ScanSummary
+from scanner import OpportunityScanner
 from scanner_validator import (
-    ScannerCohortMetrics,
-    ScannerRegimeMetrics,
     ScannerSignal,
-    ScannerTurnoverMetrics,
     ScannerValidationReport,
     ScannerValidator,
-    compute_ece_and_brier,
     compute_herfindahl_index,
 )
 from sector_provider import sector_map_provider
@@ -194,7 +187,7 @@ def test_class_and_sector_distribution_and_concentration():
     # Test within ScannerValidator
     validator = ScannerValidator()
     base_ts = pd.Timestamp("2026-01-05 09:30", tz="Asia/Kolkata")
-    
+
     # 5 stocks: 4 from Banking, 1 from IT
     banking_syms = ["HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK"]
     it_sym = ["TCS"]

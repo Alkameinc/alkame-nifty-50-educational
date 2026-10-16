@@ -10,23 +10,23 @@ Tests that horizon configurations properly account for market calendar reality:
 Part of PY-01 Assignment (8 points, P1)
 """
 
+from datetime import date
+
 import pytest
-from datetime import date, timedelta
 
 from config import (
     ALL_HORIZONS,
-    HORIZON_CONFIG,
-    HORIZON_INTRADAY,
+    HORIZON_1Y,
     HORIZON_3D,
-    HORIZON_7D,
-    HORIZON_30D,
     HORIZON_3M,
     HORIZON_6M,
-    HORIZON_1Y,
+    HORIZON_7D,
+    HORIZON_30D,
+    HORIZON_CONFIG,
+    HORIZON_INTRADAY,
 )
 from horizon_validator import HorizonValidator
 from market_calendar import MarketCalendar
-
 
 # ============================================================================
 # NORMAL CASES: Valid configurations
@@ -48,7 +48,7 @@ def test_f27_normal_intraday_horizon_valid():
     assert result["actual_bars"] == 6
     assert result["discrepancy"] is None
 
-    print(f"✓ NORMAL case passed: INTRADAY (6 bars × 5m = 30min) is valid")
+    print("✓ NORMAL case passed: INTRADAY (6 bars × 5m = 30min) is valid")
 
 
 def test_f27_normal_1y_horizon_valid():
@@ -67,7 +67,7 @@ def test_f27_normal_1y_horizon_valid():
     assert result["expected_bars"] == 252
     assert result["discrepancy"] is None
 
-    print(f"✓ NORMAL case passed: 1Y (252 bars) matches trading year")
+    print("✓ NORMAL case passed: 1Y (252 bars) matches trading year")
 
 
 def test_f27_normal_30d_horizon_valid():
@@ -86,7 +86,7 @@ def test_f27_normal_30d_horizon_valid():
     # Expected should be ~21 (within tolerance of ±2)
     assert abs(result["expected_bars"] - 21) <= 2
 
-    print(f"✓ NORMAL case passed: 30D (21 bars) accounts for weekends")
+    print("✓ NORMAL case passed: 30D (21 bars) accounts for weekends")
 
 
 # ============================================================================
@@ -115,7 +115,7 @@ def test_f27_boundary_7d_horizon_bar_count():
         assert result["discrepancy"] is not None
         print(f"⚠️  BOUNDARY case: 7D flagged with: {result['discrepancy']}")
     else:
-        print(f"✓ BOUNDARY case passed: 7D (5 bars) correctly accounts for weekend")
+        print("✓ BOUNDARY case passed: 7D (5 bars) correctly accounts for weekend")
 
 
 def test_f27_boundary_3d_horizon_weekend_handling():
@@ -180,7 +180,7 @@ def test_f27_failure_unknown_horizon():
     assert "not found in HORIZON_CONFIG" in result["discrepancy"]
     assert result["recommendation"] is not None
 
-    print(f"✓ FAILURE case passed: Unknown horizon correctly rejected")
+    print("✓ FAILURE case passed: Unknown horizon correctly rejected")
 
 
 def test_f27_failure_bar_interval_mismatch():
@@ -199,7 +199,7 @@ def test_f27_failure_bar_interval_mismatch():
             f"{horizon} should use '1d' interval, got '{config['bar_interval']}'"
         )
 
-    print(f"✓ FAILURE case passed: All multi-day horizons correctly use '1d' interval")
+    print("✓ FAILURE case passed: All multi-day horizons correctly use '1d' interval")
 
 
 # ============================================================================
@@ -237,7 +237,7 @@ def test_f27_integration_trading_days_counting():
         f"365 calendar days should have ~252 trading days, got {trading_days_365}"
     )
 
-    print(f"✓ INTEGRATION passed: Trading day counts match calendar reality")
+    print("✓ INTEGRATION passed: Trading day counts match calendar reality")
     print(f"  7 days: {trading_days_7} trading days")
     print(f"  30 days: {trading_days_30} trading days")
     print(f"  365 days: {trading_days_365} trading days")
@@ -261,7 +261,7 @@ def test_f27_integration_weekend_holiday_handling():
         f"Fri-Sat-Sun-RepublicDay should have 1 trading day, got {trading_days}"
     )
 
-    print(f"✓ INTEGRATION passed: Weekend and holiday correctly excluded")
+    print("✓ INTEGRATION passed: Weekend and holiday correctly excluded")
 
 
 def test_f27_integration_all_horizons_consistency():
@@ -326,7 +326,7 @@ def test_f27_integration_expected_bars_calculation():
             f"{horizon_label}: expected ~{expected_cal_days} cal days, calculated {cal_days}"
         )
 
-    print(f"✓ INTEGRATION passed: Expected bars calculation is reasonable")
+    print("✓ INTEGRATION passed: Expected bars calculation is reasonable")
 
 
 # ============================================================================
@@ -364,7 +364,7 @@ def test_f27_documentation_validation_report():
     # Report should show pass/fail status
     assert "PASS" in output or "FAIL" in output
 
-    print(f"✓ DOCUMENTATION passed: Validation report is comprehensive")
+    print("✓ DOCUMENTATION passed: Validation report is comprehensive")
     print(f"  Report length: {len(output)} characters")
 
 
@@ -379,7 +379,7 @@ def test_f27_regression_horizon_config_accessible():
 
     Verify F27 fix doesn't break existing config access.
     """
-    from config import HORIZON_CONFIG, ALL_HORIZONS
+    from config import ALL_HORIZONS, HORIZON_CONFIG
 
     assert isinstance(HORIZON_CONFIG, dict)
     assert len(HORIZON_CONFIG) >= 7  # At least 7 horizons
@@ -391,7 +391,7 @@ def test_f27_regression_horizon_config_accessible():
         assert "bar_interval" in config
         assert "deadband_pct_default" in config
 
-    print(f"✓ REGRESSION passed: HORIZON_CONFIG structure preserved")
+    print("✓ REGRESSION passed: HORIZON_CONFIG structure preserved")
 
 
 def test_f27_regression_market_calendar_functional():
@@ -417,7 +417,7 @@ def test_f27_regression_market_calendar_functional():
     regular_weekday = date(2026, 7, 14)  # Tuesday in July, not a holiday
     assert cal.is_trading_day(regular_weekday) is True
 
-    print(f"✓ REGRESSION passed: MarketCalendar functionality intact")
+    print("✓ REGRESSION passed: MarketCalendar functionality intact")
 
 
 # ============================================================================

@@ -1,11 +1,10 @@
 # 1. Standard library imports
-from datetime import datetime, timedelta, timezone
 import json
-import os
-from pathlib import Path
 import sys
 import tempfile
 import unittest
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -13,14 +12,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # 2. Third-party imports
-from fastapi.testclient import TestClient
-import numpy as np
 import pandas as pd
-import pytest
+from fastapi.testclient import TestClient
+
+import config
 
 # 3. Local imports
 from api import app
-import config
 from health_monitor import (
     ENGINE_HEALTH_DEGRADED,
     ENGINE_HEALTH_FAILED,
@@ -31,12 +29,8 @@ from health_monitor import (
 from model_validity import (
     ALL_VALIDITY_STATES,
     CALIBRATION_STATUS_ADVERSARIAL,
-    CALIBRATION_STATUS_INSUFFICIENT_DATA,
-    CALIBRATION_STATUS_MISCALIBRATED,
     CALIBRATION_STATUS_WELL_CALIBRATED,
     EDGE_STATUS_CONFIRMED,
-    EDGE_STATUS_NO_EDGE,
-    ModelValidityResult,
     VALIDITY_CALIBRATED,
     VALIDITY_INVALID,
     VALIDITY_LIVE_ELIGIBLE,
@@ -44,16 +38,9 @@ from model_validity import (
     VALIDITY_TRAINED,
     VALIDITY_UNTRAINED,
     VALIDITY_VALIDATED,
+    ModelValidityResult,
     can_serve_live_signal,
     evaluate_model_validity,
-)
-from runtime_validator import (
-    CalibrationResult,
-    EdgeCheckResult,
-    RuntimeValidator,
-    STATUS_EDGE_CONFIRMED,
-    STATUS_NO_EDGE,
-    STATUS_SUFFICIENT,
 )
 
 
@@ -138,7 +125,7 @@ class TestModelValidityStates(unittest.TestCase):
             "model_id": f"{symbol}_{horizon}_v1",
             "model_version": "v1.0",
             "artifact_sha256": "expected_valid_sha256_hash_that_does_not_match",
-            "trained_at": datetime.now(timezone.utc).isoformat(),
+            "trained_at": datetime.now(UTC).isoformat(),
         }
         meta_file.write_text(json.dumps(meta), encoding="utf-8")
 
@@ -169,7 +156,7 @@ class TestModelValidityStates(unittest.TestCase):
             "model_id": f"{symbol}_{horizon}_v1",
             "model_version": "v1.0",
             "artifact_sha256": h,
-            "trained_at": datetime.now(timezone.utc).isoformat(),
+            "trained_at": datetime.now(UTC).isoformat(),
         }
         meta_file.write_text(json.dumps(meta), encoding="utf-8")
 
@@ -205,7 +192,7 @@ class TestModelValidityStates(unittest.TestCase):
         import hashlib
         h = hashlib.sha256(content).hexdigest()
 
-        old_date = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()
+        old_date = (datetime.now(UTC) - timedelta(days=45)).isoformat()
         meta = {
             "model_id": f"{symbol}_{horizon}_v1",
             "model_version": "v1.0",
@@ -242,7 +229,7 @@ class TestModelValidityStates(unittest.TestCase):
         import hashlib
         h = hashlib.sha256(content).hexdigest()
 
-        fresh_date = datetime.now(timezone.utc).isoformat()
+        fresh_date = datetime.now(UTC).isoformat()
         meta = {
             "model_id": f"{symbol}_{horizon}_v1",
             "model_version": "v1.0",
@@ -274,7 +261,7 @@ class TestModelValidityStates(unittest.TestCase):
         import hashlib
         h = hashlib.sha256(content).hexdigest()
 
-        fresh_date = datetime.now(timezone.utc).isoformat()
+        fresh_date = datetime.now(UTC).isoformat()
         meta = {
             "model_id": f"{symbol}_{horizon}_v1",
             "model_version": "v1.0",
@@ -309,7 +296,7 @@ class TestModelValidityStates(unittest.TestCase):
         import hashlib
         h = hashlib.sha256(content).hexdigest()
 
-        fresh_date = datetime.now(timezone.utc).isoformat()
+        fresh_date = datetime.now(UTC).isoformat()
         meta = {
             "model_id": f"{symbol}_{horizon}_v1",
             "model_version": "v1.0",
@@ -344,7 +331,7 @@ class TestModelValidityStates(unittest.TestCase):
         import hashlib
         h = hashlib.sha256(content).hexdigest()
 
-        fresh_date = datetime.now(timezone.utc).isoformat()
+        fresh_date = datetime.now(UTC).isoformat()
         meta = {
             "model_id": f"{symbol}_{horizon}_v1",
             "model_version": "v1.0",
@@ -532,7 +519,7 @@ class TestApiHealthAndValidityEndpoints(unittest.TestCase):
         from predictor import MultiHorizonSignal, PredictionSignal
         dummy_sig = PredictionSignal(
             symbol="RELIANCE",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             horizon="INTRADAY",
             action="BUY",
             model_predicted_class="UP",
@@ -551,7 +538,7 @@ class TestApiHealthAndValidityEndpoints(unittest.TestCase):
         )
         multi_sig = MultiHorizonSignal(
             symbol="RELIANCE",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             signals={"INTRADAY": dummy_sig},
             primary_action="BUY",
             primary_horizon="INTRADAY",
@@ -587,7 +574,7 @@ class TestApiHealthAndValidityEndpoints(unittest.TestCase):
         from predictor import MultiHorizonSignal, PredictionSignal
         dummy_sig = PredictionSignal(
             symbol="RELIANCE",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             horizon="INTRADAY",
             action="BUY",
             model_predicted_class="UP",
@@ -606,7 +593,7 @@ class TestApiHealthAndValidityEndpoints(unittest.TestCase):
         )
         multi_sig = MultiHorizonSignal(
             symbol="RELIANCE",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             signals={"INTRADAY": dummy_sig},
             primary_action="BUY",
             primary_horizon="INTRADAY",

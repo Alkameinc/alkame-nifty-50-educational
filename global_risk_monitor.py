@@ -2,7 +2,7 @@
 import json
 import logging
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 import numpy as np
 
@@ -128,7 +128,7 @@ class GlobalRiskMonitor:
                     reason="",
                     level_at_activation=None,
                     activated_at=None,
-                    updated_at=datetime.now().isoformat(),
+                    updated_at=datetime.now(UTC).isoformat(),
                     changed_by="system",
                     version=1,
                 )
@@ -159,7 +159,7 @@ class GlobalRiskMonitor:
             reason="",
             level_at_activation=None,
             activated_at=None,
-            updated_at=datetime.now().isoformat(),
+            updated_at=datetime.now(UTC).isoformat(),
             changed_by="system",
             version=1,
         )
@@ -184,7 +184,7 @@ class GlobalRiskMonitor:
         expected_version: int | None = None,
     ) -> ToggleState:
         """Human-gated override switch. Persists to shared DB with optimistic versioning."""
-        now_iso = datetime.now().isoformat()
+        now_iso = datetime.now(UTC).isoformat()
         new_version = (self._toggle_state.version + 1) if self._toggle_state else 1
 
         # 1. Update shared DB
@@ -277,7 +277,7 @@ class GlobalRiskMonitor:
         Missing tickers are excluded from the composite rather than crashing
         the whole computation — degrades gracefully.
         """
-        now = datetime.now()
+        now = datetime.now(UTC)
         if self._cached_reading is not None and self._cached_time is not None:
             if (now - self._cached_time).total_seconds() < 300:  # 5 minutes
                 return self._cached_reading
@@ -297,7 +297,7 @@ class GlobalRiskMonitor:
                 logger.error("No global risk drivers available at all — failing closed to UNAVAILABLE.")
                 health_registry.report("global_risk_monitor", ok=False, detail="No global risk drivers available")
                 return GlobalRiskReading(
-                    timestamp=datetime.now(),
+                    timestamp=datetime.now(UTC),
                     composite_zscore=0.0,
                     risk_level=RISK_LEVEL_UNAVAILABLE,
                     dominant_driver=None,
@@ -320,7 +320,7 @@ class GlobalRiskMonitor:
             health_registry.report("global_risk_monitor", ok=True)
 
             result = GlobalRiskReading(
-                timestamp=datetime.now(),
+                timestamp=datetime.now(UTC),
                 composite_zscore=composite,
                 risk_level=level,
                 dominant_driver=dominant_driver,
@@ -338,7 +338,7 @@ class GlobalRiskMonitor:
                 "global_risk_monitor", ok=False, detail="Failed computing composite risk", error=str(e)
             )
             result = GlobalRiskReading(
-                timestamp=datetime.now(),
+                timestamp=datetime.now(UTC),
                 composite_zscore=0.0,
                 risk_level=RISK_LEVEL_UNAVAILABLE,
                 dominant_driver=None,
@@ -436,7 +436,7 @@ if __name__ == "__main__":
         # Force a synthetic CRISIS reading to test the multiplier logic deterministically
         # (we don't rely on live data actually being in a crisis state for this test)
         synthetic_reading = GlobalRiskReading(
-            timestamp=datetime.now(),
+            timestamp=datetime.now(UTC),
             composite_zscore=3.0,
             risk_level=RISK_LEVEL_CRISIS,
             dominant_driver="CRUDE_BRENT",

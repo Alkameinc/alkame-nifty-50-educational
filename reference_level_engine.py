@@ -1,7 +1,7 @@
 # 1. Standard library imports
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 # 2. Third-party imports
@@ -60,7 +60,7 @@ class ReferenceLevels:
     def __post_init__(self):
         # DATA-004: Standardize internal timestamps on timezone-aware UTC
         if self.as_of is not None and getattr(self.as_of, "tzinfo", None) is None:
-            self.as_of = self.as_of.replace(tzinfo=timezone.utc)
+            self.as_of = self.as_of.replace(tzinfo=UTC)
 
     @property
     def is_available(self) -> bool:
@@ -174,7 +174,7 @@ class ReferenceLevelEngine:
                 f"REF-002: Reference level calculation unavailable: {msg}",
                 extra={
                     "symbol": symbol,
-                    "timestamp": str(datetime.now(timezone.utc)),
+                    "timestamp": str(datetime.now(UTC)),
                     "operation": "get_reference_levels",
                     "exception_type": "InsufficientDataError",
                     "detail": msg,
@@ -183,7 +183,7 @@ class ReferenceLevelEngine:
             health_registry.report("reference_level_engine", ok=False, detail=msg)
             return ReferenceLevels(
                 symbol=symbol,
-                as_of=datetime.now(timezone.utc),
+                as_of=datetime.now(UTC),
                 current_price=0.0,
                 status="UNAVAILABLE",
                 error=msg,
@@ -196,7 +196,7 @@ class ReferenceLevelEngine:
                 f"REF-002: Reference level calculation unavailable: {msg}",
                 extra={
                     "symbol": symbol,
-                    "timestamp": str(datetime.now(timezone.utc)),
+                    "timestamp": str(datetime.now(UTC)),
                     "operation": "get_reference_levels",
                     "exception_type": "InsufficientDataError",
                     "detail": msg,
@@ -209,7 +209,7 @@ class ReferenceLevelEngine:
                 cp = 0.0
             return ReferenceLevels(
                 symbol=symbol,
-                as_of=datetime.now(timezone.utc),
+                as_of=datetime.now(UTC),
                 current_price=cp,
                 status="UNAVAILABLE",
                 error=msg,
@@ -223,9 +223,9 @@ class ReferenceLevelEngine:
             if hasattr(as_of, "to_pydatetime"):
                 as_of = as_of.to_pydatetime()
             elif not isinstance(as_of, datetime):
-                as_of = datetime.now(timezone.utc)
+                as_of = datetime.now(UTC)
             if getattr(as_of, "tzinfo", None) is None:
-                as_of = as_of.replace(tzinfo=timezone.utc)
+                as_of = as_of.replace(tzinfo=UTC)
 
             current_price = float(stock_df["Close"].iloc[-1])
 
@@ -294,7 +294,7 @@ class ReferenceLevelEngine:
             health_registry.report("reference_level_engine", ok=False, detail=err_msg, error=str(e))
             return ReferenceLevels(
                 symbol=symbol,
-                as_of=as_of if isinstance(as_of, datetime) else datetime.now(timezone.utc),
+                as_of=as_of if isinstance(as_of, datetime) else datetime.now(UTC),
                 current_price=current_price,
                 status="UNAVAILABLE",
                 error=err_msg,
@@ -314,7 +314,7 @@ class ReferenceLevelEngine:
             health_registry.report("reference_level_engine", ok=False, detail="Unexpected engine defect", error=str(e))
             return ReferenceLevels(
                 symbol=symbol,
-                as_of=as_of if isinstance(as_of, datetime) else datetime.now(timezone.utc),
+                as_of=as_of if isinstance(as_of, datetime) else datetime.now(UTC),
                 current_price=current_price,
                 status="UNAVAILABLE",
                 error=f"Unexpected defect: {e}",

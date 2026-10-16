@@ -9,20 +9,17 @@ Tests the versioned universe and sector providers, plus corporate action handlin
 Part of PY-01 Assignment (5 points, P1)
 """
 
-import pytest
-import hashlib
 import json
 from pathlib import Path
-from datetime import date
 
-import pandas as pd
 import numpy as np
+import pandas as pd
+import pytest
 
-from universe_provider import UniverseProvider, UniverseSnapshot, get_nifty50_constituents
-from sector_provider import SectorMapProvider, get_symbol_sector
-from market_data_provider import PriceAdjustmentMode, TestFixtureMarketDataProvider, DataStatus
 import config
-
+from market_data_provider import DataStatus, PriceAdjustmentMode, TestFixtureMarketDataProvider
+from sector_provider import SectorMapProvider, get_symbol_sector
+from universe_provider import UniverseProvider, get_nifty50_constituents
 
 # ============================================================================
 # NORMAL CASES: Valid universe and sector operations
@@ -118,7 +115,7 @@ def test_f28_normal_corporate_action_modes_defined():
     assert PriceAdjustmentMode.RAW.value == "raw"
     assert PriceAdjustmentMode.TOTAL_RETURN.value == "total_return"
 
-    print(f"✓ NORMAL case passed: Corporate action modes defined (adjusted, raw, total_return)")
+    print("✓ NORMAL case passed: Corporate action modes defined (adjusted, raw, total_return)")
 
 
 # ============================================================================
@@ -200,7 +197,7 @@ def test_f28_boundary_config_sync():
         # They should match (or provider should override if different)
         assert config_sector != "Unknown" or provider_sector != "Unknown"
 
-    print(f"✓ BOUNDARY case passed: Config synced with providers")
+    print("✓ BOUNDARY case passed: Config synced with providers")
 
 
 def test_f28_boundary_universe_duplicate_detection():
@@ -219,7 +216,7 @@ def test_f28_boundary_universe_duplicate_detection():
     # Verify validation logic
     assert provider.validate_constituents(expected_count=50) is True
 
-    print(f"✓ BOUNDARY case passed: Duplicate detection working")
+    print("✓ BOUNDARY case passed: Duplicate detection working")
 
 
 # ============================================================================
@@ -242,7 +239,7 @@ def test_f28_failure_nonexistent_symbol_sector():
     assert sector == "Unknown", "Non-existent symbol should return Unknown sector"
     assert industry == "Unknown", "Non-existent symbol should return Unknown industry"
 
-    print(f"✓ FAILURE case passed: Invalid symbol handled gracefully")
+    print("✓ FAILURE case passed: Invalid symbol handled gracefully")
 
 
 def test_f28_failure_wrong_constituent_count():
@@ -261,7 +258,7 @@ def test_f28_failure_wrong_constituent_count():
     assert provider.validate_constituents(expected_count=49) is False
     assert provider.validate_constituents(expected_count=51) is False
 
-    print(f"✓ FAILURE case passed: Wrong constituent count detected")
+    print("✓ FAILURE case passed: Wrong constituent count detected")
 
 
 def test_f28_failure_empty_sector_filter():
@@ -277,7 +274,7 @@ def test_f28_failure_empty_sector_filter():
     assert isinstance(symbols, list)
     assert len(symbols) == 0
 
-    print(f"✓ FAILURE case passed: Non-existent sector returns empty list")
+    print("✓ FAILURE case passed: Non-existent sector returns empty list")
 
 
 # ============================================================================
@@ -316,7 +313,7 @@ def test_f28_integration_price_adjustment_in_test_fixture():
     assert result_raw.status == DataStatus.LIVE
     assert result_raw.adjustment_mode == PriceAdjustmentMode.RAW
 
-    print(f"✓ INTEGRATION passed: Price adjustment mode tracked correctly")
+    print("✓ INTEGRATION passed: Price adjustment mode tracked correctly")
 
 
 def test_f28_integration_universe_sector_cross_reference():
@@ -366,7 +363,7 @@ def test_f28_integration_versioned_data_effective_dates():
     assert universe_snapshot.effective_from is not None
     assert universe_snapshot.source is not None
 
-    print(f"✓ INTEGRATION passed: Universe snapshot metadata complete")
+    print("✓ INTEGRATION passed: Universe snapshot metadata complete")
     print(f"  Version: {universe_snapshot.version}")
     print(f"  Effective from: {universe_snapshot.effective_from}")
     print(f"  Source: {universe_snapshot.source}")
@@ -399,7 +396,7 @@ def test_f28_integration_sector_industry_hierarchy():
         assert industry != "Unknown", f"{symbol} should have industry"
         assert industry != sector, f"{symbol} industry should be more granular than sector"
 
-    print(f"✓ INTEGRATION passed: Sector/industry hierarchy validated")
+    print("✓ INTEGRATION passed: Sector/industry hierarchy validated")
 
 
 # ============================================================================
@@ -423,7 +420,7 @@ def test_f28_regression_config_constants_accessible():
     assert len(config.NIFTY50_SYMBOLS) == 50
     assert len(config.SECTOR_MAP) >= 50
 
-    print(f"✓ REGRESSION passed: Config constants intact")
+    print("✓ REGRESSION passed: Config constants intact")
 
 
 def test_f28_regression_helper_functions():
@@ -442,7 +439,7 @@ def test_f28_regression_helper_functions():
     assert isinstance(reliance_sector, str)
     assert reliance_sector == "Energy"
 
-    print(f"✓ REGRESSION passed: Helper functions working")
+    print("✓ REGRESSION passed: Helper functions working")
 
 
 def test_f28_regression_data_reliability_tests_still_pass():
@@ -453,9 +450,9 @@ def test_f28_regression_data_reliability_tests_still_pass():
     """
     # Import and run key assertions from test_data_reliability.py
     from test_data_reliability import (
-        test_universe_provider_integrity_and_checksum,
-        test_sector_map_provider_coverage,
         test_corporate_action_adjustment_metadata,
+        test_sector_map_provider_coverage,
+        test_universe_provider_integrity_and_checksum,
     )
 
     # These should not raise any exceptions
@@ -463,7 +460,7 @@ def test_f28_regression_data_reliability_tests_still_pass():
     test_sector_map_provider_coverage()
     test_corporate_action_adjustment_metadata()
 
-    print(f"✓ REGRESSION passed: Original data reliability tests still pass")
+    print("✓ REGRESSION passed: Original data reliability tests still pass")
 
 
 # ============================================================================
@@ -491,7 +488,7 @@ def test_f28_documentation_universe_data_file_exists():
     assert isinstance(data["constituents"], list)
     assert len(data["constituents"]) == 50
 
-    print(f"✓ DOCUMENTATION passed: Universe data file valid")
+    print("✓ DOCUMENTATION passed: Universe data file valid")
 
 
 def test_f28_documentation_sector_data_file_exists():
@@ -518,7 +515,7 @@ def test_f28_documentation_sector_data_file_exists():
         assert "sector" in mapping, f"{symbol} missing sector"
         assert "industry" in mapping, f"{symbol} missing industry"
 
-    print(f"✓ DOCUMENTATION passed: Sector map data file valid")
+    print("✓ DOCUMENTATION passed: Sector map data file valid")
 
 
 # ============================================================================

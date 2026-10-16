@@ -1,24 +1,20 @@
 from __future__ import annotations
 
+import logging
+
 # 1. Standard library imports
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-import logging
-from typing import Any, cast
 
 # 2. Third-party imports
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 
 # 3. Local imports
 from config import (
     HORIZON_CONFIG,
     HORIZON_SCALP,
-    SECTOR_MAP,
 )
-from sector_provider import sector_map_provider
 
 logger = logging.getLogger(__name__)
 
@@ -189,22 +185,22 @@ class ScalpDataset:
 
         c = df["Close"]
         h = df["High"]
-        l = df["Low"]
+        low = df["Low"]
         o = df["Open"]
         v = df["Volume"]
 
-        bar_range = np.maximum(h - l, 1e-6)
-        
+        bar_range = np.maximum(h - low, 1e-6)
+
         features = pd.DataFrame(index=df.index)
-        features["micro_spread_bps"] = ((h - l) / c) * 10000.0 * 0.20
-        features["tick_volatility_pct"] = ((h - l) / c) * 100.0
+        features["micro_spread_bps"] = ((h - low) / c) * 10000.0 * 0.20
+        features["tick_volatility_pct"] = ((h - low) / c) * 100.0
         features["order_imbalance_proxy"] = (c - o) / bar_range
         features["micro_momentum_1b"] = (c - c.shift(1)) / c.shift(1) * 100.0
         features["micro_momentum_2b"] = (c - c.shift(2)) / c.shift(2) * 100.0
-        
+
         roll_vol = v.rolling(5).mean()
         features["volume_surge"] = np.where(roll_vol > 0, v / roll_vol, 1.0)
-        
+
         return features
 
     @staticmethod
@@ -387,10 +383,10 @@ class ScalpValidator:
             if sig in ("BUY", "UP"):
                 entry_p = close.iloc[i]
                 exit_p = close.iloc[i + horizon_bars]
-                
+
                 # Gross return
                 gross_ret = (exit_p - entry_p) / entry_p * 100.0
-                
+
                 # Apply friction: base cost + latency drag + adverse stop if loss
                 is_loss = gross_ret < 0
                 adverse_bps = cfg.adverse_selection_bps if is_loss else 0.0
@@ -557,7 +553,7 @@ class ScalpValidator:
         # 4. Out-of-sample Predictions & Calibration
         probs = scalp_model.predict_proba(X_test)
         preds = scalp_model.predict(X_test)
-        
+
         # Max predicted class probability
         confs = np.max(probs, axis=1)
         # Hit definition: predicted direction matched realized forward label
@@ -631,7 +627,7 @@ if __name__ == "__main__":
     np.random.seed(42)
     n_bars = 400
     timestamps = pd.date_range("2026-01-05 09:15", periods=n_bars, freq="1min", tz="Asia/Kolkata")
-    
+
     price = 1000.0
     prices = [price]
     for _ in range(n_bars - 1):

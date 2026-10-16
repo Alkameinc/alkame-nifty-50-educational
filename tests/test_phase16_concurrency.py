@@ -21,8 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import threading
 import time
-from datetime import datetime, timezone
-from unittest.mock import patch
+from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
@@ -30,17 +29,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api import app
-from config import DB_PATH
-from history_manager import HistoryManager, PredictionRecord
+from history_manager import HistoryManager
 from model_lineage import compute_feature_schema_hash
-from models import Base
 from prediction_concurrency import (
     PredictionConcurrencyCoordinator,
-    PredictionConcurrencyMetrics,
     compute_prediction_key,
-    normalize_timestamp_for_key,
 )
-from predictor import MultiHorizonSignal, PredictionSignal, Predictor
+from predictor import PredictionSignal
 from scheduler import CycleResult, Scheduler
 
 
@@ -77,7 +72,7 @@ def temp_history_manager(tmp_path: Path):
 def test_prediction_key_deterministic_and_unique():
     ts1 = "2026-07-01T09:15:00Z"
     ts2 = pd.Timestamp("2026-07-01 09:15:00", tz="UTC")
-    ts3 = datetime(2026, 7, 1, 9, 15, 0, tzinfo=timezone.utc)
+    ts3 = datetime(2026, 7, 1, 9, 15, 0, tzinfo=UTC)
 
     schema_hash = compute_feature_schema_hash(["rsi_feat", "sma_feat", "vol_feat"])
 
@@ -113,7 +108,7 @@ def test_prediction_key_deterministic_and_unique():
 # ---------------------------------------------------------------------------
 def test_storage_idempotency_prevents_duplicate_records(temp_history_manager):
     hm = temp_history_manager
-    ts = datetime(2026, 7, 1, 9, 15, 0, tzinfo=timezone.utc)
+    ts = datetime(2026, 7, 1, 9, 15, 0, tzinfo=UTC)
     key = compute_prediction_key("RELIANCE", ts, "v1.0", "abc123hash")
 
     sig = PredictionSignal(
@@ -155,7 +150,7 @@ def test_storage_idempotency_prevents_duplicate_records(temp_history_manager):
 # ---------------------------------------------------------------------------
 def test_get_prediction_by_key_and_signal_reconstruction(temp_history_manager):
     hm = temp_history_manager
-    ts = datetime(2026, 7, 1, 9, 30, 0, tzinfo=timezone.utc)
+    ts = datetime(2026, 7, 1, 9, 30, 0, tzinfo=UTC)
     key = compute_prediction_key("INFY", ts, "v1.0", "infy_schema_hash")
 
     sig = PredictionSignal(

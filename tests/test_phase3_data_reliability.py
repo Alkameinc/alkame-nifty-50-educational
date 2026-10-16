@@ -1,6 +1,6 @@
 # 1. Standard library imports
 import sys
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
@@ -11,7 +11,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # 2. Third-party imports
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -19,15 +18,13 @@ import pytest
 from config import MARKET_TIMEZONE
 from data_fetcher import DataFetcher
 from event_classifier import INVALID_EVENT_TIMESTAMP, Event, EventClassifier
-from feature_engineer import AlignmentCoverageReport, FeatureEngineer
-from market_calendar import MarketCalendar, previous_market_close
-from market_data_provider import DataStatus, MarketDataResult, PriceAdjustmentMode
-from predictor import PredictionContext, PredictionSignal, Predictor
+from feature_engineer import FeatureEngineer
+from market_data_provider import DataStatus, MarketDataResult
+from predictor import PredictionContext, PredictionSignal
 from scheduler import Scheduler
 
-
 IST = ZoneInfo(MARKET_TIMEZONE)
-UTC = timezone.utc
+UTC = UTC
 
 
 def _make_intraday_bars(start_dt: datetime, num_bars: int = 10, freq_minutes: int = 5) -> pd.DataFrame:

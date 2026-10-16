@@ -85,10 +85,10 @@ The agent MUST maintain this table as work progresses.
 | SEC-008 | CORS | Restrict methods/headers/credential behavior | P1 | VERIFIED | AI | Yes | Yes |
 | SEC-009 | Audit | Critical state mutations must not silently succeed when audit fails | P1 | VERIFIED | AI | Yes | Yes |
 | SEC-010 | Correlation | Validate/sanitize client correlation IDs | P2 | VERIFIED | AI | Yes | Yes |
-| API-001 | Architecture | Refactor duplicated/legacy API initialization and routes | P1 | OPEN | AI | No | No |
+| API-001 | Architecture | Refactor duplicated/legacy API initialization and routes | P1 | VERIFIED | AI | Yes | Yes |
 | API-002 | Consistency | API prediction path differs from scheduler context | P0 | VERIFIED | AI | Yes | Yes |
-| API-003 | Semantics | Separate raw model score from calibrated probability | P1 | OPEN | AI | No | No |
-| API-004 | UX/API | Remove overly directive trading language from analytical outputs | P1 | OPEN | AI | No | No |
+| API-003 | Semantics | Separate raw model score from calibrated probability | P1 | VERIFIED | AI | Yes | Yes |
+| API-004 | UX/API | Remove overly directive trading language from analytical outputs | P1 | VERIFIED | AI | Yes | Yes |
 | DATA-001 | Freshness | Plain DataFrame cache path can hide stale-data state | P0 | VERIFIED | AI | Yes | Yes |
 | DATA-002 | Freshness | Cache freshness must understand market sessions | P1 | VERIFIED | AI | Yes | Yes |
 | DATA-003 | Alignment | Detect stock/index timestamp alignment loss | P1 | VERIFIED | AI | Yes | Yes |
@@ -120,15 +120,15 @@ The agent MUST maintain this table as work progresses.
 | SCHED-001 | Reliability | Scheduler needs explicit failure/degraded/failed states | P1 | VERIFIED | AI | Yes | Yes |
 | SCHED-002 | Concurrency | Prevent duplicate simultaneous prediction cycles | P1 | VERIFIED | AI | Yes | Yes |
 | SCHED-003 | Storage | Handle SQLite lock/concurrency failures deterministically | P1 | VERIFIED | AI | Yes | Yes |
-| EVENT-001 | Events | Preserve source/event availability semantics end-to-end | P1 | OPEN | AI | No | No |
-| EVENT-002 | Events | Improve keyword/entity event classification | P2 | OPEN | AI | No | No |
-| TEST-001 | Testing | Add full end-to-end integration test | P0 | OPEN | AI | No | No |
-| TEST-002 | Testing | Replace reliance on self-tests with pytest integration suite | P1 | OPEN | AI | No | No |
-| TEST-003 | Testing | Raise quality from line coverage to invariant coverage | P1 | OPEN | AI | No | No |
-| DOC-001 | Documentation | Replace stale `BUGS_FOUND.md` with versioned audit history | P1 | OPEN | AI | No | No |
-| DOC-002 | Documentation | Add `ENGINEERING_CONTRACT.md` for future AI agents | P1 | OPEN | AI | No | No |
+| EVENT-001 | Events | Preserve source/event availability semantics end-to-end | P1 | VERIFIED | AI | Yes | Yes |
+| EVENT-002 | Events | Improve keyword/entity event classification | P2 | VERIFIED | AI | Yes | Yes |
+| TEST-001 | Testing | Add full end-to-end integration test | P0 | VERIFIED | AI | Yes | Yes |
+| TEST-002 | Testing | Replace reliance on self-tests with pytest integration suite | P1 | VERIFIED | AI | Yes | Yes |
+| TEST-003 | Testing | Raise quality from line coverage to invariant coverage | P1 | VERIFIED | AI | Yes | Yes |
+| DOC-001 | Documentation | Replace stale `BUGS_FOUND.md` with versioned audit history | P1 | VERIFIED | AI | Yes | Yes |
+| DOC-002 | Documentation | Add `ENGINEERING_CONTRACT.md` for future AI agents | P1 | VERIFIED | AI | Yes | Yes |
 | OPS-001 | Operations | Add scheduler circuit breaker and alertable health states | P1 | VERIFIED | AI | Yes | Yes |
-| OPS-002 | Operations | Add reproducibility bundle to prediction records | P1 | OPEN | AI | No | No |
+| OPS-002 | Operations | Add reproducibility bundle to prediction records | P1 | VERIFIED | AI | Yes | Yes |
 
 ---
 

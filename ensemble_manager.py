@@ -31,6 +31,8 @@ from sklearn.metrics import accuracy_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+# 3. Local imports
+import config
 from config import (
     ENSEMBLE_LR_MAX_ITER,
     ENSEMBLE_MODEL_TYPES,
@@ -47,9 +49,6 @@ from config import (
     configure_logging,
     ensure_directories,
 )
-
-# 3. Local imports
-import config
 from database import SessionLocal
 from health_monitor import registry as health_registry
 from model_lineage import build_lineage_metadata
@@ -221,7 +220,9 @@ class EnsembleManager:
 
             # Soft-vote: average probability matrices across all models
             avg_proba = np.mean(list(proba_matrices.values()), axis=0)
-            avg_proba = avg_proba / avg_proba.sum(axis=1, keepdims=True)  # Renormalize
+            zero_mask = avg_proba.sum(axis=1, keepdims=True) == 0
+            row_sums = np.where(zero_mask, 1.0, avg_proba.sum(axis=1, keepdims=True))
+            avg_proba = np.where(zero_mask, 1.0 / avg_proba.shape[1], avg_proba / row_sums)
             ensemble_pred_idx = avg_proba.argmax(axis=1)
             ensemble_preds = [LABEL_CLASSES[i] for i in ensemble_pred_idx]
             ensemble_accuracy = accuracy_score(y_test, ensemble_preds)
@@ -450,7 +451,7 @@ class EnsembleManager:
         1. Versioned immutable path (preferred, QNT-008 compliant)
         2. Horizon-suffixed legacy flat path (multi-horizon standard)
         3. Un-suffixed legacy flat path (pre-multi-horizon compatibility with warnings)
-        
+
         Returns (models_dict, classes_list, metadata_dict) or None if no valid artifact found.
         """
         try:
@@ -480,7 +481,7 @@ class EnsembleManager:
                 bundle = joblib.load(ensemble_path)
                 with open(metadata_path, encoding="utf-8") as f:
                     metadata = json.load(f)
-                
+
                 # Validate horizon compatibility
                 meta_horizon = metadata.get("horizon", "UNKNOWN")
                 if meta_horizon != horizon and meta_horizon != "UNKNOWN":
@@ -488,7 +489,7 @@ class EnsembleManager:
                         f"Horizon mismatch: requested {horizon}, metadata says {meta_horizon} "
                         f"for {symbol} at {ensemble_path}. Proceeding with caution."
                     )
-                
+
                 logger.info(
                     f"Loaded ensemble for {symbol} ({horizon}) from legacy flat path: {ensemble_path}"
                 )
@@ -497,19 +498,19 @@ class EnsembleManager:
             # TIER 3: Fall back to un-suffixed legacy flat path (pre-multi-horizon compatibility)
             legacy_ensemble = self._legacy_ensemble_path(symbol)
             legacy_metadata = self._legacy_metadata_path(symbol)
-            
+
             if legacy_ensemble.exists():
                 bundle = joblib.load(legacy_ensemble)
-                
+
                 # Try to load metadata if available
                 metadata = {}
                 if legacy_metadata.exists():
                     with open(legacy_metadata, encoding="utf-8") as f:
                         metadata = json.load(f)
-                
+
                 # Check if metadata specifies a horizon
                 meta_horizon = metadata.get("horizon", "UNKNOWN")
-                
+
                 # ALWAYS warn about legacy unsuffixed artifacts (migration debt alert)
                 if meta_horizon != "UNKNOWN" and meta_horizon != horizon:
                     # Horizon mismatch - highest severity warning
@@ -535,7 +536,7 @@ class EnsembleManager:
                         f"(horizon={horizon} matches metadata). This artifact uses pre-multi-horizon naming. "
                         f"Consider migrating to versioned or horizon-suffixed naming for better provenance tracking."
                     )
-                
+
                 logger.info(
                     f"Loaded ensemble for {symbol} ({horizon}) from LEGACY unsuffixed path: {legacy_ensemble} "
                     f"[compatibility=UNVERIFIED, provenance={meta_horizon}]"
@@ -551,7 +552,7 @@ class EnsembleManager:
                 f"Train the model first using train_all.py or backtester."
             )
             return None
-            
+
         except Exception as e:
             logger.error(f"Failed loading ensemble for {symbol} ({horizon}): {e}")
             return None
@@ -643,7 +644,7 @@ class EnsembleManager:
     def inventory_legacy_artifacts(self, symbols: list[str] | None = None) -> dict[str, dict]:
         """
         Scans models/ directory for legacy artifacts and reports compatibility status.
-        
+
         Returns dict mapping artifact_name -> {
             "path": Path,
             "symbol": str,
@@ -656,43 +657,43 @@ class EnsembleManager:
         }
         """
         from config import ALL_HORIZONS
-        
+
         inventory = {}
-        
+
         # Scan for .joblib files in models/ root (legacy flat structure)
         for joblib_file in MODELS_DIR.glob("*_ensemble.joblib"):
             artifact_name = joblib_file.name
-            
+
             # Try to parse symbol from filename
             # Format: {SYMBOL}_ensemble.joblib OR {SYMBOL}_{HORIZON}_ensemble.joblib
             name_parts = joblib_file.stem.replace("_ensemble", "").split("_")
-            
+
             # Check if last part before _ensemble is a known horizon
             potential_symbol_parts = []
             potential_horizon = None
-            
+
             for i, part in enumerate(name_parts):
                 if part in ALL_HORIZONS:
                     potential_horizon = part
                     potential_symbol_parts = name_parts[:i]
                     break
-            
+
             if not potential_horizon:
                 # No horizon in filename - this is legacy unsuffixed format
                 potential_symbol_parts = name_parts
-            
+
             symbol_name = "_".join(potential_symbol_parts) if potential_symbol_parts else "UNKNOWN"
-            
+
             # If symbols filter provided, skip non-matching
             if symbols and symbol_name not in symbols:
                 continue
-            
+
             # Check for metadata
             meta_path = joblib_file.with_suffix("").parent / f"{joblib_file.stem}_metadata.json"
             has_metadata = meta_path.exists()
             metadata_horizon = None
             metadata = {}
-            
+
             if has_metadata:
                 try:
                     with open(meta_path, encoding="utf-8") as f:
@@ -700,7 +701,7 @@ class EnsembleManager:
                         metadata_horizon = metadata.get("horizon", None)
                 except Exception as e:
                     logger.warning(f"Could not read metadata for {artifact_name}: {e}")
-            
+
             # Determine compatibility
             if potential_horizon and metadata_horizon:
                 # Both filename and metadata have horizon
@@ -732,7 +733,7 @@ class EnsembleManager:
                     "No horizon information in filename or metadata. Cannot determine intended use. "
                     "Strongly recommend retraining with current codebase."
                 )
-            
+
             inventory[artifact_name] = {
                 "path": joblib_file,
                 "symbol": symbol_name,
@@ -747,7 +748,7 @@ class EnsembleManager:
                     "code_commit_sha": metadata.get("code_commit_sha"),
                 } if metadata else None,
             }
-        
+
         return inventory
 
     def predict(self, symbol: str, X: pd.DataFrame, horizon: str = HORIZON_INTRADAY) -> list[EnsemblePrediction] | None:
@@ -764,11 +765,16 @@ class EnsembleManager:
             if missing:
                 logger.error(f"Cannot predict for {symbol}: missing expected feature columns {missing}")
                 return None
-            X_ordered = X[expected_cols]
+            X_ordered = X[expected_cols].copy()
+            # Sanitize and impute missing/infinite values so estimators (e.g. GradientBoostingClassifier) never encounter NaNs
+            X_ordered = X_ordered.replace([np.inf, -np.inf], np.nan)
+            X_ordered = X_ordered.ffill().bfill().fillna(0.0)
 
             proba_matrices = {name: self._reindexed_proba(model, X_ordered) for name, model in models.items()}
             avg_proba = np.mean(list(proba_matrices.values()), axis=0)
-            avg_proba = avg_proba / avg_proba.sum(axis=1, keepdims=True)  # Renormalize
+            zero_mask = avg_proba.sum(axis=1, keepdims=True) == 0
+            row_sums = np.where(zero_mask, 1.0, avg_proba.sum(axis=1, keepdims=True))
+            avg_proba = np.where(zero_mask, 1.0 / avg_proba.shape[1], avg_proba / row_sums)
             pred_idx = avg_proba.argmax(axis=1)
 
             individual_pred_arrays = {name: p.argmax(axis=1) for name, p in proba_matrices.items()}

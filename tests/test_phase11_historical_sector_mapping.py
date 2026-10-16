@@ -1,8 +1,7 @@
 # 1. Standard library imports
-from datetime import date, datetime, timezone
-from pathlib import Path
 import sys
-from typing import Any
+from datetime import UTC, datetime
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -11,13 +10,12 @@ if str(PROJECT_ROOT) not in sys.path:
 # 2. Third-party imports
 import numpy as np
 import pandas as pd
-import pytest
 
 # 3. Local imports
 from config import NIFTY50_SYMBOLS, SECTOR_MAP
-from event_classifier import EventClassifier, SCOPE_SECTOR, SCOPE_STOCK
+from event_classifier import SCOPE_SECTOR, SCOPE_STOCK, EventClassifier
 from predictor import Predictor
-from sector_provider import HistoricalSectorRecord, SectorMapProvider, sector_map_provider
+from sector_provider import sector_map_provider
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +231,7 @@ def test_predictor_point_in_time_sector_adjustment():
     predictor = Predictor()
 
     # Construct synthetic DataFrame with timestamps in 2021 for HDFC
-    dates_2021 = pd.date_range("2021-05-01 09:15:00", periods=50, freq="5min", tz=timezone.utc)
+    dates_2021 = pd.date_range("2021-05-01 09:15:00", periods=50, freq="5min", tz=UTC)
     stock_df = pd.DataFrame(
         {
             "Open": np.linspace(2500, 2550, 50),
@@ -251,7 +249,7 @@ def test_predictor_point_in_time_sector_adjustment():
     assert resolved_sector == "NBFC", f"Expected NBFC, got {resolved_sector}"
 
     # For 2025 dates, HDFC resolves to Unknown
-    dates_2025 = pd.date_range("2025-01-01 09:15:00", periods=50, freq="5min", tz=timezone.utc)
+    dates_2025 = pd.date_range("2025-01-01 09:15:00", periods=50, freq="5min", tz=UTC)
     stock_df_2025 = stock_df.copy()
     stock_df_2025.index = dates_2025
     resolved_sector_2025 = sector_map_provider.get_sector("HDFC", as_of=stock_df_2025.index[-1])

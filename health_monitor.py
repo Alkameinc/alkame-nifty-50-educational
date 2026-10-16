@@ -3,6 +3,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
+
 from sqlalchemy import text as sa_text
 
 # 2. Third-party imports
@@ -58,11 +59,26 @@ class EngineHealthResult:
 # ---------------------------------------------------------------------------
 class HealthRegistry:
     def __init__(self, db_path=None):
-        pass
+        self._db_path = db_path
+        self._session_factory = None
+        if db_path:
+            from sqlalchemy import create_engine
+            from sqlalchemy.orm import sessionmaker
+
+            from models import Base
+            engine_url = f"sqlite:///{db_path}" if db_path != ":memory:" else "sqlite://"
+            engine = create_engine(engine_url, connect_args={"check_same_thread": False})
+            Base.metadata.create_all(bind=engine)
+            self._session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    def _get_session(self):
+        if self._session_factory:
+            return self._session_factory()
+        return SessionLocal()
 
     def report(self, component: str, ok: bool, detail: str = "", error: str | None = None) -> HealthStatus:
         try:
-            with SessionLocal() as db:
+            with self._get_session() as db:
                 row = db.query(DBHealthStatus).filter(DBHealthStatus.component == component).first()
 
                 now_str = datetime.now().isoformat()
@@ -139,7 +155,7 @@ class HealthRegistry:
 
     def get_status(self, component: str | None = None) -> list[HealthStatus]:
         try:
-            with SessionLocal() as db:
+            with self._get_session() as db:
                 if component:
                     rows = db.query(DBHealthStatus).filter(DBHealthStatus.component == component).all()
                 else:
@@ -147,9 +163,13 @@ class HealthRegistry:
 
                 statuses = []
                 for row in rows:
+                    comp_name = str(row.component)
+                    # Filter out test artifacts in production registry mode
+                    if self._db_path is None and component is None and (comp_name.startswith("test_") or comp_name.startswith("comp")):
+                        continue
                     statuses.append(
                         HealthStatus(
-                            component=str(row.component),
+                            component=comp_name,
                             status=str(row.status),
                             last_success_at=(
                                 datetime.fromisoformat(str(row.last_success_at)) if row.last_success_at else None

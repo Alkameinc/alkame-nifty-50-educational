@@ -8,8 +8,8 @@ Part of F17 fix: Missing symbol validation
 """
 
 import logging
+from collections.abc import Callable
 from functools import wraps
-from typing import Callable, Any
 
 from universe_provider import UniverseProvider
 
@@ -306,14 +306,14 @@ if __name__ == "__main__":
     # Test 3: Validation with error
     try:
         validator.validate("INVALID_SYMBOL", raise_error=True)
-        assert False, "Should have raised SymbolValidationError"
+        raise AssertionError("Should have raised SymbolValidationError")
     except SymbolValidationError as e:
         print(f"\n✓ Caught expected error: {e}")
 
     # Test 4: Batch validation
     mixed_symbols = ["RELIANCE", "INVALID", "TCS", "NOTREAL"]
     valid, invalid = validator.validate_batch(mixed_symbols, raise_error=False)
-    print(f"\nBatch validation:")
+    print("\nBatch validation:")
     print(f"  Valid: {valid}")
     print(f"  Invalid: {invalid}")
     assert len(valid) == 2

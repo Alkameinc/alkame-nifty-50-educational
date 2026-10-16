@@ -1,8 +1,7 @@
 # 1. Standard library imports
+import sys
 from datetime import date, datetime
 from pathlib import Path
-import sys
-from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -11,12 +10,11 @@ if str(PROJECT_ROOT) not in sys.path:
 # 2. Third-party imports
 import numpy as np
 import pandas as pd
-import pytest
 
 # 3. Local imports
-from backtester import BacktestResult, Backtester
+from backtester import Backtester
 from config import HORIZON_INTRADAY
-from universe_provider import UniverseProvider, get_nifty50_constituents, universe_provider
+from universe_provider import UniverseProvider, get_nifty50_constituents
 
 
 # ---------------------------------------------------------------------------

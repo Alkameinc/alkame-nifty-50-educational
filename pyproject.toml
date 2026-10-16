@@ -17,6 +17,9 @@ build-backend = "setuptools.build_meta"
 [tool.pytest.ini_options]
 testpaths = ["."]
 python_files = "test_*.py"
+markers = [
+    "self_test: converted module self-tests",
+]
 
 [tool.ruff]
 line-length = 120
@@ -40,7 +43,7 @@ warn_return_any = true
 
 [tool.coverage.run]
 source = ["."]
-omit = ["test_*.py", "data/*", ".venv/*"]
+omit = ["test_*.py", "tests/*", "data/*", ".venv/*"]
 
 [tool.coverage.report]
 fail_under = 60

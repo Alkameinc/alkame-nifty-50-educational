@@ -5,7 +5,6 @@ import json
 import logging
 import platform
 import subprocess
-import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path

@@ -1,7 +1,8 @@
 # 1. Standard library imports
 import logging
+import re
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 # 2. Third-party imports
 # (none required)
@@ -66,14 +67,49 @@ NEWS_KEYWORD_SECTOR_HINTS = {
     "rainfall": MONSOON_SENSITIVE_SECTORS,
     "interest rate": RATE_SENSITIVE_SECTORS,
     "repo rate": RATE_SENSITIVE_SECTORS,
+    "rate cut": RATE_SENSITIVE_SECTORS,
+    "rate hike": RATE_SENSITIVE_SECTORS,
+    "rbi rate": RATE_SENSITIVE_SECTORS,
     "war": ["ALL"],
     "sanction": ["ALL"],
     "blockade": ["ALL"],
     "tariff": ["ALL"],
 }
 
+# EVENT-002: Disambiguation phrases that override a keyword match to prevent false positives
+NEWS_KEYWORD_NEGATIVE_PATTERNS = {
+    "crude": ["crude joke", "crude jokes", "crude language", "crude behavior", "crude remark", "crude remarks"],
+    "war": ["price war", "culture war", "turf war"],
+    "tariff": ["telecom tariff", "mobile tariff", "tariff plan", "5g tariff", "recharge tariff", "prepaid tariff"],
+    "oil": ["oilfield services", "palm oil", "essential oil"],
+    "oil price": ["palm oil", "essential oil"],
+}
 
-INVALID_EVENT_TIMESTAMP = datetime(1970, 1, 1, 0, 0, tzinfo=timezone.utc)
+# EVENT-002: Entity extraction mapping common corporate names to NSE tickers
+COMPANY_NAME_TO_SYMBOL = {
+    "reliance": "RELIANCE",
+    "infosys": "INFY",
+    "tcs": "TCS",
+    "tata consultancy": "TCS",
+    "hdfc bank": "HDFCBANK",
+    "icici bank": "ICICIBANK",
+    "state bank of india": "SBIN",
+    "sbi": "SBIN",
+    "bharti airtel": "BHARTIARTL",
+    "airtel": "BHARTIARTL",
+    "itc": "ITC",
+    "larsen & toubro": "LT",
+    "larsen": "LT",
+    "l&t": "LT",
+    "tata motors": "TATAMOTORS",
+    "wipro": "WIPRO",
+    "hcl tech": "HCLTECH",
+    "sun pharma": "SUNPHARMA",
+    "maruti": "MARUTI",
+}
+
+
+INVALID_EVENT_TIMESTAMP = datetime(1970, 1, 1, 0, 0, tzinfo=UTC)
 
 
 @dataclass
@@ -94,6 +130,7 @@ class Event:
     magnitude_estimate: str = "MEDIUM"  # "LOW" | "MEDIUM" | "HIGH"
     impact_horizon: str = HORIZON_INTRADAY
     raw: dict | None = field(default=None, repr=False)
+    source_confidence: float = 1.0  # keyword=0.5, entity=0.8, curated=1.0
 
     def __post_init__(self):
         # DATA-004: Standardize internal timestamps on timezone-aware UTC
@@ -165,7 +202,7 @@ class EventClassifier:
                 event_id=self._next_event_id("MACRO"),
                 source="MACRO",
                 event_type=macro_event.event_type,
-                timestamp=datetime.combine(macro_event.event_date, datetime.min.time(), tzinfo=timezone.utc),
+                timestamp=datetime.combine(macro_event.event_date, datetime.min.time(), tzinfo=UTC),
                 scope=scope,
                 affected_tickers=tickers,
                 sector=sectors[0] if scope == SCOPE_SECTOR and sectors and sectors[0] != "ALL" else None,
@@ -179,6 +216,7 @@ class EventClassifier:
                 ),
                 impact_horizon=EVENT_IMPACT_HORIZON.get(macro_event.event_type, HORIZON_30D),
                 raw=None,
+                source_confidence=1.0,
             )
             health_registry.report("event_classifier", ok=True)
             return evt
@@ -228,9 +266,9 @@ class EventClassifier:
                     raise ValueError(f"Invalid or missing corporate event timestamp for {symbol or 'UNKNOWN'}")
 
             if source_timestamp.tzinfo is None:
-                source_timestamp = source_timestamp.replace(tzinfo=timezone.utc)
+                source_timestamp = source_timestamp.replace(tzinfo=UTC)
             else:
-                source_timestamp = source_timestamp.astimezone(timezone.utc)
+                source_timestamp = source_timestamp.astimezone(UTC)
 
             affected = [symbol] if symbol else []
             scope = SCOPE_STOCK if symbol else SCOPE_MARKET  # market-wide block deals have no single symbol
@@ -257,6 +295,7 @@ class EventClassifier:
                     category, EVENT_IMPACT_HORIZON.get("CORPORATE_ANNOUNCEMENT", HORIZON_INTRADAY)
                 ),
                 raw=raw,
+                source_confidence=1.0,
             )
             health_registry.report("event_classifier", ok=True)
             return evt
@@ -295,13 +334,16 @@ class EventClassifier:
                     raise ValueError(f"Invalid or missing published_at in news article: {title}")
 
             if pub_at.tzinfo is None:
-                pub_at = pub_at.replace(tzinfo=timezone.utc)
+                pub_at = pub_at.replace(tzinfo=UTC)
             else:
-                pub_at = pub_at.astimezone(timezone.utc)
+                pub_at = pub_at.astimezone(UTC)
 
             matched_sectors: list[str] | None = None
             for keyword, sectors in NEWS_KEYWORD_SECTOR_HINTS.items():
                 if keyword in title_lower:
+                    negatives = NEWS_KEYWORD_NEGATIVE_PATTERNS.get(keyword, [])
+                    if any(neg in title_lower for neg in negatives):
+                        continue
                     if keyword == "rupee":
                         matched_sectors = self._classify_currency_headline(title_lower)
                     else:
@@ -312,12 +354,26 @@ class EventClassifier:
                 scope = SCOPE_MARKET if "ALL" in matched_sectors else SCOPE_SECTOR
                 tickers = self._sectors_to_tickers(matched_sectors, as_of=pub_at)
                 confidence = 0.6  # keyword-matched macro-relevance is inherently less certain than a direct tag
+                source_confidence = 0.5
                 sector_val = None if scope == SCOPE_MARKET else matched_sectors[0]
             else:
-                # No macro keyword matched -> stays scoped to the single stock it was fetched for
+                # No macro keyword matched -> check company name entity extraction if symbol not explicit
+                if not symbol:
+                    for c_name, c_sym in COMPANY_NAME_TO_SYMBOL.items():
+                        if re.search(r"\b" + re.escape(c_name) + r"\b", title_lower):
+                            symbol = c_sym
+                            break
+                    if not symbol:
+                        for sym in NIFTY50_SYMBOLS:
+                            if re.search(r"\b" + re.escape(sym.lower()) + r"\b", title_lower):
+                                symbol = sym
+                                break
+
+                # Stays scoped to the single stock it was fetched for or recognized by entity
                 scope = SCOPE_STOCK
                 tickers = [symbol] if symbol else []
                 confidence = 1.0 if symbol else 0.3
+                source_confidence = 0.8 if symbol else 0.3
                 if pub_at:
                     sec = sector_map_provider.get_sector(symbol, as_of=pub_at) if symbol else None
                     sector_val = sec if sec and sec != "Unknown" else None
@@ -338,6 +394,7 @@ class EventClassifier:
                 magnitude_estimate="HIGH" if scope == SCOPE_MARKET else "MEDIUM",
                 impact_horizon=EVENT_IMPACT_HORIZON.get("NEWS_HEADLINE", HORIZON_INTRADAY),
                 raw=news_article,
+                source_confidence=source_confidence,
             )
             health_registry.report("event_classifier", ok=True)
             return evt
@@ -378,6 +435,7 @@ class EventClassifier:
             magnitude_estimate="LOW",
             impact_horizon=EVENT_IMPACT_HORIZON.get("CLASSIFICATION_ERROR", HORIZON_INTRADAY),
             raw=None,
+            source_confidence=0.0,
         )
 
     def classify_batch(

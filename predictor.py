@@ -1,20 +1,20 @@
 # 1. Standard library imports
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 # 2. Third-party imports
 import pandas as pd
 
 # 3. Local imports
-from config import HORIZON_CONFIG, HORIZON_INTRADAY, SECTOR_MAP, configure_logging
+from config import HORIZON_CONFIG, HORIZON_INTRADAY, SECTOR_MAP, UNIVERSE_VERSION, configure_logging
 from data_fetcher import DataFetcher
 from ensemble_manager import EnsembleManager, EnsemblePrediction
 from event_classifier import Event, EventClassifier
 from feature_engineer import FeatureEngineer
 from global_risk_monitor import GlobalRiskMonitor, GlobalRiskReading
 from health_monitor import registry as health_registry
-from model_lineage import compute_feature_schema_hash
+from model_lineage import compute_config_hash, compute_feature_schema_hash, get_git_commit_sha
 from prediction_concurrency import compute_prediction_key
 from runtime_validator import CalibrationResult, EdgeCheckResult, LiveGateResult, RuntimeValidator
 from sector_provider import sector_map_provider
@@ -73,6 +73,9 @@ class PredictionSignal:
     entry_price: float | None = None
     data_version: str = "UNKNOWN"
     label_definition_version: str = "direction-adaptive-deadband-v1"
+    event_source_status: str = "EVENTS_AVAILABLE"
+    config_hash: str | None = None
+    reproducibility_bundle: dict | None = None
 
     def __post_init__(self):
         # DATA-004: Standardize internal timestamps on timezone-aware UTC
@@ -88,7 +91,7 @@ class PredictionSignal:
                 except Exception:
                     pass
             elif hasattr(self.timestamp, "tzinfo") and self.timestamp.tzinfo is None:
-                self.timestamp = self.timestamp.replace(tzinfo=timezone.utc)
+                self.timestamp = self.timestamp.replace(tzinfo=UTC)
 
 
 @dataclass
@@ -103,8 +106,19 @@ class MultiHorizonSignal:
 
     def __post_init__(self):
         # DATA-004: Standardize internal timestamps on timezone-aware UTC
-        if self.timestamp is not None and self.timestamp.tzinfo is None:
-            self.timestamp = self.timestamp.replace(tzinfo=timezone.utc)
+        if self.timestamp is not None:
+            if isinstance(self.timestamp, str):
+                try:
+                    ts = pd.to_datetime(self.timestamp)
+                    if ts.tz is None:
+                        ts = ts.tz_localize("UTC")
+                    else:
+                        ts = ts.tz_convert("UTC")
+                    self.timestamp = ts.to_pydatetime()
+                except Exception:
+                    pass
+            elif hasattr(self.timestamp, "tzinfo") and self.timestamp.tzinfo is None:
+                self.timestamp = self.timestamp.replace(tzinfo=UTC)
 
 
 @dataclass
@@ -318,6 +332,7 @@ class Predictor:
         edge_check_result: EdgeCheckResult | None = None,
         horizon: str = HORIZON_INTRADAY,
         as_of: datetime | None = None,
+        event_source_status: str | None = None,
     ) -> PredictionSignal:
         """
         Produces one final PredictionSignal for `symbol`. calibration_result
@@ -325,9 +340,9 @@ class Predictor:
         history_manager.py / backtester.py (later phases) — until those exist,
         callers must supply them (e.g. from a self-test or a manual check).
         """
-        now = as_of or datetime.now(timezone.utc)
+        now = as_of or datetime.now(UTC)
         if now.tzinfo is None:
-            now = now.replace(tzinfo=timezone.utc)
+            now = now.replace(tzinfo=UTC)
 
         try:
             data_stale = self.data_fetcher.check_staleness(stock_df, symbol)
@@ -354,6 +369,15 @@ class Predictor:
                     suppression_reasons=["Data staleness check failed."],
                     prediction_key=pred_key_stale,
                     feature_schema_hash=fsh_stale,
+                    config_hash=compute_config_hash(),
+                    reproducibility_bundle={
+                        "config_hash": compute_config_hash(),
+                        "feature_schema_hash": fsh_stale,
+                        "model_version": "UNKNOWN",
+                        "universe_version": UNIVERSE_VERSION,
+                        "data_snapshot_id": f"snapshot-{symbol}-{now.isoformat()}",
+                        "training_commit": get_git_commit_sha(),
+                    },
                 )
 
             # --- Step 2: engineer features and get the latest row ---
@@ -410,19 +434,32 @@ class Predictor:
                 ensemble_pred = ensemble_predictions[0]
 
             # --- Step 4: classify events, filter to this symbol and horizon ---
-            event_batch_result = self.event_classifier.classify_batch(
-                macro_events=macro_events,
-                corporate_events=corporate_events,
-                news_articles=news_articles,
-            )
-
-            if event_batch_result.status == "EVENT_SOURCE_UNAVAILABLE":
+            if event_source_status == "EVENT_SOURCE_UNAVAILABLE":
                 return self._suppressed_signal(
                     symbol,
                     now,
                     "Event sources are completely unavailable — failing closed for safety.",
                     horizon=horizon,
                     stock_df=stock_df,
+                    event_source_status="EVENT_SOURCE_UNAVAILABLE",
+                )
+
+            event_batch_result = self.event_classifier.classify_batch(
+                macro_events=macro_events,
+                corporate_events=corporate_events,
+                news_articles=news_articles,
+            )
+
+            effective_event_status = event_source_status or event_batch_result.status
+
+            if effective_event_status == "EVENT_SOURCE_UNAVAILABLE":
+                return self._suppressed_signal(
+                    symbol,
+                    now,
+                    "Event sources are completely unavailable — failing closed for safety.",
+                    horizon=horizon,
+                    stock_df=stock_df,
+                    event_source_status="EVENT_SOURCE_UNAVAILABLE",
                 )
 
             all_events = event_batch_result.events
@@ -650,6 +687,16 @@ class Predictor:
                 prediction_key=pred_key,
                 feature_schema_hash=fsh,
                 entry_price=cmp,
+                event_source_status=effective_event_status,
+                config_hash=compute_config_hash(),
+                reproducibility_bundle={
+                    "config_hash": compute_config_hash(),
+                    "feature_schema_hash": fsh,
+                    "model_version": getattr(ensemble_pred, "model_version", "v1.0"),
+                    "universe_version": UNIVERSE_VERSION,
+                    "data_snapshot_id": f"snapshot-{symbol}-{now.isoformat()}",
+                    "training_commit": get_git_commit_sha(),
+                },
             )
             health_registry.report("predictor", ok=True)
             return sig
@@ -753,11 +800,12 @@ class Predictor:
         calibration_results: dict[str, "CalibrationResult"] | None = None,
         edge_check_results: dict[str, "EdgeCheckResult"] | None = None,
         as_of: datetime | None = None,
+        event_source_status: str | None = None,
     ) -> MultiHorizonSignal:
         signals = {}
-        effective_ts = as_of or datetime.now(timezone.utc)
+        effective_ts = as_of or datetime.now(UTC)
         if effective_ts.tzinfo is None:
-            effective_ts = effective_ts.replace(tzinfo=timezone.utc)
+            effective_ts = effective_ts.replace(tzinfo=UTC)
 
         for h in horizons:
             # If horizon uses daily data, fetch it on the fly
@@ -795,6 +843,7 @@ class Predictor:
                 edge_check_result=h_edge,
                 horizon=h,
                 as_of=effective_ts,
+                event_source_status=event_source_status,
             )
             signals[h] = sig
 
@@ -837,11 +886,11 @@ class Predictor:
         as_of: datetime | None = None,
     ) -> PredictionContext:
         """API-002: Build a canonical prediction context."""
-        ts = as_of or datetime.now(timezone.utc)
+        ts = as_of or datetime.now(UTC)
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
         if as_of is not None and as_of.tzinfo is None:
-            as_of = as_of.replace(tzinfo=timezone.utc)
+            as_of = as_of.replace(tzinfo=UTC)
         return PredictionContext(
             symbol=symbol,
             timestamp=ts,
@@ -868,7 +917,7 @@ class Predictor:
 
             horizons = ALL_HORIZONS
 
-        return self.generate_multi_horizon_signal(
+        multi_sig = self.generate_multi_horizon_signal(
             symbol=context.symbol,
             horizons=horizons,
             stock_df=context.market_data,
@@ -879,7 +928,12 @@ class Predictor:
             calibration_results=context.calibration_results,
             edge_check_results=context.edge_check_results,
             as_of=context.as_of or context.timestamp,
+            event_source_status=context.event_status,
         )
+        if context.event_status:
+            for s in multi_sig.signals.values():
+                s.event_source_status = context.event_status
+        return multi_sig
 
     def predict_stream_context(
         self,
@@ -911,6 +965,7 @@ class Predictor:
         reason: str,
         horizon: str = HORIZON_INTRADAY,
         stock_df: pd.DataFrame | None = None,
+        event_source_status: str = "EVENTS_AVAILABLE",
     ) -> PredictionSignal:
         cmp = float(stock_df["Close"].iloc[-1]) if stock_df is not None and not stock_df.empty else None
         target_price = None
@@ -962,6 +1017,16 @@ class Predictor:
             peak_potential_price=peak_potential_price,
             prediction_key=compute_prediction_key(symbol, timestamp, "BASELINE", compute_feature_schema_hash([])),
             feature_schema_hash=compute_feature_schema_hash([]),
+            event_source_status=event_source_status,
+            config_hash=compute_config_hash(),
+            reproducibility_bundle={
+                "config_hash": compute_config_hash(),
+                "feature_schema_hash": compute_feature_schema_hash([]),
+                "model_version": "BASELINE",
+                "universe_version": UNIVERSE_VERSION,
+                "data_snapshot_id": f"snapshot-{symbol}-{timestamp.isoformat()}",
+                "training_commit": get_git_commit_sha(),
+            },
         )
 
 
@@ -1071,7 +1136,7 @@ if __name__ == "__main__":
             "symbol": "RELIANCE",
             "category": "CORPORATE_ANNOUNCEMENT",
             "raw": {"subject": "Board Meeting Intimation"},
-            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "fetched_at": datetime.now(UTC).isoformat(),
         }
 
         signal_proven = predictor.generate_signal(

@@ -17,7 +17,6 @@ from config import (
     ALL_HORIZONS,
     HORIZON_CONFIG,
     HORIZON_INTRADAY,
-    MARKET_TIMEZONE,
 )
 from market_calendar import MarketCalendar
 

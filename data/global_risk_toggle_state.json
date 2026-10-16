@@ -1,9 +1,9 @@
 {
   "enabled": false,
-  "reason": "Cleanup",
+  "reason": "System baseline normal",
   "level_at_activation": null,
-  "activated_at": "2026-09-17T12:33:17.019424",
-  "updated_at": "2026-09-17T12:33:17.026736",
-  "changed_by": "worker-1",
-  "version": 67
+  "activated_at": null,
+  "updated_at": "2026-10-16T12:00:00+00:00",
+  "changed_by": "system",
+  "version": 1
 }

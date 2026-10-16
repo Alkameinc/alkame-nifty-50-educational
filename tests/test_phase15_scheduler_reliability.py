@@ -1,7 +1,6 @@
 # 1. Standard library imports
-from datetime import datetime, timezone
-from pathlib import Path
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -9,27 +8,19 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 # 2. Third-party imports
-from fastapi.testclient import TestClient
-import numpy as np
 import pandas as pd
-import pytest
+from fastapi.testclient import TestClient
 
 # 3. Local imports
 from api import app
-from config import (
-    SCHEDULER_CIRCUIT_BREAKER_DEGRADED_FAILURES,
-    SCHEDULER_CIRCUIT_BREAKER_MAX_FAILURES,
-)
 from health_monitor import registry as health_registry
 from scheduler import CycleResult, Scheduler
 from scheduler_circuit_breaker import (
     SCHEDULER_STATE_DEGRADED,
-    SCHEDULER_STATE_FAILED,
     SCHEDULER_STATE_HALTED,
     SCHEDULER_STATE_HEALTHY,
     SCHEDULER_STATE_STARTING,
     SchedulerCircuitBreaker,
-    SchedulerMetrics,
 )
 
 
@@ -198,7 +189,9 @@ def test_scheduler_timestamps_tracking():
     scheduler = Scheduler(circuit_breaker=cb)
 
     df = _build_mock_stock_df()
-    mock_provider = lambda: {"TCS": (df, df)}
+
+    def mock_provider():
+        return {"TCS": (df, df)}
 
     with patch.object(scheduler, "run_one_cycle_for_symbol") as mock_one:
         mock_one.return_value = CycleResult(success=True, status="SUCCESS", symbol="TCS")

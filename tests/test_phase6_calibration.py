@@ -18,7 +18,6 @@ from model_trainer import FourWaySplitResult, ModelTrainer
 from runtime_validator import (
     STATUS_DRIFT_DETECTED,
     STATUS_INSUFFICIENT_DATA,
-    STATUS_STABLE,
     STATUS_SUFFICIENT,
     CalibrationBin,
     CalibrationResult,

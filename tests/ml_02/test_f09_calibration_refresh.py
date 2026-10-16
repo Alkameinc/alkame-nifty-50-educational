@@ -40,8 +40,8 @@ def test_failed_refresh_does_not_replace_previous_valid_snapshot():
 
 
 def test_refresh_failure_preserves_previous_valid_snapshot():
-    from scheduler import Scheduler
     from backtester import BacktestResult
+    from scheduler import Scheduler
 
     class FakeBacktester:
         def run_backtest_for_symbol(self, symbol, stock_df, index_df, horizon="INTRADAY"):

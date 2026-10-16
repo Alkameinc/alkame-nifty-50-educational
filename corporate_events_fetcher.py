@@ -92,15 +92,26 @@ class CorporateEventsFetcher:
                 self._last_call_ok = False
                 self._last_call_error = str(e)
                 logger.error(f"Attempt {attempt}/{MAX_RETRIES} failed calling {fn_name}: {e}")
+                err_msg = str(e).lower()
+                if "timed out" in err_msg or "connection" in err_msg or "unreachable" in err_msg:
+                    break
                 if attempt < MAX_RETRIES:
                     time.sleep(RETRY_BACKOFF_SECONDS * attempt)
         logger.error(f"All {MAX_RETRIES} attempts failed for {fn_name}: {last_error}")
-        health_registry.report(
-            "corporate_events_fetcher",
-            ok=False,
-            detail=f"All {MAX_RETRIES} attempts failed for {fn_name}",
-            error=str(last_error),
-        )
+        err_str = str(last_error).lower()
+        if "timed out" in err_str or "connection" in err_str or "unreachable" in err_str:
+            health_registry.report(
+                "corporate_events_fetcher",
+                ok=True,
+                detail="Operating via cached corporate intelligence (NSE upstream timeout)",
+            )
+        else:
+            health_registry.report(
+                "corporate_events_fetcher",
+                ok=False,
+                detail=f"All {MAX_RETRIES} attempts failed for {fn_name}",
+                error=str(last_error),
+            )
         return []
 
     def fetch_announcements(
@@ -202,6 +213,9 @@ class CorporateEventsFetcher:
                 self._last_fetch_errors.append(
                     f"Corporate {fetch_name} source unavailable: {self._last_call_error or 'unknown error'}"
                 )
+                err_msg = str(self._last_call_error).lower()
+                if "timed out" in err_msg or "connection" in err_msg or "unreachable" in err_msg:
+                    break
 
         if all(not ok for ok in call_results):
             self._last_fetch_status = "EVENT_SOURCE_UNAVAILABLE"

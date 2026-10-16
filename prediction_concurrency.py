@@ -16,9 +16,11 @@ import hashlib
 import logging
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Callable, Optional
+from datetime import UTC, datetime
+from typing import Any
+
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -35,9 +37,9 @@ def normalize_timestamp_for_key(timestamp: datetime | str | pd.Timestamp) -> str
         ts = pd.Timestamp(timestamp)
 
     if ts.tzinfo is None:
-        ts = ts.tz_localize(timezone.utc)
+        ts = ts.tz_localize(UTC)
     else:
-        ts = ts.tz_convert(timezone.utc)
+        ts = ts.tz_convert(UTC)
     return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 

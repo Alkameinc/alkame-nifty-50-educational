@@ -192,13 +192,13 @@ Extended test period for features requiring longer history.
 def get_horizon_lookback(horizon: str) -> int:
     """
     Get appropriate lookback period for a given horizon.
-    
+
     Args:
         horizon: Horizon identifier ("30D", "3M", "6M", "1Y", etc.)
-    
+
     Returns:
         Lookback period in bars
-    
+
     Example:
         >>> get_horizon_lookback("3M")
         120
@@ -211,16 +211,16 @@ def get_horizon_lookback(horizon: str) -> int:
 def get_trading_days_for_period(period: str) -> int:
     """
     Get approximate trading days for common period labels.
-    
+
     Args:
         period: Period identifier ("1M", "1Q", "1Y", etc.)
-    
+
     Returns:
         Approximate trading days
-    
+
     Raises:
         ValueError: If period is not recognized
-    
+
     Example:
         >>> get_trading_days_for_period("1M")
         21
@@ -233,27 +233,27 @@ def get_trading_days_for_period(period: str) -> int:
         "3M": TRADING_DAYS_PER_QUARTER_APPROX,
         "1Y": TRADING_DAYS_PER_YEAR_APPROX,
     }
-    
+
     if period not in period_map:
         raise ValueError(
             f"Unknown period: {period}. "
             f"Supported: {list(period_map.keys())}"
         )
-    
+
     return period_map[period]
 
 
 def validate_quantile(value: float, name: str = "quantile") -> None:
     """
     Validate that a value is a valid quantile (0.0 to 1.0).
-    
+
     Args:
         value: Value to validate
         name: Name of the parameter for error messages
-    
+
     Raises:
         ValueError: If value is not in [0.0, 1.0]
-    
+
     Example:
         >>> validate_quantile(0.75, "resistance_quantile")
         # No error
@@ -275,10 +275,10 @@ def _self_test():
     print("\n" + "=" * 80)
     print("MAGIC NUMBERS CONFIG SELF-TEST")
     print("=" * 80)
-    
+
     tests_passed = 0
     tests_failed = 0
-    
+
     # Test 1: Time conversion
     print("\nTest 1: Time conversion constants")
     assert MINUTES_PER_HOUR == 60
@@ -287,14 +287,14 @@ def _self_test():
     assert TRADING_DAYS_PER_YEAR_APPROX == 252
     print("  ✓ All time conversion constants correct")
     tests_passed += 1
-    
+
     # Test 2: Technical indicator defaults
     print("\nTest 2: Technical indicator defaults")
     assert RSI_NEUTRAL_VALUE == 50.0
     assert DEFAULT_MA_PERIOD == 50
     print("  ✓ Technical indicator defaults correct")
     tests_passed += 1
-    
+
     # Test 3: Lookback periods
     print("\nTest 3: Lookback periods")
     assert LOOKBACK_PERIOD_30D == 60
@@ -304,7 +304,7 @@ def _self_test():
     assert DEFAULT_LOOKBACK_PERIOD == 120
     print("  ✓ All lookback periods correct")
     tests_passed += 1
-    
+
     # Test 4: Horizon lookback function
     print("\nTest 4: get_horizon_lookback() function")
     assert get_horizon_lookback("30D") == 60
@@ -314,7 +314,7 @@ def _self_test():
     assert get_horizon_lookback("UNKNOWN") == 120  # Default
     print("  ✓ get_horizon_lookback() works correctly")
     tests_passed += 1
-    
+
     # Test 5: Trading days function
     print("\nTest 5: get_trading_days_for_period() function")
     assert get_trading_days_for_period("1M") == 21
@@ -323,7 +323,7 @@ def _self_test():
     assert get_trading_days_for_period("1Y") == 252
     print("  ✓ get_trading_days_for_period() works correctly")
     tests_passed += 1
-    
+
     # Test 6: Trading days function error handling
     print("\nTest 6: get_trading_days_for_period() error handling")
     try:
@@ -334,7 +334,7 @@ def _self_test():
         assert "Unknown period" in str(e)
         print("  ✓ Correctly raises ValueError for invalid period")
         tests_passed += 1
-    
+
     # Test 7: Quantile validation
     print("\nTest 7: validate_quantile() function")
     try:
@@ -346,7 +346,7 @@ def _self_test():
     except ValueError:
         print("  ✗ Valid quantiles should not raise error")
         tests_failed += 1
-    
+
     # Test 8: Quantile validation error handling
     print("\nTest 8: validate_quantile() error handling")
     try:
@@ -356,7 +356,7 @@ def _self_test():
     except ValueError:
         print("  ✓ Correctly raises ValueError for invalid quantile")
         tests_passed += 1
-    
+
     # Test 9: Support/resistance quantiles
     print("\nTest 9: Support/resistance quantiles")
     assert 0.0 <= RESISTANCE_HIGH_QUANTILE <= 1.0
@@ -367,7 +367,7 @@ def _self_test():
     assert RESISTANCE_LOW_QUANTILE > SUPPORT_HIGH_QUANTILE
     print("  ✓ All support/resistance quantiles valid and ordered")
     tests_passed += 1
-    
+
     # Test 10: Resistance band thresholds
     print("\nTest 10: Resistance band thresholds")
     assert RESISTANCE_BAND_LOWER_THRESHOLD < 1.0
@@ -375,14 +375,14 @@ def _self_test():
     assert RESISTANCE_BAND_UPPER_THRESHOLD > RESISTANCE_BAND_LOWER_THRESHOLD
     print("  ✓ Resistance band thresholds valid")
     tests_passed += 1
-    
+
     # Summary
     print("\n" + "=" * 80)
     print("SUMMARY")
     print("=" * 80)
     print(f"Tests Passed: {tests_passed}")
     print(f"Tests Failed: {tests_failed}")
-    
+
     if tests_failed == 0:
         print("\n✓ ALL TESTS PASSED")
         print("=" * 80 + "\n")

@@ -1,15 +1,14 @@
 # 1. Standard library imports
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 import hashlib
 import json
 import logging
 import os
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 # 2. Third-party imports
-import numpy as np
 import pandas as pd
 
 # 3. Local imports
@@ -17,19 +16,15 @@ from config import (
     CALIBRATION_ECE_THRESHOLD,
     EDGE_CHECK_MIN_ALPHA_PCT,
     HORIZON_INTRADAY,
-    MODELS_DIR,
 )
 from health_monitor import (
     ENGINE_HEALTH_FAILED,
-    ENGINE_HEALTH_DEGRADED,
-    ENGINE_HEALTH_HEALTHY,
     EngineHealthResult,
 )
 from runtime_validator import (
-    RuntimeValidator,
     STATUS_EDGE_CONFIRMED,
     STATUS_INSUFFICIENT_DATA,
-    STATUS_SUFFICIENT,
+    RuntimeValidator,
 )
 
 # 4. Logger setup
@@ -88,12 +83,12 @@ class ModelValidityResult:
 
 def _parse_timestamp(val: Any) -> datetime | None:
     if isinstance(val, datetime):
-        return val if val.tzinfo else val.replace(tzinfo=timezone.utc)
+        return val if val.tzinfo else val.replace(tzinfo=UTC)
     if isinstance(val, str):
         try:
             clean_str = val.replace("Z", "+00:00")
             dt = datetime.fromisoformat(clean_str)
-            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+            return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
         except Exception:
             return None
     return None
@@ -243,13 +238,13 @@ def evaluate_model_validity(
     trained_dt = _parse_timestamp(trained_at_str)
     if trained_dt is None:
         try:
-            trained_dt = datetime.fromtimestamp(os.path.getmtime(artifact_path), tz=timezone.utc)
+            trained_dt = datetime.fromtimestamp(os.path.getmtime(artifact_path), tz=UTC)
             trained_at_str = trained_dt.isoformat()
         except Exception:
-            trained_dt = datetime.now(timezone.utc)
+            trained_dt = datetime.now(UTC)
             trained_at_str = trained_dt.isoformat()
 
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     age_days = max(0.0, (now_utc - trained_dt).total_seconds() / 86400.0)
 
     is_stale = age_days > max_model_age_days

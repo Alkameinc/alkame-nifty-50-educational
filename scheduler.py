@@ -3,7 +3,7 @@ import hashlib
 import logging
 import time as time_module
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Optional, cast
 from zoneinfo import ZoneInfo
 
@@ -17,35 +17,30 @@ from config import (
     BAR_INTERVAL,
     MARKET_TIMEZONE,
     NSE_ANNOUNCEMENT_REFRESH_MINUTES,
-    PREDICTION_DEADBAND_PCT,
     SCHEDULER_INTERVAL_MINUTES,
     configure_logging,
+    interval_to_minutes,
 )
 from corporate_events_fetcher import CorporateEventsFetcher
 from data_fetcher import DataFetcher
 from event_classifier import EventClassifier
 from health_monitor import registry as health_registry
 from history_manager import HistoryManager
-from market_calendar import market_calendar
-from model_trainer import ModelTrainer
 from macro_calendar import MacroCalendar
-from news_sentiment_fetcher import NewsSentimentFetcher
+from market_calendar import market_calendar
 from model_lineage import compute_feature_schema_hash
+from model_trainer import ModelTrainer
+from news_sentiment_fetcher import NewsSentimentFetcher
 from prediction_concurrency import (
     PredictionConcurrencyCoordinator,
     compute_prediction_key,
-    normalize_timestamp_for_key,
 )
 from predictor import MultiHorizonSignal, PredictionContext, PredictionSignal, Predictor
 from runtime_validator import CalibrationResult, EdgeCheckResult
 from scheduler_circuit_breaker import (
-    SCHEDULER_STATE_DEGRADED,
-    SCHEDULER_STATE_FAILED,
-    SCHEDULER_STATE_HALTED,
     SCHEDULER_STATE_HEALTHY,
     SCHEDULER_STATE_STARTING,
     SchedulerCircuitBreaker,
-    SchedulerMetrics,
 )
 
 # 4. Logger setup
@@ -55,20 +50,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # 5. Constants
 # ---------------------------------------------------------------------------
-def _interval_to_minutes(interval: str) -> int:
-    """Small local helper — same parsing logic as feature_engineer.py's,
-    duplicated rather than imported to avoid a circular/unnecessary dependency
-    on a private helper for such a tiny piece of parsing."""
-    import re
-
-    match = re.match(r"^(\d+)([mh])$", interval.strip().lower())
-    if not match:
-        return 5
-    value, unit = int(match.group(1)), match.group(2)
-    return value * 60 if unit == "h" else value
-
-
-BAR_INTERVAL_MINUTES = _interval_to_minutes(BAR_INTERVAL)
+BAR_INTERVAL_MINUTES = interval_to_minutes(BAR_INTERVAL)
 EVENT_CONTEXT_REFRESH_MINUTES = max(1, int(NSE_ANNOUNCEMENT_REFRESH_MINUTES))
 
 
@@ -187,7 +169,7 @@ class Scheduler:
         elif stock_df is not None and not stock_df.empty:
             bar_ts = stock_df.index[-1]
         else:
-            bar_ts = datetime.now(timezone.utc)
+            bar_ts = datetime.now(UTC)
 
         model_ver = "v1.0"
         schema_hash = ""
@@ -565,11 +547,11 @@ class Scheduler:
                 calib_results[h] = snapshot.calibration_result
                 edge_results[h] = snapshot.edge_check_result
 
-        ts = as_of or datetime.now(timezone.utc)
+        ts = as_of or datetime.now(UTC)
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
         if as_of is not None and as_of.tzinfo is None:
-            as_of = as_of.replace(tzinfo=timezone.utc)
+            as_of = as_of.replace(tzinfo=UTC)
 
         return PredictionContext(
             symbol=symbol,
@@ -685,6 +667,7 @@ class Scheduler:
                 multi_sig = self.predictor.generate_multi_horizon_signal(**kwargs)
 
             for h, sig in multi_sig.signals.items():
+                sig.event_source_status = context.event_status
                 data_version = self._data_version(stock_df, sig.timestamp)
                 if hasattr(self.history_manager, "save_prediction_bundle"):
                     self.history_manager.save_prediction_bundle(
@@ -930,7 +913,7 @@ class Scheduler:
 
         try:
             # 3. Market data collection
-            self.circuit_breaker.metrics.last_data_fetch = datetime.now(timezone.utc)
+            self.circuit_breaker.metrics.last_data_fetch = datetime.now(UTC)
             if symbol_data_provider is not None:
                 symbol_data = symbol_data_provider()
             else:
@@ -954,7 +937,7 @@ class Scheduler:
             for symbol, (stock_df, index_df) in symbol_data.items():
                 self.resolve_pending_outcomes(symbol, stock_df)
                 event_context = self.get_event_context(symbol)
-                self.circuit_breaker.metrics.last_event_fetch = datetime.now(timezone.utc)
+                self.circuit_breaker.metrics.last_event_fetch = datetime.now(UTC)
 
                 res = self.run_one_cycle_for_symbol(
                     symbol,
@@ -968,7 +951,7 @@ class Scheduler:
                 if isinstance(res, CycleResult):
                     cycle_results[symbol] = res
                     if res.success:
-                        self.circuit_breaker.metrics.last_prediction = datetime.now(timezone.utc)
+                        self.circuit_breaker.metrics.last_prediction = datetime.now(UTC)
 
             # Evaluate cycle success: at least one symbol succeeded and no circuit breaker halts
             successful_symbols = [s for s, r in cycle_results.items() if r.success]

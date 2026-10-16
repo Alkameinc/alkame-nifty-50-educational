@@ -1,7 +1,7 @@
 # 1. Standard library imports
-from datetime import datetime, timezone
-from pathlib import Path
 import sys
+from datetime import UTC
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -21,13 +21,11 @@ from config import (
     HORIZON_SCALP,
     HORIZON_TO_MA_PERIOD,
     HORIZON_TO_SR_METHOD,
-    NIFTY50_SYMBOLS,
 )
-from predictor import ACTION_BUY, ACTION_SELL, PredictionSignal
+from predictor import ACTION_BUY, PredictionSignal
 from scalp_validator import (
     SCALPING_COST_SCENARIOS,
     ScalpCalibrationResult,
-    ScalpCostScenario,
     ScalpDataset,
     ScalpEdgeResult,
     ScalpLatencyConfig,
@@ -35,7 +33,7 @@ from scalp_validator import (
     ScalpValidationReport,
     ScalpValidator,
 )
-from scalping import ScalpSetup, ScalpingEngine
+from scalping import ScalpingEngine, ScalpSetup
 
 
 # ---------------------------------------------------------------------------
@@ -317,7 +315,7 @@ def test_scalping_safety_gate_suppression():
     )
 
     mock_sig = PredictionSignal(
-        timestamp=pd.Timestamp.now(tz=timezone.utc),
+        timestamp=pd.Timestamp.now(tz=UTC),
         symbol="RELIANCE",
         horizon=HORIZON_SCALP,
         action=ACTION_BUY,

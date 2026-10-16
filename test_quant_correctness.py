@@ -296,9 +296,10 @@ def test_out_of_sample_calibration_and_drift_detection(tmp_path):
     db_file = tmp_path / "test_history.db"
     hm = HistoryManager(db_path=db_file)
 
+    base_ts = pd.Timestamp.now(tz="UTC")
     sig_in_sample = PredictionSignal(
         symbol="TCS",
-        timestamp=pd.Timestamp.now(),
+        timestamp=base_ts,
         action="BUY",
         model_predicted_class="UP",
         raw_confidence=0.8,
@@ -320,7 +321,7 @@ def test_out_of_sample_calibration_and_drift_detection(tmp_path):
     )
     sig_out_sample = PredictionSignal(
         symbol="TCS",
-        timestamp=pd.Timestamp.now(),
+        timestamp=base_ts + pd.Timedelta(minutes=15),
         action="BUY",
         model_predicted_class="UP",
         raw_confidence=0.85,

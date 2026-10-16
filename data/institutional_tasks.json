@@ -1,0 +1,52 @@
+[
+  {
+    "id": "task-001",
+    "title": "Verify Brier calibration curve before removing PROBATION status",
+    "priority": "P0",
+    "category": "Calibration",
+    "symbol": "ADANIENT",
+    "due_date": "Today, 15:30 IST",
+    "completed": false,
+    "created_at": "2026-10-16T09:24:00.991213+00:00"
+  },
+  {
+    "id": "task-002",
+    "title": "Audit macro discount factor against crude Brent volatility (+3.2%)",
+    "priority": "P1",
+    "category": "Risk Audit",
+    "symbol": "GLOBAL",
+    "due_date": "Today, 17:00 IST",
+    "completed": false,
+    "created_at": "2026-10-16T09:24:00.991213+00:00"
+  },
+  {
+    "id": "task-003",
+    "title": "Review dual-boundary stop-loss threshold on NEXT_DAY horizon for RELIANCE",
+    "priority": "P1",
+    "category": "Execution",
+    "symbol": "RELIANCE",
+    "due_date": "Tomorrow, 09:15 IST",
+    "completed": true,
+    "created_at": "2026-10-16T09:24:00.991213+00:00"
+  },
+  {
+    "id": "task-004",
+    "title": "Confirm zero lookahead leakage on board meeting corporate event stream",
+    "priority": "P2",
+    "category": "Compliance",
+    "symbol": "TCS",
+    "due_date": "End of Week",
+    "completed": false,
+    "created_at": "2026-10-16T09:24:00.991213+00:00"
+  },
+  {
+    "id": "task-005",
+    "title": "Inspect 16-component subsystem telemetry health logs for SQLite WAL journal",
+    "priority": "P2",
+    "category": "Risk Audit",
+    "symbol": "GLOBAL",
+    "due_date": "End of Week",
+    "completed": true,
+    "created_at": "2026-10-16T09:24:00.991213+00:00"
+  }
+]

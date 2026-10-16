@@ -1,8 +1,6 @@
 # 1. Standard library imports
-from datetime import datetime, timezone
-from pathlib import Path
 import sys
-from typing import Any
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -14,17 +12,15 @@ import pandas as pd
 import pytest
 
 # 3. Local imports
-from backtester import BacktestResult, Backtester
-from config import HORIZON_CONFIG, HORIZON_INTRADAY
+from backtester import Backtester, BacktestResult
+from config import HORIZON_INTRADAY
 from execution_simulator import (
-    CostScenario,
-    ExecutionSimulator,
     PHASE12_COST_SCENARIOS,
     PHASE12_MANDATORY_SCENARIOS,
-    STANDARD_COST_SCENARIOS,
+    CostScenario,
+    ExecutionSimulator,
     SimulatedTrade,
     SimulationReport,
-    create_scaled_cost_scenario,
 )
 
 
@@ -35,12 +31,12 @@ def _generate_synthetic_df(n_bars: int = 120, start_price: float = 1000.0, trend
     """Generate synthetic OHLCV DataFrame with reproducible prices."""
     np.random.seed(42)
     timestamps = pd.date_range("2026-01-05 09:15", periods=n_bars, freq="5min", tz="Asia/Kolkata")
-    
+
     prices = [start_price]
     for i in range(1, n_bars):
         change = prices[-1] * (trend + np.random.normal(0, 0.002))
         prices.append(max(10.0, prices[-1] + change))
-        
+
     prices_arr = np.array(prices)
     highs = prices_arr * (1.0 + np.abs(np.random.normal(0, 0.0015, n_bars)))
     lows = prices_arr * (1.0 - np.abs(np.random.normal(0, 0.0015, n_bars)))
@@ -48,7 +44,7 @@ def _generate_synthetic_df(n_bars: int = 120, start_price: float = 1000.0, trend
     opens[0] = prices_arr[0]
     closes = prices_arr
     volumes = np.random.randint(1000, 50000, size=n_bars)
-    
+
     df = pd.DataFrame(
         {
             "Open": opens,
@@ -111,7 +107,7 @@ def test_phase12_scenarios_defined_and_parameterized():
         "HIGH_SLIPPAGE",
         "LOW_LIQUIDITY",
     ]
-    
+
     for name in expected_scenarios:
         assert name in PHASE12_COST_SCENARIOS, f"Missing mandated Phase 12 scenario: {name}"
         scenario = PHASE12_COST_SCENARIOS[name]
@@ -161,7 +157,7 @@ def test_pnl_decomposition_identity():
     Must hold at both trade-level and aggregate SimulationReport-level.
     """
     df = _generate_synthetic_df(n_bars=100)
-    
+
     # Generate 5 signals spaced apart
     signals = pd.Series(0, index=df.index)
     signals.iloc[5] = 1
@@ -174,7 +170,7 @@ def test_pnl_decomposition_identity():
     report = sim.simulate("RELIANCE", df, signals, horizon=HORIZON_INTRADAY)
 
     assert report.n_trades > 0, "Expected simulated trades"
-    
+
     # 1. Trade-level verification
     for t in report.trades:
         # total_cost_pct = slippage_cost_pct + statutory_cost_pct
@@ -314,7 +310,7 @@ def test_gross_profitable_net_negative_rejected_from_live():
 
     # 2. Backtester rejection check
     backtester = Backtester()
-    
+
     # Check that a BacktestResult with positive gross but negative net is rejected
     res_mock = BacktestResult(
         symbol="MARGINAL_SYM",
@@ -454,7 +450,7 @@ def test_backwards_compatibility_standard_scenarios():
     signals.iloc[30] = -1
 
     sensitivity = sim.run_sensitivity_analysis("SBIN", df, signals, horizon=HORIZON_INTRADAY)
-    
+
     # Must have exactly 4 tiers: OPTIMISTIC, BASE, PESSIMISTIC, STRESS
     assert len(sensitivity) == 4
     assert set(sensitivity.keys()) == {"OPTIMISTIC", "BASE", "PESSIMISTIC", "STRESS"}

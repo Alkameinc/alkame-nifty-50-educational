@@ -1,6 +1,6 @@
 # 1. Standard library imports
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 # Ensure project root is in sys.path
@@ -14,17 +14,15 @@ import pandas as pd
 import pytest
 
 # 3. Local imports
-from config import HORIZON_CONFIG, HORIZON_INTRADAY
+from config import HORIZON_INTRADAY
 from feature_engineer import (
     CANONICAL_FEATURE_CATALOG,
     ML_SAFE_SUFFIX,
-    AlignmentCoverageReport,
     FeatureEngineer,
     FeatureSpec,
     validate_feature_contract,
 )
-from model_trainer import ModelTrainer, TemporalInformationInterval
-from reference_level_engine import ReferenceLevelDeltas
+from model_trainer import ModelTrainer
 
 
 def _generate_synthetic_market_data(
@@ -35,7 +33,7 @@ def _generate_synthetic_market_data(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Generates synthetic stock and index OHLCV with UTC timestamps."""
     rng = np.random.default_rng(seed)
-    start_dt = datetime(2026, 6, 1, 9, 15, tzinfo=timezone.utc)
+    start_dt = datetime(2026, 6, 1, 9, 15, tzinfo=UTC)
     timestamps = [start_dt + timedelta(minutes=i * freq_minutes) for i in range(num_bars)]
 
     # Stock

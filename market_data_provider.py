@@ -3,7 +3,7 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -52,7 +52,7 @@ class MarketDataResult:
     source: str
     adjustment_mode: PriceAdjustmentMode = PriceAdjustmentMode.ADJUSTED
     error: str | None = None
-    fetched_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    fetched_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     age_seconds: float | None = None
 
     def __post_init__(self):
@@ -67,10 +67,6 @@ class MarketDataResult:
     @property
     def df(self) -> pd.DataFrame | None:
         return self.data
-
-    @property
-    def is_stale(self) -> bool:
-        return self.status == DataStatus.CACHED_STALE
 
     @property
     def is_live(self) -> bool:
@@ -262,6 +258,10 @@ class YFinanceMarketDataProvider(MarketDataProvider):
         period: str = BAR_HISTORY_PERIOD,
         adjustment: PriceAdjustmentMode = PriceAdjustmentMode.ADJUSTED,
     ) -> MarketDataResult:
+        # Clamp 1m granularity requests to maximum supported Yahoo period (7d)
+        if interval == "1m" and period not in ["1d", "5d", "7d"]:
+            period = "7d"
+
         # Check cache first
         cached = self._load_cache(ticker, interval, adjustment)
 
@@ -302,6 +302,7 @@ class YFinanceMarketDataProvider(MarketDataProvider):
         # Fallback to cache
         if cached is not None:
             logger.warning(f"Live fetch failed for {ticker}, returning cached data.")
+            health_registry.report("data_fetcher", ok=True, detail=f"Served cached data for {ticker}")
             return MarketDataResult(
                 data=cached,
                 status=DataStatus.CACHED_STALE,
@@ -379,6 +380,8 @@ class LocalCacheMarketDataProvider(MarketDataProvider):
 
 class TestFixtureMarketDataProvider(MarketDataProvider):
     """Deterministic, in-memory provider for hermetic automated tests (TEST-001)."""
+
+    __test__ = False
 
     def __init__(self, fixtures: dict[str, pd.DataFrame] | None = None):
         self.fixtures: dict[str, pd.DataFrame] = fixtures or {}

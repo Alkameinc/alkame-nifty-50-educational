@@ -15,14 +15,11 @@ Verifies:
 10. Scheduler and REST API diagnostics integration.
 """
 
-import os
 import sqlite3
 import sys
 import threading
-import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -33,19 +30,17 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from api import app
-from database import engine as global_engine
 from event_classifier import Event
 from health_monitor import registry as health_registry
-from history_manager import HistoryManager, PredictionRecord
-from models import Base, Event as DBEvent, Prediction as DBPrediction
+from history_manager import HistoryManager
+from models import Base
+from models import Event as DBEvent
 from predictor import PredictionSignal
 from scheduler import Scheduler
 from storage_reliability import (
     StorageRecoveryReport,
     atomic_transaction,
-    configure_sqlite_engine,
     create_reliable_engine,
-    run_storage_recovery,
     safe_float,
     safe_iso_timestamp,
     safe_json_loads,
@@ -57,7 +52,7 @@ from storage_reliability import (
 def _make_dummy_signal(symbol: str = "TCS", p_key: str | None = None) -> PredictionSignal:
     return PredictionSignal(
         symbol=symbol,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         horizon="INTRADAY",
         action="BUY",
         model_predicted_class="UP",
@@ -86,7 +81,7 @@ def _make_dummy_event(event_id: str, symbol: str = "TCS") -> Event:
         event_id=event_id,
         source="NEWS",
         event_type="EARNINGS",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         scope="STOCK",
         affected_tickers=[symbol],
         sector="IT",
@@ -250,7 +245,7 @@ def test_save_prediction_bundle_rolls_back_on_event_failure(tmp_path):
         event_id="EVT_BAD_2",
         source="NEWS",
         event_type="NEWS",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         scope="STOCK",
         affected_tickers=["RELIANCE"],
         confidence_in_scope=1.0,

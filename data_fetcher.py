@@ -1,7 +1,7 @@
 # 1. Standard library imports
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -88,7 +88,7 @@ class DataFetcher:
                     df.index = df.index.tz_localize("UTC")
                 else:
                     try:
-                        df.index = df.index.tz_convert("Asia/Kolkata")
+                        df.index = df.index.tz_convert("UTC")
                     except Exception:
                         pass
                 logger.info(f"Loaded CACHED data for {ticker} ({interval}) from {path}")
@@ -105,7 +105,7 @@ class DataFetcher:
                     df.index = df.index.tz_localize("UTC")
                 else:
                     try:
-                        df.index = df.index.tz_convert("Asia/Kolkata")
+                        df.index = df.index.tz_convert("UTC")
                     except Exception:
                         pass
                 logger.warning(
@@ -116,7 +116,7 @@ class DataFetcher:
                 return df
         except Exception as e:
             logger.error(f"Failed to load legacy unsuffixed cache for {ticker}: {e}")
-        
+
         return None
 
     def fetch_ohlcv(
@@ -132,17 +132,22 @@ class DataFetcher:
         DATA-001: Returns MarketDataResult if return_metadata=True, or DataFrame/None.
         If return_metadata=False and cache is stale, returns None unless allow_stale=True.
         """
-        now_utc = pd.Timestamp.now(tz=timezone.utc).to_pydatetime()
+        now_utc = pd.Timestamp.now(tz=UTC).to_pydatetime()
+
+        # Clamp 1m granularity requests to maximum supported Yahoo period (7d)
+        if interval == "1m" and period not in ["1d", "5d", "7d"]:
+            period = "7d"
 
         # FIRST: Check if we have a fresh cache
         cached = self._load_cache(ticker, interval=interval)
         if cached is not None and not self.check_staleness(cached, ticker):
             logger.info(f"Using fresh cache for {ticker}")
+            health_registry.report("data_fetcher", ok=True, detail=f"Served cached data for {ticker}")
             age_sec = 0.0
             if len(cached) > 0 and hasattr(cached.index[-1], "to_pydatetime"):
                 last_dt = cached.index[-1].to_pydatetime()
                 if last_dt.tzinfo is None:
-                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                    last_dt = last_dt.replace(tzinfo=UTC)
                 age_sec = max(0.0, (now_utc - last_dt).total_seconds())
 
             if return_metadata:
@@ -201,7 +206,7 @@ class DataFetcher:
             if len(cached) > 0 and hasattr(cached.index[-1], "to_pydatetime"):
                 last_dt = cached.index[-1].to_pydatetime()
                 if last_dt.tzinfo is None:
-                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                    last_dt = last_dt.replace(tzinfo=UTC)
                 age_sec = max(0.0, (now_utc - last_dt).total_seconds())
 
             if return_metadata:
@@ -312,9 +317,16 @@ class DataFetcher:
         interval: str = BAR_INTERVAL,
         period: str = BAR_HISTORY_PERIOD,
         return_metadata: bool = False,
+        allow_stale: bool = False,
     ) -> pd.DataFrame | None | MarketDataResult:
         """Fetch the NIFTY 50 index itself — used as the baseline for edge/outperformance checks."""
-        return self.fetch_ohlcv(NIFTY_INDEX_TICKER, interval=interval, period=period, return_metadata=return_metadata)
+        return self.fetch_ohlcv(
+            NIFTY_INDEX_TICKER,
+            interval=interval,
+            period=period,
+            return_metadata=return_metadata,
+            allow_stale=allow_stale,
+        )
 
     def fetch_stock_fundamentals(self, ticker: str) -> dict[str, object]:
         """Fetch fundamental metrics (P/E, P/B, Market Cap, EPS, Div Yield, 52W High/Low) with safe fallbacks."""

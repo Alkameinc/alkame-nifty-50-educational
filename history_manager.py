@@ -2,9 +2,8 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Optional
 
 import pandas as pd
 from sqlalchemy import text
@@ -76,6 +75,9 @@ class PredictionRecord:
     delivery_count: int = 1
     data_stale: bool = False
     suppressed: bool = False
+    event_source_status: str = "EVENTS_AVAILABLE"
+    config_hash: str | None = None
+    reproducibility_bundle: dict | None = None
 
 
 @dataclass
@@ -144,6 +146,11 @@ class HistoryManager:
             "outcome_entry_timestamp": "TEXT",
             "outcome_target_timestamp": "TEXT",
             "delivery_count": "INTEGER NOT NULL DEFAULT 1",
+            "prediction_key": "TEXT",
+            "feature_schema_hash": "TEXT",
+            "event_source_status": "TEXT DEFAULT 'EVENTS_AVAILABLE'",
+            "config_hash": "TEXT",
+            "reproducibility_bundle": "TEXT",
         }
         with self.engine.begin() as conn:
             existing = {row[1] for row in conn.execute(text("PRAGMA table_info(predictions)"))}
@@ -227,7 +234,8 @@ class HistoryManager:
                 seed = {"symbol": signal.symbol, "timestamp": str(signal.timestamp), "horizon": signal.horizon,
                         "model_version": signal.model_version, "feature_version": signal.feature_version,
                         "action": signal.action, "predicted_class": signal.model_predicted_class,
-                        "entry_timestamp": entry_ts, "entry_price": entry_px}
+                        "entry_timestamp": entry_ts, "entry_price": entry_px,
+                        "is_out_of_sample": bool(is_out_of_sample)}
                 if p_key:
                     seed["prediction_key"] = p_key
                 stable_generation_id = generation_id or "forecast-" + hashlib.sha256(
@@ -284,6 +292,13 @@ class HistoryManager:
                     entry_price=safe_float(entry_px) if entry_px is not None else None,
                     outcome_resolution_status="PENDING",
                     delivery_count=1,
+                    event_source_status=getattr(signal, "event_source_status", "EVENTS_AVAILABLE"),
+                    config_hash=getattr(signal, "config_hash", None),
+                    reproducibility_bundle=(
+                        json.dumps(signal.reproducibility_bundle)
+                        if getattr(signal, "reproducibility_bundle", None)
+                        else None
+                    ),
                 )
                 db.add(prediction)
                 db.flush()
@@ -324,7 +339,7 @@ class HistoryManager:
         entry_price: float | None = None,
     ) -> tuple[int | None, list[str]]:
         """SCHED-003: Persists a prediction and its associated contributing events in a single atomic transaction.
-        
+
         Guarantees zero partial writes: if any event fails, the entire transaction rolls back,
         preventing orphaned predictions or half-persisted states.
         """
@@ -407,6 +422,13 @@ class HistoryManager:
                         entry_price=safe_float(entry_px) if entry_px is not None else None,
                         outcome_resolution_status="PENDING",
                         delivery_count=1,
+                        event_source_status=getattr(signal, "event_source_status", "EVENTS_AVAILABLE"),
+                        config_hash=getattr(signal, "config_hash", None),
+                        reproducibility_bundle=(
+                            json.dumps(signal.reproducibility_bundle)
+                            if getattr(signal, "reproducibility_bundle", None)
+                            else None
+                        ),
                     )
                     db.add(prediction)
                     db.flush()
@@ -466,7 +488,7 @@ class HistoryManager:
                 prediction.outcome_resolved = True  # type: ignore[assignment]
                 prediction.outcome_correct = prediction.model_predicted_class == actual_class  # type: ignore[assignment]
                 prediction.outcome_actual_class = actual_class  # type: ignore[assignment]
-                prediction.resolved_at = datetime.now(timezone.utc).isoformat()  # type: ignore[assignment]
+                prediction.resolved_at = datetime.now(UTC).isoformat()  # type: ignore[assignment]
                 prediction.outcome_entry_price = safe_float(entry_price) if entry_price is not None else None  # type: ignore[assignment]
                 prediction.outcome_endpoint_price = safe_float(endpoint_price) if endpoint_price is not None else None  # type: ignore[assignment]
                 prediction.outcome_entry_timestamp = entry_timestamp  # type: ignore[assignment]
@@ -556,6 +578,13 @@ class HistoryManager:
                                 delivery_count=int(getattr(row, "delivery_count", None) or 1),
                                 data_stale=bool(getattr(row, "data_stale", False)),
                                 suppressed=bool(getattr(row, "suppressed", False)),
+                                event_source_status=str(getattr(row, "event_source_status", None) or "EVENTS_AVAILABLE"),
+                                config_hash=str(row.config_hash) if getattr(row, "config_hash", None) else None,
+                                reproducibility_bundle=(
+                                    json.loads(row.reproducibility_bundle)
+                                    if getattr(row, "reproducibility_bundle", None) and isinstance(row.reproducibility_bundle, str)
+                                    else (row.reproducibility_bundle if isinstance(getattr(row, "reproducibility_bundle", None), dict) else None)
+                                ),
                             )
                         )
                     except Exception as parse_err:
@@ -601,6 +630,13 @@ class HistoryManager:
                     is_out_of_sample=bool(row.is_out_of_sample),
                     prediction_key=str(row.prediction_key) if getattr(row, "prediction_key", None) else None,
                     feature_schema_hash=str(row.feature_schema_hash) if getattr(row, "feature_schema_hash", None) else None,
+                    event_source_status=str(getattr(row, "event_source_status", None) or "EVENTS_AVAILABLE"),
+                    config_hash=str(row.config_hash) if getattr(row, "config_hash", None) else None,
+                    reproducibility_bundle=(
+                        json.loads(row.reproducibility_bundle)
+                        if getattr(row, "reproducibility_bundle", None) and isinstance(row.reproducibility_bundle, str)
+                        else (row.reproducibility_bundle if isinstance(getattr(row, "reproducibility_bundle", None), dict) else None)
+                    ),
                 )
         except Exception as e:
             logger.error(f"Failed getting prediction by key={prediction_key}: {e}")
@@ -617,9 +653,9 @@ class HistoryManager:
                 try:
                     ts = pd.Timestamp(row.timestamp).to_pydatetime()
                     if ts.tzinfo is None:
-                        ts = ts.replace(tzinfo=timezone.utc)
+                        ts = ts.replace(tzinfo=UTC)
                 except Exception:
-                    ts = datetime.now(timezone.utc)
+                    ts = datetime.now(UTC)
 
                 reasoning = safe_json_loads(row.reasoning, [])
                 if not isinstance(reasoning, list):
@@ -655,6 +691,7 @@ class HistoryManager:
                     data_snapshot_id=str(row.data_snapshot_id) if row.data_snapshot_id else None,
                     prediction_key=str(row.prediction_key) if row.prediction_key else None,
                     feature_schema_hash=str(row.feature_schema_hash) if getattr(row, "feature_schema_hash", None) else None,
+                    event_source_status=str(getattr(row, "event_source_status", None) or "EVENTS_AVAILABLE"),
                 )
         except Exception as e:
             logger.error(f"Failed reconstructing prediction signal for key={prediction_key}: {e}")
@@ -681,7 +718,7 @@ class HistoryManager:
             )
             cutoff_ts = None
             if max_age_days is not None and max_age_days > 0:
-                cutoff_ts = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+                cutoff_ts = (datetime.now(UTC) - timedelta(days=max_age_days)).isoformat()
 
             data = []
             for r in records:
@@ -797,7 +834,7 @@ class HistoryManager:
         try:
             with atomic_transaction(self.SessionLocal) as db:
                 run_id = hashlib.sha256(
-                    f"{symbol}|{horizon}|{strategy_ret}|{base_ret}|{alpha}|{edge}|{calib}|{ece}|{live_worthy}|{datetime.now(timezone.utc).isoformat()}".encode()
+                    f"{symbol}|{horizon}|{strategy_ret}|{base_ret}|{alpha}|{edge}|{calib}|{ece}|{live_worthy}|{datetime.now(UTC).isoformat()}".encode()
                 ).hexdigest()[:24]
                 row = db.query(DBBacktestMetric).filter_by(symbol=symbol, horizon=horizon).first()
                 if row:
@@ -808,7 +845,7 @@ class HistoryManager:
                     row.calibration_status = calib  # type: ignore[assignment]
                     row.calibration_ece = safe_float(ece) if ece is not None else None  # type: ignore[assignment]
                     row.is_live_worthy = bool(live_worthy)  # type: ignore[assignment]
-                    row.updated_at = datetime.now(timezone.utc).isoformat()  # type: ignore[assignment]
+                    row.updated_at = datetime.now(UTC).isoformat()  # type: ignore[assignment]
                 else:
                     metric = DBBacktestMetric(
                         run_id=run_id,
@@ -821,7 +858,7 @@ class HistoryManager:
                         calibration_status=calib,
                         calibration_ece=safe_float(ece) if ece is not None else None,
                         is_live_worthy=bool(live_worthy),
-                        updated_at=datetime.now(timezone.utc).isoformat(),
+                        updated_at=datetime.now(UTC).isoformat(),
                     )
                     db.add(metric)
             health_registry.report("history_manager", ok=True, detail=f"Saved backtest metrics for {symbol} {horizon}")
@@ -861,7 +898,7 @@ if __name__ == "__main__":
             actual = "UP" if i < 3 else "FLAT"
             s = PredictionSignal(
                 symbol=test_symbol,
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(UTC),
                 action="BUY",
                 model_predicted_class="UP",
                 raw_confidence=0.72 + (i * 0.01),
@@ -902,7 +939,7 @@ if __name__ == "__main__":
             event_id="EVT_TEST_1",
             source="CORPORATE",
             event_type="CORPORATE_ANNOUNCEMENT",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             scope="STOCK",
             affected_tickers=[test_symbol, "HDFCBANK"],
             sector="Auto",
@@ -915,7 +952,7 @@ if __name__ == "__main__":
             event_id="EVT_TEST_2",
             source="CORPORATE",
             event_type="CORPORATE_ANNOUNCEMENT",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             scope="STOCK",
             affected_tickers=["MARUTI", "TMPV"],
             sector="Auto",
@@ -952,7 +989,7 @@ if __name__ == "__main__":
         # Bundle test (SCHED-003)
         bundle_signal = PredictionSignal(
             symbol="INFY",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             action="BUY",
             model_predicted_class="UP",
             raw_confidence=0.85,
@@ -976,7 +1013,7 @@ if __name__ == "__main__":
             event_id="EVT_BUNDLE_1",
             source="NEWS",
             event_type="EARNINGS",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             scope="STOCK",
             affected_tickers=["INFY"],
             sector="IT",

@@ -268,9 +268,9 @@ def test_scanner_rejection_summary():
 # 8. API Refresh Protection (P0 3.8 & Invariant G)
 # ============================================================================
 def test_api_refresh_rate_limiting():
-    from api import refresh_backtest
-
     from unittest.mock import MagicMock
+
+    from api import refresh_backtest
 
     mock_req = MagicMock()
     mock_req.client.host = "127.0.0.1"

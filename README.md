@@ -21,7 +21,7 @@ Alkame-Nifty50 is an open-source, research-grade intraday signal engine for the 
 - **Human-in-the-loop**: Trader overrides, notes, and feedback are first-class citizens of the pipeline.
 - **Modular and API-first**: Every major component is independently testable and externally accessible via a REST API layer.
 
-The full methodology, regulatory rationale, and business charter live in [`ALKAME_NIFTY50_CHARTER.md`](./ALKAME_NIFTY50_CHARTER.md). Read it first — it explains *why* the system is built the way it is.
+The full methodology, regulatory framework, and system architecture are governed by the [`ENGINEERING_CONTRACT.md`](./ENGINEERING_CONTRACT.md). Master verification reports and remediation logs are archived in [`docs/audits/`](./docs/audits/).
 
 This project is built and maintained by interns and mentors of the **[DBERT AI Internship Program](https://internship.dbert.online)** — see the [DBERT Internship Program](#dbert-internship-program) section below to get involved.
 
@@ -29,7 +29,22 @@ This project is built and maintained by interns and mentors of the **[DBERT AI I
 
 ## What's New — Recent Improvements
 
-This release significantly expands the system beyond the original signal pipeline.
+This release significantly expands the system beyond the original signal pipeline into an institutional research platform.
+
+### 🎥 Product Walkthrough & Demo Video
+A full, captioned institutional video walkthrough of the complete system and multi-screen UI is available in [`alkame_nifty50_demo.mp4`](./alkame_nifty50_demo.mp4).
+
+### 🆕 Institutional Research Suite Frontend (`alkame_dashboard.html`)
+An enterprise-grade, dual-theme (Dark & Light mode) multi-screen research cockpit accessible at `http://localhost:8000/dashboard` or as a standalone file:
+- **Phase 1-3 Macro-Micro Continuity Forecasting**: Temporal continuity connecting Historical Realized Data ➔ NOW Decision Pivot (T=0) ➔ Probabilistic Scenario Funnels (Bullish, Central Expectation, Downside Tail) dynamically scaled to constituent price levels with dynamic ATR, RSI, Bollinger %B, and VWAP.
+- **Live Prediction Corridor Canvas**: Auto-streaming multi-horizon prediction bounds plotted against incoming market ticks with 2s, 5s, 10s cadence controls.
+- **Multi-Horizon Forecast Matrix**: Simultaneous predictive modeling across 8 distinct horizons (1m, 5m, 15m, 30m, 1h, 1d, 1w, 1M) with dual-boundary safety gates.
+- **16-Subsystem Telemetry Matrix**: Live health diagnostic status for Ensemble Manager, Event Classifier, Corporate Events Fetcher, Data Fetcher, and Storage engines.
+- **Intraday Scalping Radar & Universe Scanner**: Real-time constituent sweeps with volume anomalies and multi-factor ranking.
+- **Macro Shock & Risk Stress Simulator**: Real-time sensitivity modeling against Brent Crude shocks, India VIX spikes, and USD/INR shifts.
+- **Institutional Task Desk & Audit Log**: Persistent task management with priority chips (P0, P1, P2) and analyst notes.
+
+![Alkame Institutional Dashboard](docs/images/dashboard_night_overview.png)
 
 ### 🆕 REST API Layer (`api.py`)
 A FastAPI-based REST API now exposes core engine capabilities over HTTP. Enables integration with external dashboards, bots, and automation workflows without touching internal Python code directly.
@@ -96,6 +111,11 @@ Expanded schema captures position plan data, narrative summaries, and health sna
 | `backtester.py` | Historical replay with slippage/costs, real alpha calculation |
 | `scheduler.py` | Orchestrates the full pipeline on a market-hours loop |
 | `api.py` | FastAPI REST API — signals, scanner results, and history over HTTP |
+| `alkame_dashboard.html` | Institutional Multi-Screen Research Suite (Live charts, risk simulator, telemetry, tasks) |
+| `alkame_nifty50_demo.mp4` | Full-feature product video walkthrough demonstrating end-to-end capabilities |
+| `ENGINEERING_CONTRACT.md` | Core engineering contract & 18 architectural invariants |
+| `docs/audits/` | Master verification reports, release gate audits, and remediation logs |
+| `market_calendar.py` | NSE trading calendar & holiday scheduler |
 | `app.py` | Streamlit dashboard |
 | `train_all.py` | Batch training script for all NIFTY 50 models |
 | `automation/` | Cron wrappers, log rotation, restart-on-failure scripts for server deployment |
@@ -325,9 +345,34 @@ If you are already a DBERT intern working on this codebase, refer to your assign
 
 ---
 
+## 🚀 Running the Production Platform
+
+### 1. Launching FastAPI Backend & Dashboard
+```bash
+# Start FastAPI backend server
+python -m uvicorn api:app --host 127.0.0.1 --port 8000
+```
+Open your browser and navigate to:
+- **Institutional Research Suite**: [http://localhost:8000/dashboard](http://localhost:8000/dashboard)
+- **Interactive OpenAPI Documentation**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Subsystem Telemetry Health Check**: [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
+
+### 2. Standalone Offline Dashboard
+You can also directly double-click or open `alkame_dashboard.html` in any modern web browser for 100% offline educational simulation without any external dependencies.
+
+### 3. Running Automated Tests & Verification Audits
+```bash
+# Run pytest test suite
+pytest
+
+# Run Playwright end-to-end browser verification audit
+python verify_telemetry_and_charts.py
+```
+
+
 ## Legal & Regulatory Notice
 
-> 📖 Read **Section 9 of `ALKAME_NIFTY50_CHARTER.md`** before sharing this project or its outputs with anyone outside your own research team.
+> 📖 Read this section carefully before sharing this project or its outputs with anyone outside your own research team.
 
 This repository is published for **educational and research purposes only**.
 

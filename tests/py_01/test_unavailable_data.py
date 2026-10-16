@@ -160,7 +160,7 @@ def test_fresh_cache_remains_usable_when_vendor_is_unavailable(isolated_fetcher,
     assert result.status == DataStatus.CACHED_FRESH
     assert result.source == "cache"
     assert result.is_stale is False
-    pd.testing.assert_frame_equal(result.data, expected, check_freq=False)
+    pd.testing.assert_frame_equal(result.data, expected.tz_convert("UTC"), check_freq=False)
 
 
 def test_stale_cache_fallback_is_preserved_when_live_fetch_fails(isolated_fetcher, monkeypatch):
@@ -174,7 +174,7 @@ def test_stale_cache_fallback_is_preserved_when_live_fetch_fails(isolated_fetche
     assert result.status == DataStatus.CACHED_STALE
     assert result.source == "cache"
     assert result.is_stale is True
-    pd.testing.assert_frame_equal(result.data, expected, check_freq=False)
+    pd.testing.assert_frame_equal(result.data, expected.tz_convert("UTC"), check_freq=False)
 
 
 def test_original_provenance_regression_accepts_stale_cache(isolated_fetcher, monkeypatch):

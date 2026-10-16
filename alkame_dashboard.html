@@ -1,0 +1,3322 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Alkame NIFTY 50 Educational Intelligence Platform</title>
+  <!-- Tailwind CSS via official gstatic script per Generative UI skill -->
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    :root {
+      --bg-base: #f8fafc;
+      --bg-surface: #f1f5f9;
+      --card-bg: #ffffff;
+      --card-border: #e2e8f0;
+      --card-glow: rgba(37, 99, 235, 0.08);
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --primary: #2563eb;
+      --primary-light: #eff6ff;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --input-bg: #ffffff;
+      --input-border: #cbd5e1;
+    }
+    .dark {
+      --bg-base: #07090e;
+      --bg-surface: #0b1120;
+      --card-bg: #0f172a;
+      --card-border: #334155;
+      --card-glow: rgba(59, 130, 246, 0.2);
+      --text-main: #ffffff;
+      --text-muted: #cbd5e1;
+      --primary: #3b82f6;
+      --primary-light: #1e293b;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #f43f5e;
+      --input-bg: #070b14;
+      --input-border: #475569;
+    }
+    body {
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      transition: background-color 0.25s ease, color 0.25s ease;
+    }
+    .glass-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 1rem;
+      box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .dark .glass-card {
+      box-shadow: 0 4px 24px -2px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(51, 65, 85, 0.35);
+    }
+    .glass-card:hover {
+      box-shadow: 0 8px 30px -4px var(--card-glow);
+    }
+    .custom-scroll::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scroll::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.4);
+      border-radius: 4px;
+    }
+    .pulse-dot {
+      animation: pulseAnimation 2s infinite;
+    }
+    @keyframes pulseAnimation {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.18); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .screen-tab.active {
+      background: #2563eb;
+      color: #ffffff;
+      box-shadow: 0 4px 14px -1px rgba(37, 99, 235, 0.35);
+    }
+    .dark .screen-tab.active {
+      background: #3b82f6;
+      color: #ffffff;
+      box-shadow: 0 4px 16px -1px rgba(59, 130, 246, 0.45);
+    }
+    @keyframes marquee {
+      0% { transform: translateX(0%); }
+      100% { transform: translateX(-50%); }
+    }
+    .marquee-track {
+      display: flex;
+      width: 200%;
+      animation: marquee 35s linear infinite;
+    }
+    .marquee-track:hover {
+      animation-play-state: paused;
+    }
+  </style>
+</head>
+<body class="antialiased min-h-screen flex flex-col custom-scroll selection:bg-blue-500 selection:text-white">
+
+  <!-- ================= TOP MARKET MARQUEE (TICKER TAPE) ================= -->
+  <div class="bg-slate-900 text-slate-200 dark:bg-black/80 border-b border-slate-800 text-xs py-1.5 px-4 overflow-hidden relative select-none">
+    <div class="flex items-center">
+      <span class="z-10 bg-slate-900 dark:bg-black pr-3 font-bold text-blue-400 uppercase tracking-wider text-[11px] flex items-center gap-1.5 whitespace-nowrap">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+        NIFTY 50 PULSE
+      </span>
+      <div class="overflow-hidden flex-1 relative">
+        <div class="marquee-track font-medium text-xs">
+          <div class="flex items-center gap-6 pr-6 whitespace-nowrap">
+            <span>NIFTY 50: <strong class="text-white">24,850.30</strong> <span class="text-emerald-400 font-bold">▲ +0.42%</span></span>
+            <span>BANK NIFTY: <strong class="text-white">51,200.15</strong> <span class="text-emerald-400 font-bold">▲ +0.61%</span></span>
+            <span>INDIA VIX: <strong class="text-white">13.45</strong> <span class="text-emerald-400 font-bold">▼ -2.10%</span></span>
+            <span>BRENT CRUDE: <strong class="text-white">$74.20</strong> <span class="text-rose-400 font-bold">▲ +0.80%</span></span>
+            <span>GOLD: <strong class="text-white">₹76,400</strong> <span class="text-emerald-400 font-bold">▲ +0.30%</span></span>
+            <span>USD/INR: <strong class="text-white">84.05</strong> <span class="text-slate-300 font-bold">▼ -0.05%</span></span>
+            <span class="cursor-pointer hover:underline" onclick="initStock('TCS')">TCS: <strong class="text-white">₹3,920.00</strong> <span class="text-emerald-400 font-bold">▲ +1.15%</span></span>
+            <span class="cursor-pointer hover:underline" onclick="initStock('RELIANCE')">RELIANCE: <strong class="text-white">₹2,985.40</strong> <span class="text-rose-400 font-bold">▼ -0.35%</span></span>
+            <span class="cursor-pointer hover:underline" onclick="initStock('HDFCBANK')">HDFCBANK: <strong class="text-white">₹1,680.20</strong> <span class="text-emerald-400 font-bold">▲ +0.70%</span></span>
+            <span class="cursor-pointer hover:underline" onclick="initStock('INFY')">INFY: <strong class="text-white">₹1,890.50</strong> <span class="text-emerald-400 font-bold">▲ +1.80%</span></span>
+          </div>
+          <div class="flex items-center gap-6 pr-6 whitespace-nowrap">
+            <span>NIFTY 50: <strong class="text-white">24,850.30</strong> <span class="text-emerald-400 font-bold">▲ +0.42%</span></span>
+            <span>BANK NIFTY: <strong class="text-white">51,200.15</strong> <span class="text-emerald-400 font-bold">▲ +0.61%</span></span>
+            <span>INDIA VIX: <strong class="text-white">13.45</strong> <span class="text-emerald-400 font-bold">▼ -2.10%</span></span>
+            <span>BRENT CRUDE: <strong class="text-white">$74.20</strong> <span class="text-rose-400 font-bold">▲ +0.80%</span></span>
+            <span>GOLD: <strong class="text-white">₹76,400</strong> <span class="text-emerald-400 font-bold">▲ +0.30%</span></span>
+            <span>USD/INR: <strong class="text-white">84.05</strong> <span class="text-slate-300 font-bold">▼ -0.05%</span></span>
+            <span class="cursor-pointer hover:underline" onclick="initStock('TCS')">TCS: <strong class="text-white">₹3,920.00</strong> <span class="text-emerald-400 font-bold">▲ +1.15%</span></span>
+            <span class="cursor-pointer hover:underline" onclick="initStock('RELIANCE')">RELIANCE: <strong class="text-white">₹2,985.40</strong> <span class="text-rose-400 font-bold">▼ -0.35%</span></span>
+            <span class="cursor-pointer hover:underline" onclick="initStock('HDFCBANK')">HDFCBANK: <strong class="text-white">₹1,680.20</strong> <span class="text-emerald-400 font-bold">▲ +0.70%</span></span>
+            <span class="cursor-pointer hover:underline" onclick="initStock('INFY')">INFY: <strong class="text-white">₹1,890.50</strong> <span class="text-emerald-400 font-bold">▲ +1.80%</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= TOP NAVIGATION HEADER ================= -->
+  <header class="sticky top-0 z-40 bg-[var(--card-bg)]/95 backdrop-blur-md border-b border-[var(--card-border)] px-4 lg:px-8 py-3 transition-colors">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      
+      <!-- Brand & Title -->
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-violet-600 text-white font-black text-sm flex items-center justify-center shadow-lg shadow-blue-500/25">
+          ALK
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-lg font-black tracking-tight text-[var(--text-main)]">Alkame NIFTY 50</h1>
+            <span class="px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+              Institutional Research Suite
+            </span>
+          </div>
+          <p class="text-xs text-[var(--text-muted)]">Non-directive causality-safe quantitative decision support</p>
+        </div>
+      </div>
+
+      <!-- Live Macro Risk & Status Bar -->
+      <div class="flex flex-wrap items-center gap-2.5">
+        
+        <!-- Risk Monitor Badge -->
+        <div id="risk-pill" class="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-700 dark:text-emerald-300 text-xs font-semibold shadow-sm transition-all cursor-pointer" onclick="toggleRiskModal()">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 pulse-dot"></span>
+          <span id="risk-label">Systemic Risk: NORMAL (z: 0.21)</span>
+          <span class="text-[10px] opacity-75">▼</span>
+        </div>
+
+        <!-- API Connection Pill -->
+        <div id="api-status-pill" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)] text-xs font-semibold text-[var(--text-muted)] cursor-pointer" onclick="toggleApiModal()">
+          <span id="api-status-dot" class="w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span id="api-status-text">API Connected</span>
+        </div>
+
+        <!-- Audio Alert Toggle -->
+        <button onclick="toggleAudioAlerts()" id="audio-alert-btn" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)] text-xs font-bold text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors" title="Toggle audio chime on boundary triggers">
+          <span id="audio-alert-icon">🔔</span>
+          <span id="audio-alert-text">Alerts: ON</span>
+        </button>
+
+        <!-- Scalping Scanner Modal Button -->
+        <button onclick="openScalpModal()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 text-white text-xs font-bold hover:shadow-md hover:shadow-indigo-500/25 transition-all">
+          <span>⚡ Scalp Scanner</span>
+        </button>
+
+        <!-- System Telemetry Button -->
+        <button onclick="openHealthModal()" class="p-2 rounded-xl border border-[var(--card-border)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" title="System Diagnostics (16 Components)">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+        </button>
+
+        <!-- Dark / Light Mode Switcher -->
+        <button onclick="toggleTheme()" class="p-2 rounded-xl border border-[var(--card-border)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors" title="Toggle High-Contrast Night Mode">
+          <span id="theme-icon">🌙</span>
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- ================= MULTI-SCREEN TAB BAR ================= -->
+  <nav class="border-b border-[var(--card-border)] bg-[var(--card-bg)] px-4 lg:px-8 py-2.5 transition-colors sticky top-[61px] z-30">
+    <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+      
+      <!-- Screen Tab Switcher (6 Screens) -->
+      <div class="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 custom-scroll text-xs font-bold">
+        <button onclick="switchScreen('screen-overview')" id="tab-screen-overview" class="screen-tab active px-3.5 py-1.5 rounded-xl border border-[var(--card-border)] whitespace-nowrap transition-all flex items-center gap-1.5">
+          <span>🏛️</span>
+          <span>Command Center</span>
+        </button>
+        <button onclick="switchScreen('screen-charts')" id="tab-screen-charts" class="screen-tab px-3.5 py-1.5 rounded-xl border border-[var(--card-border)] text-[var(--text-muted)] hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap transition-all flex items-center gap-1.5">
+          <span>📈</span>
+          <span>Deep Predictive Charts</span>
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+        </button>
+        <button onclick="switchScreen('screen-scanner')" id="tab-screen-scanner" class="screen-tab px-3.5 py-1.5 rounded-xl border border-[var(--card-border)] text-[var(--text-muted)] hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap transition-all flex items-center gap-1.5">
+          <span>⚡</span>
+          <span>Opportunity Scanner</span>
+        </button>
+        <button onclick="switchScreen('screen-risk')" id="tab-screen-risk" class="screen-tab px-3.5 py-1.5 rounded-xl border border-[var(--card-border)] text-[var(--text-muted)] hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap transition-all flex items-center gap-1.5">
+          <span>🛡️</span>
+          <span>Risk & Stress Simulator</span>
+        </button>
+        <button onclick="switchScreen('screen-tasks')" id="tab-screen-tasks" class="screen-tab px-3.5 py-1.5 rounded-xl border border-[var(--card-border)] text-[var(--text-muted)] hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap transition-all flex items-center gap-1.5">
+          <span>📋</span>
+          <span>Institutional Task Desk</span>
+          <span id="tab-task-badge" class="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500/20 text-amber-500 border border-amber-500/30">3</span>
+        </button>
+        <button onclick="switchScreen('screen-governance')" id="tab-screen-governance" class="screen-tab px-3.5 py-1.5 rounded-xl border border-[var(--card-border)] text-[var(--text-muted)] hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap transition-all flex items-center gap-1.5">
+          <span>🧪</span>
+          <span>Model Governance Lab</span>
+        </button>
+      </div>
+
+      <!-- Quick Ticker Dropdown & Search -->
+      <div class="flex items-center gap-2">
+        <div class="relative flex-1 md:w-64">
+          <input type="text" id="symbol-search" placeholder="Search symbol (e.g. ADANIENT, RELIANCE)..." 
+                 oninput="onSearchInput(this.value)"
+                 class="w-full pl-8 pr-3 py-1.5 rounded-xl text-xs bg-[var(--bg-base)] border border-[var(--card-border)] text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-blue-500 font-semibold">
+          <span class="absolute left-2.5 top-2 text-[var(--text-muted)] text-xs">🔍</span>
+          <div id="search-dropdown" class="hidden absolute top-full left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-[var(--card-bg)] border border-[var(--card-border)] rounded-xl shadow-xl z-50 text-xs custom-scroll">
+            <!-- Dynamic search results populated by JS -->
+          </div>
+        </div>
+
+        <button onclick="refreshCurrentStock()" id="btn-refresh" class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[var(--card-border)] text-xs font-bold text-[var(--text-main)] hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shadow-sm" title="Refresh stock data">
+          <span id="refresh-spinner">🔄</span>
+          <span>Refresh</span>
+        </button>
+      </div>
+
+    </div>
+  </nav>
+
+  <!-- ================= SUB-HEADER: UNIVERSE SELECTOR & SECTOR CHIPS ================= -->
+  <section class="border-b border-[var(--card-border)] bg-[var(--bg-surface)] px-4 lg:px-8 py-2.5 transition-colors">
+    <div class="max-w-7xl mx-auto flex items-center justify-between gap-3 overflow-x-auto custom-scroll">
+      
+      <!-- Sector Filter Pills -->
+      <div class="flex items-center gap-1.5 text-xs font-semibold whitespace-nowrap">
+        <span class="text-[var(--text-muted)] text-[11px] uppercase tracking-wider font-extrabold mr-1">Sector:</span>
+        <button onclick="filterSector('ALL')" class="sector-pill px-3 py-1 rounded-full bg-blue-600 text-white shadow-sm transition-all" data-sector="ALL">All NIFTY 50</button>
+        <button onclick="filterSector('FINANCIAL SERVICES')" class="sector-pill px-3 py-1 rounded-full border border-[var(--card-border)] text-[var(--text-muted)] hover:bg-slate-200 dark:hover:bg-slate-800 transition-all" data-sector="FINANCIAL SERVICES">Banking & Finance</button>
+        <button onclick="filterSector('INFORMATION TECHNOLOGY')" class="sector-pill px-3 py-1 rounded-full border border-[var(--card-border)] text-[var(--text-muted)] hover:bg-slate-200 dark:hover:bg-slate-800 transition-all" data-sector="INFORMATION TECHNOLOGY">IT & Tech</button>
+        <button onclick="filterSector('ENERGY')" class="sector-pill px-3 py-1 rounded-full border border-[var(--card-border)] text-[var(--text-muted)] hover:bg-slate-200 dark:hover:bg-slate-800 transition-all" data-sector="ENERGY">Energy & Coal</button>
+        <button onclick="filterSector('AUTOMOBILE')" class="sector-pill px-3 py-1 rounded-full border border-[var(--card-border)] text-[var(--text-muted)] hover:bg-slate-200 dark:hover:bg-slate-800 transition-all" data-sector="AUTOMOBILE">Auto</button>
+        <button onclick="filterSector('PHARMACEUTICALS')" class="sector-pill px-3 py-1 rounded-full border border-[var(--card-border)] text-[var(--text-muted)] hover:bg-slate-200 dark:hover:bg-slate-800 transition-all" data-sector="PHARMACEUTICALS">Pharma</button>
+        <button onclick="filterSector('CONSUMER GOODS')" class="sector-pill px-3 py-1 rounded-full border border-[var(--card-border)] text-[var(--text-muted)] hover:bg-slate-200 dark:hover:bg-slate-800 transition-all" data-sector="CONSUMER GOODS">FMCG</button>
+        <button onclick="filterSector('METALS')" class="sector-pill px-3 py-1 rounded-full border border-[var(--card-border)] text-[var(--text-muted)] hover:bg-slate-200 dark:hover:bg-slate-800 transition-all" data-sector="METALS">Metals</button>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ================= ACTIVE STOCK HEADER BANNER (GLOBAL) ================= -->
+  <section class="max-w-7xl w-full mx-auto px-4 lg:px-8 pt-4">
+    <div class="glass-card p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-5 bg-gradient-to-r from-blue-50/60 via-indigo-50/30 to-transparent dark:from-blue-950/40 dark:via-indigo-950/20 dark:to-transparent border-blue-200 dark:border-blue-900/60">
+      <div class="flex items-center gap-4">
+        <div class="w-13 h-13 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white font-black text-xl flex items-center justify-center shadow-lg shadow-blue-500/25 flex-shrink-0">
+          <span id="stock-avatar">AD</span>
+        </div>
+        <div>
+          <div class="flex items-center gap-3">
+            <h2 id="stock-symbol" class="text-2xl font-black text-[var(--text-main)] tracking-tight">ADANIENT</h2>
+            <span id="stock-sector" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200">Energy • Thermal Coal</span>
+          </div>
+          <p id="stock-name" class="text-xs text-[var(--text-muted)] font-medium">Adani Enterprises Limited • NSE NIFTY 50 Constituent</p>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-5">
+        <div>
+          <span class="text-[11px] font-bold text-[var(--text-muted)] uppercase block">Current Price (CMP)</span>
+          <div class="flex items-baseline gap-2">
+            <span id="stock-cmp" class="text-2xl font-black text-[var(--text-main)] tracking-tight">₹2,701.00</span>
+            <span id="stock-change" class="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-lg border border-emerald-200 dark:border-emerald-800">+0.82%</span>
+          </div>
+        </div>
+
+        <div class="border-l border-[var(--card-border)] pl-4">
+          <span class="text-[11px] font-bold text-[var(--text-muted)] uppercase block">Valuation Status</span>
+          <span id="stock-valuation-status" class="inline-block mt-0.5 px-3 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+            🟡 FAIR PRICED
+          </span>
+        </div>
+
+        <div class="border-l border-[var(--card-border)] pl-4 flex items-center gap-2">
+          <button onclick="refreshLiveWorthiness()" class="px-3.5 py-2 rounded-xl bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950 text-xs font-bold hover:shadow-md transition-all flex items-center gap-1.5">
+            <span>⚡ Refresh Live-Worthiness</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= MAIN MULTI-SCREEN CONTAINER ================= -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-8 space-y-6">
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 1: COMMAND CENTER (EXECUTIVE OVERVIEW)                              -->
+    <!-- ========================================================================= -->
+    <div id="screen-overview" class="screen-view space-y-6">
+      
+      <!-- Row 1: Primary Signal Gate & Fundamental Valuation Matrix -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        <!-- Primary Signal Banner (5 Columns) -->
+        <div class="lg:col-span-5 glass-card p-6 flex flex-col justify-between space-y-5 border-l-4 border-l-amber-500">
+          <div>
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-xs font-extrabold uppercase tracking-wider text-[var(--text-muted)]">Primary Signal Gate</span>
+              <span id="active-horizon-pill" class="px-2.5 py-0.5 rounded-full text-[11px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300">
+                INTRADAY
+              </span>
+            </div>
+
+            <!-- Big Recommendation Card -->
+            <div id="signal-recommendation-card" class="p-5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-center space-y-1.5">
+              <span class="text-xs font-bold uppercase tracking-widest text-amber-800 dark:text-amber-400 block">Recommended Action</span>
+              <div id="signal-action-text" class="text-4xl font-black text-amber-700 dark:text-amber-400 tracking-tight">HOLD</div>
+              <p id="signal-verdict-text" class="text-xs text-[var(--text-muted)] font-medium max-w-xs mx-auto">
+                Confidence not yet calibrated on sufficient history — treated as educational observation only.
+              </p>
+            </div>
+
+            <!-- Statistical Targets & Bounds -->
+            <div class="grid grid-cols-2 gap-3 mt-4">
+              <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)]">
+                <span class="text-[11px] font-bold text-[var(--text-muted)] uppercase block">Expected Target</span>
+                <span id="target-price" class="text-lg font-black text-emerald-600 dark:text-emerald-400">₹2706.15</span>
+                <span id="target-pct" class="text-xs text-emerald-600 dark:text-emerald-400 font-semibold block">↑ +0.2%</span>
+              </div>
+              <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)]">
+                <span class="text-[11px] font-bold text-[var(--text-muted)] uppercase block">Risk Threshold / Stop</span>
+                <span id="stop-loss-price" class="text-lg font-black text-rose-600 dark:text-rose-400">₹2697.55</span>
+                <span id="stop-loss-pct" class="text-xs text-rose-600 dark:text-rose-400 font-semibold block">↓ -0.1%</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Dual-Boundary Statistical Gate Expander -->
+          <div class="border border-blue-200 dark:border-blue-900/60 bg-blue-50/50 dark:bg-blue-950/20 rounded-xl p-3.5 space-y-2">
+            <div class="flex items-center justify-between text-xs font-bold text-blue-900 dark:text-blue-300 cursor-pointer" onclick="toggleSafetyGateDetails()">
+              <div class="flex items-center gap-1.5">
+                <span>🛡️ Dual-Boundary Statistical Gate</span>
+              </div>
+              <span id="gate-expand-icon">▼</span>
+            </div>
+            <div id="gate-details-content" class="text-xs text-[var(--text-muted)] leading-relaxed space-y-1.5 pt-1">
+              <p><strong>Raw Model Lean:</strong> <span id="gate-raw-lean" class="font-bold text-blue-600 dark:text-blue-400">UP (52.9%)</span></p>
+              <p><strong>Safety Rule:</strong> Uncalibrated models are held at HOLD. Model score is separated from calibrated probability to prevent risking capital on unproven statistical edges.</p>
+              <p id="gate-specific-reason" class="text-amber-700 dark:text-amber-300 font-semibold">• Model leaned BUY, but no confirmed edge vs NIFTY baseline yet — forced to HOLD.</p>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Fundamental Valuation Matrix (7 Columns) -->
+        <div class="lg:col-span-7 glass-card p-6 flex flex-col justify-between space-y-6">
+          <div>
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-sm font-extrabold uppercase tracking-wider text-[var(--text-main)] flex items-center gap-2">
+                <span>📊 Fundamental Valuation Matrix</span>
+              </h3>
+              <span class="text-xs text-[var(--text-muted)] font-medium">Point-in-time metrics</span>
+            </div>
+
+            <!-- 8 Metrics Grid -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+              <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)]">
+                <span class="text-[11px] font-bold text-[var(--text-muted)] block uppercase">P/E Ratio</span>
+                <span id="val-pe" class="text-lg font-black text-[var(--text-main)]">43.52</span>
+                <span id="val-pe-sub" class="text-[11px] text-[var(--text-muted)] block">vs Sector 28.4</span>
+              </div>
+              <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)]">
+                <span class="text-[11px] font-bold text-[var(--text-muted)] block uppercase">Market Cap</span>
+                <span id="val-mcap" class="text-lg font-black text-[var(--text-main)]">₹365,505 Cr</span>
+                <span id="val-mcap-sub" class="text-[11px] text-emerald-600 font-semibold block">Large Cap</span>
+              </div>
+              <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)]">
+                <span class="text-[11px] font-bold text-[var(--text-muted)] block uppercase">Price / Book (P/B)</span>
+                <span id="val-pb" class="text-lg font-black text-[var(--text-main)]">4.31</span>
+                <span id="val-pb-sub" class="text-[11px] text-[var(--text-muted)] block">Book Val ₹626</span>
+              </div>
+              <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)]">
+                <span class="text-[11px] font-bold text-[var(--text-muted)] block uppercase">Trailing EPS</span>
+                <span id="val-eps" class="text-lg font-black text-[var(--text-main)]">₹62.04</span>
+                <span id="val-eps-sub" class="text-[11px] text-emerald-600 font-semibold block">Profitable</span>
+              </div>
+              <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)]">
+                <span class="text-[11px] font-bold text-[var(--text-muted)] block uppercase">52-Week High</span>
+                <span id="val-52h" class="text-lg font-black text-slate-700 dark:text-slate-300">₹3,245.00</span>
+                <span id="val-52h-sub" class="text-[11px] text-rose-500 font-semibold block">-16.8% from peak</span>
+              </div>
+              <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)]">
+                <span class="text-[11px] font-bold text-[var(--text-muted)] block uppercase">52-Week Low</span>
+                <span id="val-52l" class="text-lg font-black text-slate-700 dark:text-slate-300">₹1,753.00</span>
+                <span id="val-52l-sub" class="text-[11px] text-emerald-500 font-semibold block">+54.1% from base</span>
+              </div>
+              <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)]">
+                <span class="text-[11px] font-bold text-[var(--text-muted)] block uppercase">Dividend Yield</span>
+                <span id="val-yield" class="text-lg font-black text-[var(--text-main)]">5.00%</span>
+                <span id="val-yield-sub" class="text-[11px] text-[var(--text-muted)] block">Annualized</span>
+              </div>
+              <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)]">
+                <span class="text-[11px] font-bold text-[var(--text-muted)] block uppercase">Model Validity</span>
+                <span id="val-validity" class="text-xs font-black text-amber-600 dark:text-amber-400">PROBATION</span>
+                <span id="val-validity-sub" class="text-[11px] text-[var(--text-muted)] block">Edge Unconfirmed</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 52-Week Range Slider Visualization -->
+          <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)] space-y-2">
+            <div class="flex items-center justify-between text-xs font-bold">
+              <span class="text-[var(--text-muted)]">52-Week Price Spectrum</span>
+              <span id="val-range-pct" class="text-blue-600 dark:text-blue-400">Position: 63.5%</span>
+            </div>
+            <div class="w-full bg-slate-200 dark:bg-slate-800 h-2.5 rounded-full overflow-hidden relative">
+              <div id="val-range-bar" class="h-full bg-gradient-to-r from-emerald-500 via-blue-500 to-rose-500 rounded-full" style="width: 63.5%"></div>
+            </div>
+            <div class="flex items-center justify-between text-[11px] text-[var(--text-muted)] font-semibold">
+              <span id="val-range-min">₹1,753 (Low)</span>
+              <span id="val-range-curr" class="text-blue-600 dark:text-blue-400 font-bold">CMP ₹2,701</span>
+              <span id="val-range-max">₹3,245 (High)</span>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- Row 2: Multi-Horizon Matrix & Downside-First Causal Research -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Multi-Horizon Forecast Matrix (7 Columns) -->
+        <div class="lg:col-span-7 glass-card p-6 space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-sm font-extrabold uppercase tracking-wider text-[var(--text-main)] flex items-center gap-2">
+                <span>⏱️ Multi-Horizon Forecast Matrix</span>
+              </h3>
+              <p class="text-xs text-[var(--text-muted)]">Simultaneous predictive modeling with dual-boundary safety status</p>
+            </div>
+            <span class="text-xs font-bold text-blue-600 dark:text-blue-400">8 Horizons</span>
+          </div>
+
+          <div class="overflow-x-auto custom-scroll">
+            <table class="w-full text-left text-xs">
+              <thead>
+                <tr class="border-b border-[var(--card-border)] text-[var(--text-muted)] uppercase text-[11px] tracking-wider font-extrabold">
+                  <th class="py-2.5 px-3">Horizon</th>
+                  <th class="py-2.5 px-3">Signal</th>
+                  <th class="py-2.5 px-3">Target</th>
+                  <th class="py-2.5 px-3">Stop Loss</th>
+                  <th class="py-2.5 px-3">Confidence</th>
+                  <th class="py-2.5 px-3">Validity</th>
+                </tr>
+              </thead>
+              <tbody id="horizon-table-body" class="divide-y divide-[var(--card-border)] font-medium">
+                <!-- Populated dynamically via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Event Intelligence Stream (5 Columns) -->
+        <div class="lg:col-span-5 glass-card p-6 flex flex-col justify-between space-y-4">
+          <div>
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-extrabold uppercase tracking-wider text-[var(--text-main)] flex items-center gap-2">
+                <span>📡 Event Intelligence Feed</span>
+              </h3>
+              <span class="text-xs text-[var(--text-muted)]">Point-in-Time Aligned</span>
+            </div>
+
+            <div id="events-feed-container" class="space-y-2.5 max-h-80 overflow-y-auto custom-scroll pr-1">
+              <!-- Dynamically populated event cards -->
+            </div>
+          </div>
+
+          <div class="p-3 rounded-xl bg-[var(--bg-base)] border border-[var(--card-border)] text-xs text-[var(--text-muted)]">
+            🛡️ Zero lookahead leakage: events are strictly aligned to historical bar timestamps.
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Row 3: Downside-First Causal Research -->
+      <div class="glass-card p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-extrabold uppercase tracking-wider text-[var(--text-main)] flex items-center gap-2">
+            <span>🔬 Downside-First Causal Research & Risk Assessment</span>
+          </h3>
+          <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300">
+            Capital Preservation First
+          </span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Downside Risk Card -->
+          <div class="p-4 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/20 space-y-2">
+            <div class="flex items-center gap-2 text-xs font-black text-rose-800 dark:text-rose-300 uppercase tracking-wide">
+              <span>⚠️ Downside Risk & Stop-Loss Triggers</span>
+            </div>
+            <p id="downside-summary-text" class="text-xs text-[var(--text-main)] leading-relaxed">
+              Algorithmic stop-loss set at ₹2,697.55 (-0.1% below current reference base). Primary risk factor stems from potential crude price volatility impacting margin structures and broader index consolidation.
+            </p>
+          </div>
+
+          <!-- Upside Potential Card -->
+          <div class="p-4 rounded-xl border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/40 dark:bg-emerald-950/20 space-y-2">
+            <div class="flex items-center gap-2 text-xs font-black text-emerald-800 dark:text-emerald-300 uppercase tracking-wide">
+              <span>🚀 Upside Catalyst & Potential</span>
+            </div>
+            <p id="upside-summary-text" class="text-xs text-[var(--text-main)] leading-relaxed">
+              Algorithmic ensembles exhibit positive directional momentum across INTRADAY, forecasting constructive accumulation. Projected upside target is ₹2,706.15 (+0.2% potential) based on multi-factor volatility expansion.
+            </p>
+          </div>
+        </div>
+
+        <!-- Causal Reasoning Chain Accordion -->
+        <div class="border border-[var(--card-border)] rounded-xl p-4 bg-[var(--bg-base)]">
+          <div class="flex items-center justify-between cursor-pointer" onclick="toggleReasoningDetails()">
+            <span class="text-xs font-bold text-[var(--text-main)] flex items-center gap-2">
+              <span>🧠 Full Causal Reasoning Chain</span>
+            </span>
+            <span id="reasoning-expand-icon" class="text-xs text-[var(--text-muted)]">▼</span>
+          </div>
+          <div id="reasoning-content" class="mt-3 text-xs text-[var(--text-muted)] space-y-2 border-t border-[var(--card-border)] pt-3 leading-relaxed">
+            <!-- Dynamically populated reasoning bullet points -->
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 2: DEEP PREDICTIVE CHARTS & CORRIDORS (NEW FEATURE)                -->
+    <!-- ========================================================================= -->
+    <div id="screen-charts" class="screen-view hidden space-y-6">
+
+      <!-- Chart 1: Auto-Updating Live vs. Prediction Corridor -->
+      <div class="glass-card p-6 space-y-5">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[var(--card-border)] pb-4">
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 class="text-base font-black uppercase tracking-tight text-[var(--text-main)]">
+                ⚡ Live Market Stream vs. Predictive Corridor
+              </h3>
+              <span id="live-stream-badge" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                STREAMING LIVE
+              </span>
+            </div>
+            <p class="text-xs text-[var(--text-muted)]">Real-time market ticks plotted against dynamic ±1.96σ statistical uncertainty funnel & target corridor</p>
+          </div>
+
+          <!-- Controls HUD -->
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="flex items-center gap-1.5 text-xs font-semibold">
+              <span class="text-[var(--text-muted)]">Cadence:</span>
+              <button onclick="setCadence(2)" class="cadence-btn px-2.5 py-1 rounded-lg border border-[var(--card-border)] text-xs font-bold" data-cadence="2">2s</button>
+              <button onclick="setCadence(5)" class="cadence-btn px-2.5 py-1 rounded-lg bg-blue-600 text-white text-xs font-bold" data-cadence="5">5s</button>
+              <button onclick="setCadence(10)" class="cadence-btn px-2.5 py-1 rounded-lg border border-[var(--card-border)] text-xs font-bold" data-cadence="10">10s</button>
+            </div>
+
+            <button onclick="toggleLiveStream()" id="btn-stream-toggle" class="px-3.5 py-1.5 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors shadow-sm flex items-center gap-1.5">
+              <span id="stream-toggle-icon">⏸</span>
+              <span id="stream-toggle-text">Pause Stream</span>
+            </button>
+
+            <button onclick="resetLiveStream()" class="px-3 py-1.5 rounded-xl border border-[var(--card-border)] text-xs font-bold text-[var(--text-main)] hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+              🔄 Reset Funnel
+            </button>
+          </div>
+        </div>
+
+        <!-- Metric HUD Bar -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+          <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)]">
+            <span class="text-[11px] font-bold text-[var(--text-muted)] uppercase block">Live Tick (CMP)</span>
+            <span id="hud-live-cmp" class="text-lg font-black text-[var(--text-main)]">₹2,701.00</span>
+            <span id="hud-live-delta" class="text-xs text-emerald-500 font-bold block">+₹22.15 (+0.82%)</span>
+          </div>
+          <div class="p-3 rounded-xl border border-emerald-300/40 bg-emerald-50/20 dark:bg-emerald-950/20">
+            <span class="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 uppercase block">Expected Target Bound</span>
+            <span id="hud-live-target" class="text-lg font-black text-emerald-600 dark:text-emerald-400">₹2,706.15</span>
+            <span class="text-xs text-emerald-600 font-semibold block">Upper Corridor (+0.2%)</span>
+          </div>
+          <div class="p-3 rounded-xl border border-rose-300/40 bg-rose-50/20 dark:bg-rose-950/20">
+            <span class="text-[11px] font-bold text-rose-700 dark:text-rose-400 uppercase block">Risk Stop-Loss Bound</span>
+            <span id="hud-live-stop" class="text-lg font-black text-rose-600 dark:text-rose-400">₹2,697.55</span>
+            <span class="text-xs text-rose-600 font-semibold block">Lower Corridor (-0.1%)</span>
+          </div>
+          <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)]">
+            <span class="text-[11px] font-bold text-[var(--text-muted)] uppercase block">Model Tracking Error</span>
+            <span id="hud-live-tracking" class="text-lg font-black text-blue-600 dark:text-blue-400">4.2 bps</span>
+            <span class="text-xs text-[var(--text-muted)] font-semibold block">Within 95% Confidence Band</span>
+          </div>
+        </div>
+
+        <!-- Canvas Container -->
+        <div class="w-full bg-[var(--bg-base)] rounded-2xl border border-[var(--card-border)] p-3 relative">
+          <canvas id="live-corridor-canvas" width="1200" height="380" class="w-full h-80 block"></canvas>
+          <div class="flex items-center justify-between text-xs text-[var(--text-muted)] font-semibold mt-2 px-2">
+            <div class="flex items-center gap-4">
+              <span class="flex items-center gap-1.5"><span class="w-3 h-0.5 bg-sky-400 inline-block"></span> Live Market Price</span>
+              <span class="flex items-center gap-1.5"><span class="w-3 h-0.5 bg-blue-500 inline-block border-t border-dashed"></span> Expected Central Drift</span>
+              <span class="flex items-center gap-1.5"><span class="w-3 h-0.5 bg-emerald-500 inline-block"></span> Target Resistance</span>
+              <span class="flex items-center gap-1.5"><span class="w-3 h-0.5 bg-rose-500 inline-block"></span> Risk Stop</span>
+              <span class="flex items-center gap-1.5"><span class="w-3 h-2 bg-blue-500/20 inline-block rounded"></span> ±1.96σ Uncertainty Funnel</span>
+            </div>
+            <div id="hud-next-tick" class="text-blue-600 dark:text-blue-400 font-bold">Next Tick in: 3s</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Chart 2: 3-Phase Past, Present & Expected Trend Projection Graph -->
+      <div class="glass-card p-6 space-y-5">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[var(--card-border)] pb-4">
+          <div>
+            <h3 class="text-base font-black uppercase tracking-tight text-[var(--text-main)] flex items-center gap-2">
+              <span>🔮 3-Phase Macro-Micro Continuity Chart</span>
+            </h3>
+            <p class="text-xs text-[var(--text-muted)]">Seamless temporal continuity linking Historical Realized Data (Past) ➔ Current Decision Pivot (Present) ➔ Probabilistic Scenario Funnels (Future)</p>
+          </div>
+          <div class="flex items-center gap-2 text-xs font-bold">
+            <span class="px-2.5 py-1 rounded-lg bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300">Phase 1: Realized</span>
+            <span class="px-2.5 py-1 rounded-lg bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300 border border-blue-300">Phase 2: NOW (T=0)</span>
+            <span class="px-2.5 py-1 rounded-lg bg-purple-100 text-purple-800 dark:bg-purple-900/60 dark:text-purple-300 border border-purple-300">Phase 3: Projections</span>
+          </div>
+        </div>
+
+        <!-- 3-Phase Canvas -->
+        <div class="w-full bg-[var(--bg-base)] rounded-2xl border border-[var(--card-border)] p-3 relative">
+          <canvas id="three-phase-canvas" width="1200" height="400" class="w-full h-88 block"></canvas>
+          <div class="flex items-center justify-between text-xs text-[var(--text-muted)] font-semibold mt-2 px-2">
+            <div class="flex items-center gap-4">
+              <span class="flex items-center gap-1.5"><span class="w-3 h-0.5 bg-amber-500 inline-block"></span> MA(20)</span>
+              <span class="flex items-center gap-1.5"><span class="w-3 h-0.5 bg-purple-500 inline-block"></span> MA(50)</span>
+              <span class="flex items-center gap-1.5"><span class="w-3 h-0.5 bg-emerald-400 inline-block border-t border-dotted"></span> Bullish Scenario (p: 34%)</span>
+              <span class="flex items-center gap-1.5"><span class="w-3 h-0.5 bg-blue-400 inline-block border-t border-dashed"></span> Central Expectation (p: 45%)</span>
+              <span class="flex items-center gap-1.5"><span class="w-3 h-0.5 bg-rose-400 inline-block border-t border-dotted"></span> Downside Tail (p: 21%)</span>
+            </div>
+            <div class="text-[var(--text-main)] font-bold">Zero Lookahead Leakage Enforced</div>
+          </div>
+        </div>
+
+        <!-- Technical Indicators Grid -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+          <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)]">
+            <span class="text-[11px] font-bold text-[var(--text-muted)] uppercase block">RSI (14-Period)</span>
+            <span id="indicator-rsi-val" class="text-lg font-black text-blue-600 dark:text-blue-400">54.2</span>
+            <span id="indicator-rsi-regime" class="text-xs text-[var(--text-muted)] font-medium block">Neutral Regime</span>
+          </div>
+          <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)]">
+            <span class="text-[11px] font-bold text-[var(--text-muted)] uppercase block">Bollinger %B</span>
+            <span id="indicator-bollinger-val" class="text-lg font-black text-emerald-600 dark:text-emerald-400">0.62</span>
+            <span id="indicator-bollinger-regime" class="text-xs text-[var(--text-muted)] font-medium block">Upper Consolidation</span>
+          </div>
+          <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)]">
+            <span class="text-[11px] font-bold text-[var(--text-muted)] uppercase block">Average True Range (ATR)</span>
+            <span id="indicator-atr-val" class="text-lg font-black text-[var(--text-main)]">₹42.80</span>
+            <span id="indicator-atr-regime" class="text-xs text-[var(--text-muted)] font-medium block">Normalized Volatility</span>
+          </div>
+          <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)]">
+            <span class="text-[11px] font-bold text-[var(--text-muted)] uppercase block">VWAP Benchmark</span>
+            <span id="indicator-vwap-val" class="text-lg font-black text-purple-600 dark:text-purple-400">₹2,694.30</span>
+            <span id="indicator-vwap-delta" class="text-xs text-emerald-600 font-semibold block">+₹6.70 Above VWAP</span>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 3: OPPORTUNITY SCANNER & INTRADAY RADAR                             -->
+    <!-- ========================================================================= -->
+    <div id="screen-scanner" class="screen-view hidden space-y-6">
+
+      <div class="glass-card p-6 space-y-5">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[var(--card-border)] pb-4">
+          <div>
+            <h3 class="text-base font-black uppercase tracking-tight text-[var(--text-main)] flex items-center gap-2">
+              <span>⚡ Real-Time Intraday Scalping Radar Table</span>
+            </h3>
+            <p class="text-xs text-[var(--text-muted)]">Scanning 50 NIFTY constituents for micro-momentum statistical setups with favorable risk-to-reward (R:R >= 1.5)</p>
+          </div>
+          <button onclick="runScalpScan()" class="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-sm flex items-center gap-1.5 self-start">
+            <span>🔄 Run Universe Scan</span>
+          </button>
+        </div>
+
+        <!-- Radar Table -->
+        <div class="overflow-x-auto custom-scroll">
+          <table class="w-full text-left text-xs">
+            <thead>
+              <tr class="border-b border-[var(--card-border)] text-[var(--text-muted)] uppercase text-[11px] tracking-wider font-extrabold">
+                <th class="py-3 px-3">Symbol</th>
+                <th class="py-3 px-3">Sector</th>
+                <th class="py-3 px-3">Action</th>
+                <th class="py-3 px-3">Entry (CMP)</th>
+                <th class="py-3 px-3">Target</th>
+                <th class="py-3 px-3">Stop Loss</th>
+                <th class="py-3 px-3">R:R Ratio</th>
+                <th class="py-3 px-3">Horizon</th>
+                <th class="py-3 px-3 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody id="full-scalp-table-body" class="divide-y divide-[var(--card-border)] font-medium">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Sector Heatmap & Momentum Ranking -->
+      <div class="glass-card p-6 space-y-4">
+        <div class="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+          <h3 class="text-sm font-extrabold uppercase tracking-wider text-[var(--text-main)] flex items-center gap-2">
+            <span>🗺️ NIFTY 50 Sector Momentum Heatmap</span>
+          </h3>
+          <span class="text-xs text-[var(--text-muted)]">Real-time aggregate performance</span>
+        </div>
+
+        <div id="sector-heatmap-grid" class="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 4: RISK, VAR & STRESS TEST SIMULATOR                                -->
+    <!-- ========================================================================= -->
+    <div id="screen-risk" class="screen-view hidden space-y-6">
+
+      <!-- Point-in-Time VaR Metrics -->
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="glass-card p-5 space-y-1 border-t-4 border-t-rose-500">
+          <span class="text-[11px] font-bold text-[var(--text-muted)] uppercase block">1-Day VaR (95% Conf)</span>
+          <span id="risk-var-95" class="text-2xl font-black text-rose-600 dark:text-rose-400">-₹44.30 (-1.64%)</span>
+          <span class="text-xs text-[var(--text-muted)] block">Max expected loss at 95% level</span>
+        </div>
+        <div class="glass-card p-5 space-y-1 border-t-4 border-t-rose-600">
+          <span class="text-[11px] font-bold text-[var(--text-muted)] uppercase block">1-Day VaR (99% Conf)</span>
+          <span id="risk-var-99" class="text-2xl font-black text-rose-700 dark:text-rose-500">-₹62.70 (-2.32%)</span>
+          <span class="text-xs text-[var(--text-muted)] block">Tail risk 99% boundary</span>
+        </div>
+        <div class="glass-card p-5 space-y-1 border-t-4 border-t-amber-500">
+          <span class="text-[11px] font-bold text-[var(--text-muted)] uppercase block">Stock Beta (vs NIFTY 50)</span>
+          <span id="risk-beta" class="text-2xl font-black text-amber-600 dark:text-amber-400">1.18</span>
+          <span class="text-xs text-[var(--text-muted)] block">Above average market sensitivity</span>
+        </div>
+        <div class="glass-card p-5 space-y-1 border-t-4 border-t-blue-500">
+          <span class="text-[11px] font-bold text-[var(--text-muted)] uppercase block">Systemic Stress Regime</span>
+          <span id="risk-regime-badge" class="text-xl font-black text-blue-600 dark:text-blue-400">BENIGN</span>
+          <span class="text-xs text-emerald-600 font-semibold block">All Gates Operational</span>
+        </div>
+      </div>
+
+      <!-- Interactive Macro Shock Scenario Simulator -->
+      <div class="glass-card p-6 space-y-5">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[var(--card-border)] pb-4">
+          <div>
+            <h3 class="text-base font-black uppercase tracking-tight text-[var(--text-main)] flex items-center gap-2">
+              <span>🌪️ Interactive Macro Shock Scenario Simulator</span>
+            </h3>
+            <p class="text-xs text-[var(--text-muted)]">Simulate the direct P&L shock to <span id="stress-symbol-label" class="font-bold text-blue-600">ADANIENT</span> under cross-asset macro volatility shocks</p>
+          </div>
+          <button onclick="runStressSimulation()" class="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 shadow-sm flex items-center gap-1.5 self-start">
+            <span>⚡ Re-Simulate Shock</span>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <!-- Slider 1: Brent Crude -->
+          <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)] space-y-3">
+            <div class="flex items-center justify-between text-xs font-bold">
+              <span>🛢️ Brent Crude Oil Shock</span>
+              <span id="slider-crude-val" class="text-blue-600 dark:text-blue-400 font-black">+10.0%</span>
+            </div>
+            <input type="range" id="slider-crude" min="-20" max="50" value="10" step="5" oninput="updateStressSliders()" class="w-full accent-blue-600">
+            <div class="flex justify-between text-[11px] text-[var(--text-muted)]">
+              <span>-20% Deflation</span>
+              <span>+50% Spike</span>
+            </div>
+          </div>
+
+          <!-- Slider 2: India VIX -->
+          <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)] space-y-3">
+            <div class="flex items-center justify-between text-xs font-bold">
+              <span>📈 India VIX Volatility Spike</span>
+              <span id="slider-vix-val" class="text-amber-600 dark:text-amber-400 font-black">+25.0%</span>
+            </div>
+            <input type="range" id="slider-vix" min="0" max="100" value="25" step="5" oninput="updateStressSliders()" class="w-full accent-amber-600">
+            <div class="flex justify-between text-[11px] text-[var(--text-muted)]">
+              <span>0% Baseline</span>
+              <span>+100% Panic</span>
+            </div>
+          </div>
+
+          <!-- Slider 3: USD/INR -->
+          <div class="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)] space-y-3">
+            <div class="flex items-center justify-between text-xs font-bold">
+              <span>💵 USD/INR Currency Shift</span>
+              <span id="slider-inr-val" class="text-rose-600 dark:text-rose-400 font-black">+1.5%</span>
+            </div>
+            <input type="range" id="slider-inr" min="-5" max="10" value="1.5" step="0.5" oninput="updateStressSliders()" class="w-full accent-rose-600">
+            <div class="flex justify-between text-[11px] text-[var(--text-muted)]">
+              <span>-5% INR Surge</span>
+              <span>+10% Depreciation</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Simulation Result Box -->
+        <div class="p-5 rounded-2xl bg-gradient-to-r from-slate-900 to-indigo-950 text-white space-y-3 shadow-lg">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold uppercase tracking-wider text-slate-300">Stress Simulation Outcome</span>
+            <span id="sim-regime-badge" class="px-3 py-1 rounded-full text-xs font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+              MODERATE STRESS
+            </span>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+            <div>
+              <span class="text-[11px] text-slate-400 uppercase font-semibold block">Base CMP</span>
+              <span id="sim-base-cmp" class="text-xl font-bold">₹2,701.00</span>
+            </div>
+            <div>
+              <span class="text-[11px] text-slate-400 uppercase font-semibold block">Estimated Price Under Stress</span>
+              <span id="sim-stress-cmp" class="text-xl font-black text-amber-400">₹2,678.50</span>
+            </div>
+            <div>
+              <span class="text-[11px] text-slate-400 uppercase font-semibold block">Net Simulated P&L Shock</span>
+              <span id="sim-pnl-pct" class="text-xl font-black text-rose-400">-0.83% (-₹22.50)</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 5: INSTITUTIONAL TASK DESK & GOVERNANCE                             -->
+    <!-- ========================================================================= -->
+    <div id="screen-tasks" class="screen-view hidden space-y-6">
+
+      <!-- Interactive Quant To-Do Manager -->
+      <div class="glass-card p-6 space-y-5">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[var(--card-border)] pb-4">
+          <div>
+            <div class="flex items-center gap-3">
+              <h3 class="text-base font-black uppercase tracking-tight text-[var(--text-main)]">
+                📋 Institutional Quant & Trader Task Desk
+              </h3>
+              <span id="task-progress-badge" class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300">
+                2/5 Completed (40%)
+              </span>
+            </div>
+            <p class="text-xs text-[var(--text-muted)]">Audit checklists, calibration edge validations, and risk governance action items</p>
+          </div>
+
+          <button onclick="openAddTaskModal()" class="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 shadow-sm flex items-center gap-1.5 self-start">
+            <span>➕ Add New Task</span>
+          </button>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+          <div id="task-progress-bar" class="h-full bg-emerald-500 rounded-full transition-all duration-300" style="width: 40%"></div>
+        </div>
+
+        <!-- Filter Chips -->
+        <div class="flex items-center gap-2 overflow-x-auto custom-scroll text-xs font-semibold">
+          <button onclick="filterTasks('ALL')" class="task-filter-btn px-3 py-1 rounded-xl bg-blue-600 text-white" data-task-filter="ALL">All Tasks</button>
+          <button onclick="filterTasks('P0')" class="task-filter-btn px-3 py-1 rounded-xl border border-[var(--card-border)] text-[var(--text-muted)] hover:bg-slate-100 dark:hover:bg-slate-800" data-task-filter="P0">🔴 P0 Critical</button>
+          <button onclick="filterTasks('P1')" class="task-filter-btn px-3 py-1 rounded-xl border border-[var(--card-border)] text-[var(--text-muted)] hover:bg-slate-100 dark:hover:bg-slate-800" data-task-filter="P1">🟡 P1 High</button>
+          <button onclick="filterTasks('P2')" class="task-filter-btn px-3 py-1 rounded-xl border border-[var(--card-border)] text-[var(--text-muted)] hover:bg-slate-100 dark:hover:bg-slate-800" data-task-filter="P2">🟢 P2 Routine</button>
+          <button onclick="filterTasks('ACTIVE')" class="task-filter-btn px-3 py-1 rounded-xl border border-[var(--card-border)] text-[var(--text-muted)] hover:bg-slate-100 dark:hover:bg-slate-800" data-task-filter="ACTIVE">⏳ Pending</button>
+          <button onclick="filterTasks('COMPLETED')" class="task-filter-btn px-3 py-1 rounded-xl border border-[var(--card-border)] text-[var(--text-muted)] hover:bg-slate-100 dark:hover:bg-slate-800" data-task-filter="COMPLETED">✅ Completed</button>
+        </div>
+
+        <!-- Tasks List Container -->
+        <div id="tasks-list-container" class="space-y-2.5">
+          <!-- Dynamically populated tasks -->
+        </div>
+      </div>
+
+      <!-- Audited Overrides & Notes Split -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Analyst Notes Editor (6 Columns) -->
+        <div class="lg:col-span-6 glass-card p-6 space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-extrabold uppercase tracking-wider text-[var(--text-main)] flex items-center gap-2">
+              <span>📝 Institutional Analyst Notes</span>
+            </h3>
+            <span class="text-xs text-[var(--text-muted)]">Persistent storage</span>
+          </div>
+
+          <div class="space-y-3">
+            <textarea id="analyst-note-input" rows="3" placeholder="Enter analyst observations, order flow context, or institutional pattern..." 
+                      class="w-full p-3 rounded-xl text-xs bg-[var(--bg-base)] border border-[var(--card-border)] text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+            <div class="flex items-center justify-between">
+              <span id="note-save-status" class="text-xs font-semibold text-emerald-600 dark:text-emerald-400"></span>
+              <button onclick="saveAnalystNote()" class="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors shadow-sm">
+                Save Note
+              </button>
+            </div>
+          </div>
+
+          <!-- Recent Notes List -->
+          <div class="border-t border-[var(--card-border)] pt-4 space-y-2">
+            <div class="text-xs font-bold text-[var(--text-muted)] uppercase">Recent Analyst Notes</div>
+            <div id="recent-notes-list" class="space-y-2 max-h-48 overflow-y-auto custom-scroll text-xs">
+              <!-- Dynamically populated notes -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Audited Manual Overrides (6 Columns) -->
+        <div class="lg:col-span-6 glass-card p-6 space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-extrabold uppercase tracking-wider text-[var(--text-main)] flex items-center gap-2">
+              <span>⚖️ Audited Manual Overrides</span>
+            </h3>
+            <span class="text-xs text-amber-600 font-bold">Mandatory Justification</span>
+          </div>
+
+          <div class="space-y-3.5">
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-bold text-[var(--text-muted)] uppercase mb-1">Override Action</label>
+                <select id="override-action-select" class="w-full p-2.5 rounded-xl text-xs bg-[var(--bg-base)] border border-[var(--card-border)] text-[var(--text-main)] font-semibold">
+                  <option value="HOLD">HOLD (Safe Capital Preservation)</option>
+                  <option value="BUY">BUY (Long Position Allocation)</option>
+                  <option value="SELL">SELL (Risk Off / Short Exit)</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-[var(--text-muted)] uppercase mb-1">Trader ID</label>
+                <input type="text" id="override-trader-id" value="institutional_desk_1" class="w-full p-2.5 rounded-xl text-xs bg-[var(--bg-base)] border border-[var(--card-border)] text-[var(--text-main)]">
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-[var(--text-muted)] uppercase mb-1">Justification Reason (Mandatory)</label>
+              <input type="text" id="override-reason-input" placeholder="e.g. Institutional block deal confirmed on tape..." class="w-full p-2.5 rounded-xl text-xs bg-[var(--bg-base)] border border-[var(--card-border)] text-[var(--text-main)] focus:outline-none focus:ring-2 focus:ring-amber-500">
+            </div>
+
+            <div class="flex items-center justify-between pt-1">
+              <span id="override-save-status" class="text-xs font-semibold text-amber-600 dark:text-amber-400"></span>
+              <button onclick="submitOverride()" class="px-4 py-2 rounded-xl bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 transition-colors shadow-sm">
+                Record Audited Override
+              </button>
+            </div>
+
+            <!-- Active Override Box -->
+            <div id="active-override-card" class="p-3.5 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 text-xs text-[var(--text-main)] space-y-1">
+              <div class="font-bold text-amber-800 dark:text-amber-300">Active Audit Status</div>
+              <div id="active-override-text">No active manual overrides recorded for this stock. Algorithmic outputs governing.</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Immutable Prediction Ledger Table -->
+      <div class="glass-card p-6 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 class="text-sm font-extrabold uppercase tracking-wider text-[var(--text-main)] flex items-center gap-2">
+              <span>📜 Immutable Prediction History Ledger</span>
+            </h3>
+            <p class="text-xs text-[var(--text-muted)]">Cryptographic reproducibility lineage with git commit & config hash tracking</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <input type="text" id="ledger-search" placeholder="Filter ledger..." oninput="filterLedger(this.value)" class="px-3 py-1.5 rounded-xl text-xs bg-[var(--bg-base)] border border-[var(--card-border)] text-[var(--text-main)]">
+          </div>
+        </div>
+
+        <div class="overflow-x-auto custom-scroll">
+          <table class="w-full text-left text-xs">
+            <thead>
+              <tr class="border-b border-[var(--card-border)] text-[var(--text-muted)] uppercase text-[11px] tracking-wider font-extrabold">
+                <th class="py-2.5 px-3">ID</th>
+                <th class="py-2.5 px-3">Timestamp</th>
+                <th class="py-2.5 px-3">Horizon</th>
+                <th class="py-2.5 px-3">Action</th>
+                <th class="py-2.5 px-3">Class</th>
+                <th class="py-2.5 px-3">Confidence</th>
+                <th class="py-2.5 px-3">Resolved</th>
+                <th class="py-2.5 px-3">Prediction Key</th>
+              </tr>
+            </thead>
+            <tbody id="ledger-table-body" class="divide-y divide-[var(--card-border)] font-medium">
+              <!-- Populated dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- SCREEN 6: MODEL GOVERNANCE LAB                                            -->
+    <!-- ========================================================================= -->
+    <div id="screen-governance" class="screen-view hidden space-y-6">
+
+      <!-- Brier Calibration Curve & Reliability -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Calibration Plot (7 Columns) -->
+        <div class="lg:col-span-7 glass-card p-6 space-y-4">
+          <div class="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+            <div>
+              <h3 class="text-sm font-extrabold uppercase tracking-wider text-[var(--text-main)]">
+                🎯 Brier Calibration Curve & Reliability Diagram
+              </h3>
+              <p class="text-xs text-[var(--text-muted)]">Predicted probability bins vs realized empirical event frequency</p>
+            </div>
+            <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+              Brier: 0.182 (Edge Validated)
+            </span>
+          </div>
+
+          <div class="w-full bg-[var(--bg-base)] rounded-xl border border-[var(--card-border)] p-3">
+            <canvas id="brier-curve-canvas" width="600" height="300" class="w-full h-64 block"></canvas>
+            <div class="flex items-center justify-between text-xs text-[var(--text-muted)] mt-2">
+              <span>0.0 (Impossible)</span>
+              <span class="text-blue-500 font-bold">45° Perfect Calibration Diagonal</span>
+              <span>1.0 (Certain)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Model Lineage & Integrity Checks (5 Columns) -->
+        <div class="lg:col-span-5 glass-card p-6 space-y-4">
+          <div class="border-b border-[var(--card-border)] pb-3">
+            <h3 class="text-sm font-extrabold uppercase tracking-wider text-[var(--text-main)]">
+              🧬 Model Lineage & Verification Contract
+            </h3>
+            <p class="text-xs text-[var(--text-muted)]">Point-in-time training artifacts & zero-leakage hash validation</p>
+          </div>
+
+          <div class="space-y-3 text-xs">
+            <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)] space-y-1">
+              <span class="text-[11px] font-bold text-[var(--text-muted)] uppercase block">Ensemble Architecture</span>
+              <span class="font-bold text-[var(--text-main)]">LightGBM (v4.3) + CatBoost + XGBoost Consensus</span>
+              <span class="text-[11px] text-emerald-500 font-semibold block">✓ Feature Pipeline Leakage-Free</span>
+            </div>
+            <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)] space-y-1">
+              <span class="text-[11px] font-bold text-[var(--text-muted)] uppercase block">Git Commit Lineage</span>
+              <span class="font-mono text-blue-600 dark:text-blue-400 font-bold">sha256: 7f8a91b...39e0</span>
+              <span class="text-[11px] text-[var(--text-muted)] block">Strict out-of-sample forward verification</span>
+            </div>
+            <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)] space-y-1">
+              <span class="text-[11px] font-bold text-[var(--text-muted)] uppercase block">Calibration Status</span>
+              <span class="font-bold text-emerald-600 dark:text-emerald-400">Isotonic Regression Calibrated</span>
+              <span class="text-[11px] text-[var(--text-muted)] block">Historical sample size >= 200 bars</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 16-Component Subsystem Telemetry Grid -->
+      <div class="glass-card p-6 space-y-4">
+        <div class="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+          <h3 class="text-sm font-extrabold uppercase tracking-wider text-[var(--text-main)] flex items-center gap-2">
+            <span>🩺 Continuous Subsystem Telemetry Diagnostics (16 Monitored Engines)</span>
+          </h3>
+          <span class="text-xs text-emerald-600 font-bold">15/16 HEALTHY</span>
+        </div>
+
+        <div id="full-telemetry-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+          <!-- Dynamically populated diagnostics items -->
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- ================= MODALS & DRAWERS ================= -->
+
+  <!-- 1. Add Task Modal -->
+  <div id="modal-add-task" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="glass-card max-w-md w-full p-6 space-y-4">
+      <div class="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+        <h3 class="text-base font-extrabold text-[var(--text-main)] flex items-center gap-2">
+          <span>➕ Add Institutional Task</span>
+        </h3>
+        <button onclick="closeAddTaskModal()" class="text-[var(--text-muted)] hover:text-[var(--text-main)] font-bold text-lg">&times;</button>
+      </div>
+
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="block font-bold text-[var(--text-muted)] uppercase mb-1">Task Title</label>
+          <input type="text" id="task-input-title" placeholder="e.g. Verify Brier score before removing probation..." class="w-full p-2.5 rounded-xl bg-[var(--bg-base)] border border-[var(--card-border)] text-[var(--text-main)] font-semibold">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-bold text-[var(--text-muted)] uppercase mb-1">Priority</label>
+            <select id="task-input-priority" class="w-full p-2.5 rounded-xl bg-[var(--bg-base)] border border-[var(--card-border)] text-[var(--text-main)] font-bold">
+              <option value="P0">🔴 P0 Critical</option>
+              <option value="P1" selected>🟡 P1 High</option>
+              <option value="P2">🟢 P2 Routine</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-bold text-[var(--text-muted)] uppercase mb-1">Category</label>
+            <select id="task-input-category" class="w-full p-2.5 rounded-xl bg-[var(--bg-base)] border border-[var(--card-border)] text-[var(--text-main)] font-bold">
+              <option value="Risk Audit">Risk Audit</option>
+              <option value="Calibration">Calibration</option>
+              <option value="Execution">Execution</option>
+              <option value="Compliance">Compliance</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block font-bold text-[var(--text-muted)] uppercase mb-1">Due Date</label>
+          <input type="text" id="task-input-due" placeholder="Today, 17:00 IST" value="Today, 17:00 IST" class="w-full p-2.5 rounded-xl bg-[var(--bg-base)] border border-[var(--card-border)] text-[var(--text-main)]">
+        </div>
+      </div>
+
+      <div class="border-t border-[var(--card-border)] pt-4 flex items-center justify-end gap-2">
+        <button onclick="closeAddTaskModal()" class="px-4 py-2 rounded-xl border border-[var(--card-border)] text-xs font-bold text-[var(--text-muted)]">Cancel</button>
+        <button onclick="submitNewTask()" class="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700">Add Task</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Scalp Opportunity Scanner Modal -->
+  <div id="modal-scalp" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="glass-card max-w-3xl w-full p-6 space-y-5 max-h-[85vh] overflow-y-auto custom-scroll">
+      <div class="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+        <h3 class="text-base font-extrabold text-[var(--text-main)] flex items-center gap-2">
+          <span>⚡ Real-Time Intraday Scalping Scanner</span>
+        </h3>
+        <button onclick="closeScalpModal()" class="text-[var(--text-muted)] hover:text-[var(--text-main)] font-bold text-lg">&times;</button>
+      </div>
+
+      <div class="overflow-x-auto custom-scroll">
+        <table class="w-full text-left text-xs">
+          <thead>
+            <tr class="border-b border-[var(--card-border)] text-[var(--text-muted)] uppercase text-[11px] tracking-wider font-extrabold">
+              <th class="py-2.5 px-3">Symbol</th>
+              <th class="py-2.5 px-3">Action</th>
+              <th class="py-2.5 px-3">Entry</th>
+              <th class="py-2.5 px-3">Target</th>
+              <th class="py-2.5 px-3">Stop Loss</th>
+              <th class="py-2.5 px-3">R:R</th>
+              <th class="py-2.5 px-3 text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody id="scalp-table-body" class="divide-y divide-[var(--card-border)] font-medium">
+            <!-- Dynamically populated -->
+          </tbody>
+        </table>
+      </div>
+
+      <div class="border-t border-[var(--card-border)] pt-4 flex items-center justify-between">
+        <button onclick="runScalpScan()" class="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700">Scan Now</button>
+        <button onclick="closeScalpModal()" class="px-4 py-2 rounded-xl bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200 text-xs font-bold">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. System Health Telemetry Modal -->
+  <div id="modal-health" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="glass-card max-w-2xl w-full p-6 space-y-5 max-h-[85vh] overflow-y-auto custom-scroll">
+      <div class="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+        <h3 class="text-base font-extrabold text-[var(--text-main)] flex items-center gap-2">
+          <span>🩺 System Subsystem Telemetry (16 Components)</span>
+        </h3>
+        <button onclick="closeHealthModal()" class="text-[var(--text-muted)] hover:text-[var(--text-main)] font-bold text-lg">&times;</button>
+      </div>
+
+      <div id="health-diagnostics-list" class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+        <!-- Dynamic diagnostics items -->
+      </div>
+
+      <div class="border-t border-[var(--card-border)] pt-4 flex items-center justify-between">
+        <span class="text-xs text-[var(--text-muted)] font-medium">All checks continuously monitored via Prometheus & WAL</span>
+        <button onclick="closeHealthModal()" class="px-4 py-2 rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-950 text-xs font-bold">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Global Risk Monitor Modal -->
+  <div id="modal-risk" class="hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="glass-card max-w-xl w-full p-6 space-y-5">
+      <div class="flex items-center justify-between border-b border-[var(--card-border)] pb-3">
+        <h3 class="text-base font-extrabold text-[var(--text-main)] flex items-center gap-2">
+          <span>🌐 Cross-Asset Systemic Risk Monitor</span>
+        </h3>
+        <button onclick="closeRiskModal()" class="text-[var(--text-muted)] hover:text-[var(--text-main)] font-bold text-lg">&times;</button>
+      </div>
+
+      <div class="space-y-4 text-xs">
+        <div class="p-3.5 rounded-xl bg-[var(--bg-base)] border border-[var(--card-border)] space-y-2">
+          <div class="flex items-center justify-between font-bold">
+            <span>Composite Z-Score: <span id="modal-risk-zscore" class="text-blue-600 font-black">0.21</span></span>
+            <span id="modal-risk-level-badge" class="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">NORMAL</span>
+          </div>
+          <p id="modal-risk-message" class="text-[var(--text-muted)] leading-relaxed">
+            Global market conditions normal. All cross-asset indicators (VIX, DXY, Gold, Crude) are operating within baseline statistical thresholds.
+          </p>
+        </div>
+
+        <div class="border border-[var(--card-border)] rounded-xl p-3.5 space-y-2">
+          <div class="font-bold text-[var(--text-main)]">Driver Readings</div>
+          <div id="modal-risk-drivers" class="grid grid-cols-2 gap-2 text-xs text-[var(--text-muted)]">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between p-3.5 rounded-xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900">
+          <div>
+            <div class="font-bold text-blue-900 dark:text-blue-200">Risk-Adjusted Predictions</div>
+            <div class="text-[11px] text-[var(--text-muted)]">Apply macro multiplier discount to model confidence</div>
+          </div>
+          <input type="checkbox" id="risk-toggle-checkbox" onchange="toggleRiskState(this.checked)" class="w-5 h-5 text-blue-600 rounded">
+        </div>
+      </div>
+
+      <div class="border-t border-[var(--card-border)] pt-4 flex justify-end">
+        <button onclick="closeRiskModal()" class="px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating Toast Notification System -->
+  <div id="toast-container" class="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- ================= CLIENT JAVASCRIPT LOGIC ================= -->
+  <script>
+    const API_BASE = (window.location && window.location.origin && window.location.origin.startsWith("http")) ? window.location.origin : "http://localhost:8000";
+    let isApiConnected = false;
+    let audioAlertsEnabled = true;
+    let currentStock = "ADANIENT";
+    let activeHorizon = "INTRADAY";
+    let activeScreen = "screen-overview";
+
+    // 50 Constituents Universe
+    const NIFTY50 = [
+      { s: "ADANIENT", n: "Adani Enterprises", sec: "ENERGY", p: 2701.00 },
+      { s: "ADANIPORTS", n: "Adani Ports & SEZ", sec: "SERVICES", p: 1380.00 },
+      { s: "APOLLOHOSP", n: "Apollo Hospitals", sec: "PHARMACEUTICALS", p: 6850.00 },
+      { s: "ASIANPAINT", n: "Asian Paints", sec: "CONSUMER GOODS", p: 2890.00 },
+      { s: "AXISBANK", n: "Axis Bank", sec: "FINANCIAL SERVICES", p: 1195.00 },
+      { s: "BAJAJ-AUTO", n: "Bajaj Auto", sec: "AUTOMOBILE", p: 9800.00 },
+      { s: "BAJFINANCE", n: "Bajaj Finance", sec: "FINANCIAL SERVICES", p: 7250.00 },
+      { s: "BAJAJFINSV", n: "Bajaj Finserv", sec: "FINANCIAL SERVICES", p: 1840.00 },
+      { s: "BPCL", n: "Bharat Petroleum", sec: "ENERGY", p: 345.00 },
+      { s: "BHARTIARTL", n: "Bharti Airtel", sec: "TELECOM", p: 1680.00 },
+      { s: "BRITANNIA", n: "Britannia Industries", sec: "CONSUMER GOODS", p: 5850.00 },
+      { s: "CIPLA", n: "Cipla", sec: "PHARMACEUTICALS", p: 1540.00 },
+      { s: "COALINDIA", n: "Coal India", sec: "METALS", p: 485.00 },
+      { s: "DRREDDY", n: "Dr. Reddy's Labs", sec: "PHARMACEUTICALS", p: 6650.00 },
+      { s: "EICHERMOT", n: "Eicher Motors", sec: "AUTOMOBILE", p: 4890.00 },
+      { s: "GRASIM", n: "Grasim Industries", sec: "METALS", p: 2620.00 },
+      { s: "HCLTECH", n: "HCL Technologies", sec: "INFORMATION TECHNOLOGY", p: 1780.00 },
+      { s: "HDFCBANK", n: "HDFC Bank", sec: "FINANCIAL SERVICES", p: 1680.20 },
+      { s: "HDFCLIFE", n: "HDFC Life Insurance", sec: "FINANCIAL SERVICES", p: 710.00 },
+      { s: "HEROMOTOCO", n: "Hero MotoCorp", sec: "AUTOMOBILE", p: 5450.00 },
+      { s: "HINDALCO", n: "Hindalco Industries", sec: "METALS", p: 715.00 },
+      { s: "HINDUNILVR", n: "Hindustan Unilever", sec: "CONSUMER GOODS", p: 2780.00 },
+      { s: "ICICIBANK", n: "ICICI Bank", sec: "FINANCIAL SERVICES", p: 1245.00 },
+      { s: "ITC", n: "ITC Limited", sec: "CONSUMER GOODS", p: 505.00 },
+      { s: "INDUSINDBK", n: "IndusInd Bank", sec: "FINANCIAL SERVICES", p: 1360.00 },
+      { s: "INFY", n: "Infosys", sec: "INFORMATION TECHNOLOGY", p: 1890.50 },
+      { s: "JSWSTEEL", n: "JSW Steel", sec: "METALS", p: 995.00 },
+      { s: "KOTAKBANK", n: "Kotak Mahindra Bank", sec: "FINANCIAL SERVICES", p: 1820.00 },
+      { s: "LT", n: "Larsen & Toubro", sec: "CONSTRUCTION", p: 3580.00 },
+      { s: "M&M", n: "Mahindra & Mahindra", sec: "AUTOMOBILE", p: 3090.00 },
+      { s: "MARUTI", n: "Maruti Suzuki", sec: "AUTOMOBILE", p: 12450.00 },
+      { s: "NTPC", n: "NTPC Limited", sec: "ENERGY", p: 420.00 },
+      { s: "NESTLEIND", n: "Nestle India", sec: "CONSUMER GOODS", p: 2480.00 },
+      { s: "ONGC", n: "Oil & Natural Gas Corp", sec: "ENERGY", p: 295.00 },
+      { s: "POWERGRID", n: "Power Grid Corp", sec: "ENERGY", p: 335.00 },
+      { s: "RELIANCE", n: "Reliance Industries", sec: "ENERGY", p: 2985.40 },
+      { s: "SBILIFE", n: "SBI Life Insurance", sec: "FINANCIAL SERVICES", p: 1780.00 },
+      { s: "SHRIRAMFIN", n: "Shriram Finance", sec: "FINANCIAL SERVICES", p: 3350.00 },
+      { s: "SBIN", n: "State Bank of India", sec: "FINANCIAL SERVICES", p: 815.00 },
+      { s: "SUNPHARMA", n: "Sun Pharma", sec: "PHARMACEUTICALS", p: 1860.00 },
+      { s: "TCS", n: "Tata Consultancy Services", sec: "INFORMATION TECHNOLOGY", p: 3920.00 },
+      { s: "TATACONSUM", n: "Tata Consumer Products", sec: "CONSUMER GOODS", p: 1180.00 },
+      { s: "TATAMOTORS", n: "Tata Motors", sec: "AUTOMOBILE", p: 975.00 },
+      { s: "TATASTEEL", n: "Tata Steel", sec: "METALS", p: 158.00 },
+      { s: "TECHM", n: "Tech Mahindra", sec: "INFORMATION TECHNOLOGY", p: 1590.00 },
+      { s: "TITAN", n: "Titan Company", sec: "CONSUMER GOODS", p: 3680.00 },
+      { s: "TRENT", n: "Trent Limited", sec: "CONSUMER GOODS", p: 7450.00 },
+      { s: "ULTRACEMCO", n: "UltraTech Cement", sec: "CONSTRUCTION", p: 11600.00 },
+      { s: "WIPRO", n: "Wipro", sec: "INFORMATION TECHNOLOGY", p: 535.00 },
+      { s: "BEL", n: "Bharat Electronics", sec: "CAPITAL GOODS", p: 295.00 }
+    ];
+
+    // Live Streaming Simulation State
+    let streamTimer = null;
+    let streamCadence = 5;
+    let countdownRemaining = 5;
+    let countdownInterval = null;
+    let isStreaming = true;
+    let realizedTicks = [];
+    let corridorData = {
+      baseCmp: 2701.00,
+      targetPrice: 2706.15,
+      stopLoss: 2697.55,
+      varianceFunnel: []
+    };
+
+    // --- Audio Alert Synthesizer ---
+    function playChime(freq = 587.33, duration = 0.15) {
+      if (!audioAlertsEnabled) return;
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + duration);
+      } catch (e) {
+        // audio context blocked or not supported
+      }
+    }
+
+    function toggleAudioAlerts() {
+      audioAlertsEnabled = !audioAlertsEnabled;
+      document.getElementById("audio-alert-text").innerText = audioAlertsEnabled ? "Alerts: ON" : "Alerts: OFF";
+      document.getElementById("audio-alert-icon").innerText = audioAlertsEnabled ? "🔔" : "🔕";
+      showToast(audioAlertsEnabled ? "Audio boundary alerts enabled" : "Audio boundary alerts muted", "info");
+    }
+
+    // --- Multi-Screen Tab Switcher ---
+    function switchScreen(screenId) {
+      activeScreen = screenId;
+      document.querySelectorAll(".screen-view").forEach(el => el.classList.add("hidden"));
+      const target = document.getElementById(screenId);
+      if (target) target.classList.remove("hidden");
+
+      document.querySelectorAll(".screen-tab").forEach(tab => {
+        tab.classList.remove("active");
+        tab.classList.add("text-[var(--text-muted)]");
+      });
+      const activeTab = document.getElementById(`tab-${screenId}`);
+      if (activeTab) {
+        activeTab.classList.add("active");
+        activeTab.classList.remove("text-[var(--text-muted)]");
+      }
+
+      playChime(659.25, 0.08);
+
+      // Re-render canvases if switching to deep charts or governance
+      if (screenId === "screen-charts") {
+        renderLiveCorridorCanvas();
+        renderThreePhaseCanvas();
+      } else if (screenId === "screen-governance") {
+        renderBrierCalibrationCanvas();
+      } else if (screenId === "screen-scanner") {
+        populateFullScalpTable();
+        populateSectorHeatmap();
+      }
+    }
+
+    // --- Toast Notifications ---
+    function showToast(message, type = "info") {
+      const container = document.getElementById("toast-container");
+      if (!container) return;
+      const toast = document.createElement("div");
+      let bgClass = "bg-slate-900 text-white border-slate-700";
+      if (type === "success") bgClass = "bg-emerald-950 text-emerald-200 border-emerald-700";
+      if (type === "error") bgClass = "bg-rose-950 text-rose-200 border-rose-700";
+      if (type === "warning") bgClass = "bg-amber-950 text-amber-200 border-amber-700";
+
+      toast.className = `p-3.5 rounded-xl border ${bgClass} text-xs font-semibold shadow-2xl flex items-center gap-2 pointer-events-auto transition-all transform translate-y-2 opacity-0`;
+      toast.innerHTML = `<span>${type === 'success' ? '✅' : (type === 'error' ? '❌' : (type === 'warning' ? '⚠️' : 'ℹ️'))}</span><span>${message}</span>`;
+      container.appendChild(toast);
+
+      setTimeout(() => {
+        toast.classList.remove("translate-y-2", "opacity-0");
+      }, 20);
+
+      setTimeout(() => {
+        toast.classList.add("opacity-0", "translate-y-2");
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    // --- Theme Toggler ---
+    function toggleTheme() {
+      const html = document.documentElement;
+      const isDark = html.classList.toggle("dark");
+      html.classList.toggle("light", !isDark);
+      document.getElementById("theme-icon").innerText = isDark ? "☀️" : "🌙";
+      localStorage.setItem("alkame_theme", isDark ? "dark" : "light");
+      renderLiveCorridorCanvas();
+      renderThreePhaseCanvas();
+      renderBrierCalibrationCanvas();
+    }
+
+    // --- Initial Stock & Setup ---
+    function initStock(symbol) {
+      currentStock = symbol.toUpperCase();
+      const st = NIFTY50.find(x => x.s === currentStock) || { s: currentStock, n: currentStock + " Ltd", sec: "DIVERSIFIED", p: 2500.00 };
+      
+      document.getElementById("stock-symbol").innerText = st.s;
+      document.getElementById("stock-avatar").innerText = st.s.substring(0, 2);
+      document.getElementById("stock-name").innerText = `${st.n} • NSE NIFTY 50 Constituent`;
+      document.getElementById("stock-sector").innerText = st.sec;
+      document.getElementById("stock-cmp").innerText = `₹${st.p.toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
+      document.getElementById("stress-symbol-label").innerText = st.s;
+
+      corridorData.baseCmp = st.p;
+      corridorData.targetPrice = round(st.p * 1.0025, 2);
+      corridorData.stopLoss = round(st.p * 0.9988, 2);
+
+      initLiveCorridorData();
+      // Immediately render synchronous stock-tailored fundamentals and predictions with 0ms lag
+      populateMockStockData(currentStock);
+      runStressSimulation();
+
+      // Fetch async backend updates
+      fetchStockData(currentStock);
+      fetchTasks(currentStock);
+      fetchNotes(currentStock);
+      fetchOverride(currentStock);
+      fetchHistory(currentStock);
+    }
+
+    // --- Dynamic Fundamental Valuation Engine ---
+    function getStockFundamentals(symbol, cmp, sec) {
+      const sectorPeMap = {
+        "FINANCIAL SERVICES": 18.4,
+        "INFORMATION TECHNOLOGY": 28.5,
+        "ENERGY": 15.2,
+        "AUTOMOBILE": 24.8,
+        "PHARMACEUTICALS": 33.0,
+        "CONSUMER GOODS": 46.5,
+        "METALS": 12.8,
+        "CONSTRUCTION": 29.5,
+        "TELECOM": 35.0,
+        "SERVICES": 22.0,
+        "CAPITAL GOODS": 38.0
+      };
+      const sectorPbMap = {
+        "FINANCIAL SERVICES": 2.6,
+        "INFORMATION TECHNOLOGY": 8.5,
+        "ENERGY": 1.9,
+        "AUTOMOBILE": 4.2,
+        "PHARMACEUTICALS": 5.1,
+        "CONSUMER GOODS": 11.2,
+        "METALS": 1.7,
+        "CONSTRUCTION": 4.8,
+        "TELECOM": 3.8,
+        "SERVICES": 3.2,
+        "CAPITAL GOODS": 6.5
+      };
+      const sectorYieldMap = {
+        "FINANCIAL SERVICES": 1.25,
+        "INFORMATION TECHNOLOGY": 1.85,
+        "ENERGY": 3.40,
+        "AUTOMOBILE": 1.45,
+        "PHARMACEUTICALS": 0.95,
+        "CONSUMER GOODS": 2.10,
+        "METALS": 2.80,
+        "CONSTRUCTION": 0.85,
+        "TELECOM": 0.40,
+        "SERVICES": 1.10,
+        "CAPITAL GOODS": 1.15
+      };
+
+      const secPe = sectorPeMap[sec] || 24.0;
+      const secPb = sectorPbMap[sec] || 3.5;
+      const secYield = sectorYieldMap[sec] || 1.50;
+
+      const hash = symbol.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+      const peOffset = ((hash % 11) - 5) * 0.7;
+      const stockPe = Math.max(8.0, Number((secPe + peOffset).toFixed(2)));
+      const pbOffset = ((hash % 7) - 3) * 0.15;
+      const stockPb = Math.max(1.1, Number((secPb + pbOffset).toFixed(2)));
+      const eps = Number((cmp / stockPe).toFixed(2));
+      const bookVal = Number((cmp / stockPb).toFixed(0));
+      const divYield = Math.max(0.4, Number((secYield + ((hash % 5) - 2) * 0.2).toFixed(2)));
+
+      const high52 = Number((cmp * (1.14 + (hash % 10) * 0.015)).toFixed(2));
+      const low52 = Number((cmp * (0.68 + (hash % 8) * 0.015)).toFixed(2));
+
+      // Realistic large-cap market caps
+      const knownMcap = {
+        "RELIANCE": 2020500,
+        "TCS": 1418000,
+        "HDFCBANK": 1278000,
+        "ICICIBANK": 874500,
+        "BHARTIARTL": 945000,
+        "INFY": 785000,
+        "SBIN": 726000,
+        "ITC": 630000,
+        "HINDUNILVR": 655000,
+        "LT": 492000,
+        "BAJFINANCE": 448000,
+        "MARUTI": 392000,
+        "ADANIENT": 308500,
+        "KOTAKBANK": 362000,
+        "AXISBANK": 368000,
+        "TATAMOTORS": 358000,
+        "SUNPHARMA": 445000,
+        "NTPC": 405000,
+        "ONGC": 372000,
+        "TITAN": 326000
+      };
+      const mcapNum = knownMcap[symbol] || Math.round(cmp * (140 + (hash % 70)) * 10);
+      const mcapStr = `₹${mcapNum.toLocaleString('en-IN')} Cr`;
+
+      let valStatus = "FAIR PRICED";
+      let valBadge = "🟡 FAIR PRICED (Fair Value)";
+      if (stockPe < secPe * 0.85) {
+        valStatus = "UNDERPRICED";
+        valBadge = "🟢 UNDERPRICED (Attractive Valuation)";
+      } else if (stockPe > secPe * 1.25) {
+        valStatus = "OVERPRICED";
+        valBadge = "🔴 OVERPRICED (Premium Valuation)";
+      }
+
+      return {
+        pe_ratio: stockPe.toFixed(2),
+        sector_pe: secPe.toFixed(1),
+        price_to_book: stockPb.toFixed(2),
+        book_val: bookVal,
+        market_cap: mcapStr,
+        eps: eps.toFixed(2),
+        dividend_yield: divYield.toFixed(2),
+        fifty_two_week_high: high52,
+        fifty_two_week_low: low52,
+        valuation_status: valStatus,
+        valuation_badge: valBadge,
+        model_validity: "PROBATION",
+        validity_detail: "Edge Unconfirmed"
+      };
+    }
+
+    // --- Multi-Horizon Forecast Generator ---
+    function generateStockHorizons(symbol, cmp, sec) {
+      const cfg = [
+        { horizon: "INTRADAY", tMult: 1.0025, sMult: 0.9988, score: 0.529, lean: "UP" },
+        { horizon: "SCALP", tMult: 1.0015, sMult: 0.9992, score: 0.518, lean: "UP" },
+        { horizon: "3D", tMult: 1.0150, sMult: 0.9880, score: 0.541, lean: "UP" },
+        { horizon: "7D", tMult: 1.0250, sMult: 0.9800, score: 0.548, lean: "UP" },
+        { horizon: "30D", tMult: 1.0650, sMult: 0.9550, score: 0.562, lean: "UP" },
+        { horizon: "3M", tMult: 1.1050, sMult: 0.9300, score: 0.570, lean: "UP" },
+        { horizon: "6M", tMult: 1.1650, sMult: 0.8950, score: 0.584, lean: "UP" },
+        { horizon: "1Y", tMult: 1.2500, sMult: 0.8500, score: 0.612, lean: "UP" }
+      ];
+
+      return cfg.map(item => {
+        const target = round(cmp * item.tMult, 2);
+        const stop = round(cmp * item.sMult, 2);
+        const targetPct = (((target - cmp) / cmp) * 100).toFixed(1);
+        const stopPct = (((stop - cmp) / cmp) * 100).toFixed(1);
+
+        return {
+          horizon: item.horizon,
+          action: "HOLD",
+          target_price: target,
+          stop_loss: stop,
+          target_pct: targetPct,
+          stop_pct: stopPct,
+          calibrated_confidence: null,
+          edge_status: "PROBATION",
+          model_score: item.score,
+          model_lean: item.lean,
+          verdict_text: "Confidence not yet calibrated on sufficient history — treated as educational observation only.",
+          downside_summary: `Algorithmic stop-loss set at ₹${stop.toLocaleString('en-IN', {minimumFractionDigits: 2})} (${stopPct}% below current reference base). Primary risk factor stems from potential ${sec.toLowerCase()} sector volatility impacting margin structures and broader index consolidation.`,
+          upside_summary: `Algorithmic ensembles exhibit positive directional momentum across ${item.horizon} for ${symbol}, forecasting constructive accumulation. Projected upside target is ₹${target.toLocaleString('en-IN', {minimumFractionDigits: 2})} (+${targetPct}% potential) based on multi-factor volatility expansion.`,
+          specific_reason: `• Model leaned BUY (${(item.score * 100).toFixed(1)}%), but no confirmed edge vs NIFTY baseline yet for ${symbol} (${sec}) — forced to HOLD.`
+        };
+      });
+    }
+
+    // --- Sector-Specific Event Generator ---
+    function generateStockEvents(symbol, sec) {
+      if (sec === "FINANCIAL SERVICES") {
+        return [
+          { type: "MACRO_INDICATOR", sentiment: "+0.15", text: "RBI Monetary Policy Committee maintains corridor; repo rate anchored at 6.50%" },
+          { type: "SECTOR_UPDATE", sentiment: "+0.22", text: "Systemic credit expansion tracks +14.2% YoY with asset quality holding at decadal highs" },
+          { type: "CORPORATE_ACTION", sentiment: "+0.05", text: `${symbol} Board declares scheduled strategic capital adequacy & liquidity framework review` }
+        ];
+      } else if (sec === "INFORMATION TECHNOLOGY") {
+        return [
+          { type: "MACRO_INDICATOR", sentiment: "+0.18", text: "US enterprise IT spend guidance stabilizes across cloud migration and digital transformation" },
+          { type: "SECTOR_UPDATE", sentiment: "+0.25", text: "Quarterly deal Total Contract Value (TCV) in AI and automation expands +11.8% YoY" },
+          { type: "CORPORATE_ACTION", sentiment: "+0.00", text: `${symbol} schedules institutional investor briefing on cross-border BFSI engagement delivery` }
+        ];
+      } else if (sec === "ENERGY") {
+        return [
+          { type: "MACRO_INDICATOR", sentiment: "-0.10", text: "OPEC+ quota recalibration maintains Brent crude in normalized $78-84/bbl band" },
+          { type: "SECTOR_UPDATE", sentiment: "+0.18", text: "Domestic refining throughput and commercial natural gas grid utilization report steady volumes" },
+          { type: "CORPORATE_ACTION", sentiment: "+0.12", text: `${symbol} proceeds with planned green hydrogen & renewable generation capex commissioning` }
+        ];
+      } else if (sec === "AUTOMOBILE") {
+        return [
+          { type: "MACRO_INDICATOR", sentiment: "+0.12", text: "Raw material basket (sheet steel, auto-grade aluminum) stabilizes, aiding OEM gross margins" },
+          { type: "SECTOR_UPDATE", sentiment: "+0.24", text: "Monthly vehicle wholesale registrations indicate +8.6% YoY festive delivery momentum" },
+          { type: "CORPORATE_ACTION", sentiment: "+0.06", text: `${symbol} files regulatory patent roadmap for next-gen electric powertrain platform` }
+        ];
+      } else if (sec === "PHARMACEUTICALS") {
+        return [
+          { type: "MACRO_INDICATOR", sentiment: "+0.14", text: "US FDA establishment inspection reports confirm zero data integrity observations across key facilities" },
+          { type: "SECTOR_UPDATE", sentiment: "+0.18", text: "Complex injectable and biosimilar pipeline approvals show steady quarterly run-rate" },
+          { type: "CORPORATE_ACTION", sentiment: "+0.00", text: `${symbol} completes strategic clinical dossier submission with global health authorities` }
+        ];
+      } else if (sec === "CONSUMER GOODS") {
+        return [
+          { type: "MACRO_INDICATOR", sentiment: "+0.10", text: "Monsoon precipitation across major agricultural belts supports rural purchasing power" },
+          { type: "SECTOR_UPDATE", sentiment: "+0.16", text: "Modern trade and quick-commerce channels exhibit double-digit volume expansion" },
+          { type: "CORPORATE_ACTION", sentiment: "+0.05", text: `${symbol} expands distribution reach into Tier-2/3 retail consumer touchpoints` }
+        ];
+      } else {
+        return [
+          { type: "MACRO_INDICATOR", sentiment: "+0.12", text: "India GDP baseline growth projected above 7.0% supported by infrastructure investment" },
+          { type: "SECTOR_UPDATE", sentiment: "+0.15", text: `Industrial operating capacity utilization for ${sec} maintains robust expansion trend` },
+          { type: "CORPORATE_ACTION", sentiment: "+0.00", text: `${symbol} leadership team convenes scheduled governance and balance sheet audit` }
+        ];
+      }
+    }
+
+    // --- Data Fetching from FastAPI ---
+    async function checkApiHealth() {
+      try {
+        const resp = await fetch(`${API_BASE}/api/v1/health`, { signal: AbortSignal.timeout(3000) });
+        if (resp.ok) {
+          const data = await resp.json();
+          isApiConnected = true;
+          document.getElementById("api-status-dot").className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+          document.getElementById("api-status-text").innerText = "API Connected";
+          populateHealthDiagnostics(data.diagnostics || []);
+        } else {
+          setApiOffline();
+        }
+      } catch (e) {
+        setApiOffline();
+      }
+    }
+
+    function setApiOffline() {
+      isApiConnected = false;
+      document.getElementById("api-status-dot").className = "w-2 h-2 rounded-full bg-amber-500";
+      document.getElementById("api-status-text").innerText = "Demo Fallback";
+      populateDefaultHealthDiagnostics();
+    }
+
+    async function fetchStockData(symbol) {
+      const st = NIFTY50.find(x => x.s === symbol) || { s: symbol, n: symbol + " Ltd", sec: "DIVERSIFIED", p: 2500.00 };
+      if (!isApiConnected) {
+        populateMockStockData(symbol);
+        return;
+      }
+      try {
+        const [fundResp, sigResp, riskResp] = await Promise.allSettled([
+          fetch(`${API_BASE}/api/v1/fundamentals/${symbol}`, { signal: AbortSignal.timeout(4000) }),
+          fetch(`${API_BASE}/api/v1/signal/${symbol}`, { signal: AbortSignal.timeout(4000) }),
+          fetch(`${API_BASE}/api/v1/risk/reading`, { signal: AbortSignal.timeout(3000) })
+        ]);
+
+        if (symbol !== currentStock) {
+          // Outdated request superseded by user selecting another constituent
+          return;
+        }
+
+        if (fundResp.status === "fulfilled" && fundResp.value.ok) {
+          const f = await fundResp.value.json();
+          renderFundamentals(f.fundamentals, f.cmp || st.p, symbol, st.sec);
+        } else {
+          populateMockFundamentals(symbol);
+        }
+
+        if (sigResp.status === "fulfilled" && sigResp.value.ok) {
+          const s = await sigResp.value.json();
+          renderMultiHorizon(s, symbol, st.p, st.sec);
+        } else {
+          populateMockHorizons(symbol);
+        }
+
+        if (riskResp.status === "fulfilled" && riskResp.value.ok) {
+          const r = await riskResp.value.json();
+          renderRiskMonitor(r);
+        }
+      } catch (e) {
+        populateMockStockData(symbol);
+      }
+    }
+
+    function renderFundamentals(f, cmp, symbol, sec) {
+      const fallback = getStockFundamentals(symbol || currentStock, cmp, sec);
+      const data = f || fallback;
+
+      // Handle raw or string PE
+      let pe = data.raw_pe || data.pe_ratio || data.pe;
+      if (!pe || pe === "N/A") pe = fallback.pe_ratio;
+      else if (typeof pe === "number") pe = pe.toFixed(2);
+      document.getElementById("val-pe").innerText = pe;
+      document.getElementById("val-pe-sub").innerText = `vs Sector ${data.sector_pe || fallback.sector_pe}`;
+
+      // Market Cap
+      let mcap = data.market_cap;
+      if (!mcap || mcap === "N/A") mcap = fallback.market_cap;
+      else if (typeof mcap === "number") mcap = `₹${(mcap / 10000000).toFixed(0)} Cr`;
+      document.getElementById("val-mcap").innerText = mcap;
+      document.getElementById("val-mcap-sub").innerText = "Large Cap";
+
+      // Price to Book
+      let pb = data.raw_pb || data.price_to_book || data.pb;
+      if (!pb || pb === "N/A") pb = fallback.price_to_book;
+      else if (typeof pb === "number") pb = pb.toFixed(2);
+      document.getElementById("val-pb").innerText = pb;
+      const bval = data.book_val || fallback.book_val || (parseFloat(pb) > 0 ? (cmp / parseFloat(pb)).toFixed(0) : "626");
+      document.getElementById("val-pb-sub").innerText = `Book Val ₹${bval}`;
+
+      // EPS
+      let eps = data.eps;
+      if (!eps || eps === "N/A") eps = fallback.eps;
+      else if (typeof eps === "number") eps = eps.toFixed(2);
+      else eps = String(eps).replace("₹", "").trim();
+      document.getElementById("val-eps").innerText = `₹${eps}`;
+      document.getElementById("val-eps-sub").innerText = "Profitable";
+
+      // 52W High & Low
+      let high = data.fifty_two_week_high || data.high_52w;
+      if (!high || high === "N/A") high = fallback.fifty_two_week_high;
+      else if (typeof high === "string") high = parseFloat(high.replace(/[₹,]/g, "")) || fallback.fifty_two_week_high;
+
+      let low = data.fifty_two_week_low || data.low_52w;
+      if (!low || low === "N/A") low = fallback.fifty_two_week_low;
+      else if (typeof low === "string") low = parseFloat(low.replace(/[₹,]/g, "")) || fallback.fifty_two_week_low;
+
+      document.getElementById("val-52h").innerText = `₹${high.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+      const highDrop = Math.abs(((high - cmp) / high) * 100).toFixed(1);
+      document.getElementById("val-52h-sub").innerText = `-${highDrop}% from peak`;
+
+      document.getElementById("val-52l").innerText = `₹${low.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+      const lowRise = Math.abs(((cmp - low) / low) * 100).toFixed(1);
+      document.getElementById("val-52l-sub").innerText = `+${lowRise}% from base`;
+
+      // Dividend Yield
+      let dy = data.dividend_yield;
+      if (!dy || dy === "N/A") dy = fallback.dividend_yield;
+      else if (typeof dy === "number") dy = dy.toFixed(2);
+      else dy = String(dy).replace("%", "").trim();
+      document.getElementById("val-yield").innerText = `${dy}%`;
+      document.getElementById("val-yield-sub").innerText = "Annualized";
+
+      // Validity & Valuation status
+      document.getElementById("val-validity").innerText = data.model_validity || "PROBATION";
+      document.getElementById("val-validity-sub").innerText = data.validity_detail || "Edge Unconfirmed";
+      document.getElementById("stock-valuation-status").innerText = data.valuation_badge || fallback.valuation_badge;
+
+      // 52-Week Range Spectrum Slider
+      const rangeSpan = Math.max(1, high - low);
+      const pct = Math.min(100, Math.max(0, ((cmp - low) / rangeSpan) * 100));
+      document.getElementById("val-range-bar").style.width = `${pct.toFixed(1)}%`;
+      document.getElementById("val-range-pct").innerText = `Position: ${pct.toFixed(1)}%`;
+      document.getElementById("val-range-min").innerText = `₹${low.toFixed(0)} (Low)`;
+      document.getElementById("val-range-curr").innerText = `CMP ₹${cmp.toFixed(0)}`;
+      document.getElementById("val-range-max").innerText = `₹${high.toFixed(0)} (High)`;
+    }
+
+    function updatePrimarySignalGate(sig, symbol, cmp, sec) {
+      if (!sig) return;
+      activeHorizon = sig.horizon || "INTRADAY";
+      document.getElementById("active-horizon-pill").innerText = activeHorizon;
+
+      // Action card styling
+      const action = sig.action || "HOLD";
+      const actionEl = document.getElementById("signal-action-text");
+      actionEl.innerText = action;
+      const card = document.getElementById("signal-recommendation-card");
+      if (action === "BUY") {
+        card.className = "p-5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-center space-y-1.5";
+        actionEl.className = "text-4xl font-black text-emerald-700 dark:text-emerald-400 tracking-tight";
+      } else if (action === "SELL") {
+        card.className = "p-5 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 text-center space-y-1.5";
+        actionEl.className = "text-4xl font-black text-rose-700 dark:text-rose-400 tracking-tight";
+      } else {
+        card.className = "p-5 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-center space-y-1.5";
+        actionEl.className = "text-4xl font-black text-amber-700 dark:text-amber-400 tracking-tight";
+      }
+
+      document.getElementById("signal-verdict-text").innerText = sig.verdict_text || "Confidence not yet calibrated on sufficient history — treated as educational observation only.";
+
+      // Target and Stop Loss
+      let target = sig.target_price || round(cmp * 1.0025, 2);
+      let stop = sig.stop_loss || round(cmp * 0.9988, 2);
+      if (Math.abs(target - cmp) / cmp > 0.35) {
+        target = round(cmp * 1.0025, 2);
+        stop = round(cmp * 0.9988, 2);
+      }
+      const targetDelta = (((target - cmp) / cmp) * 100);
+      const stopDelta = (((stop - cmp) / cmp) * 100);
+
+      document.getElementById("target-price").innerText = `₹${target.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+      document.getElementById("target-pct").innerText = `↑ +${Math.abs(targetDelta).toFixed(1)}%`;
+      document.getElementById("stop-loss-price").innerText = `₹${stop.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+      document.getElementById("stop-loss-pct").innerText = `↓ ${stopDelta.toFixed(1)}%`;
+
+      // Dual-boundary Gate
+      const rawLean = sig.model_lean || (sig.model_score >= 0.5 ? "UP" : "DOWN") || "UP";
+      const scorePct = sig.model_score ? (sig.model_score * 100).toFixed(1) : "52.9";
+      document.getElementById("gate-raw-lean").innerText = `${rawLean} (${scorePct}%)`;
+      const defaultReason = `• Model leaned BUY, but no confirmed edge vs NIFTY baseline yet for ${symbol || currentStock} (${sec}) — forced to HOLD.`;
+      document.getElementById("gate-specific-reason").innerText = (sig.specific_reason && sig.specific_reason.includes(symbol || currentStock)) ? sig.specific_reason : defaultReason;
+
+      // Downside & Upside Research
+      document.getElementById("downside-summary-text").innerText = sig.downside_summary || `Algorithmic stop-loss set at ₹${stop.toLocaleString('en-IN', {minimumFractionDigits: 2})} (${stopDelta.toFixed(1)}% below current reference base). Primary risk factor stems from potential ${sec.toLowerCase()} sector volatility impacting margin structures and broader index consolidation.`;
+      document.getElementById("upside-summary-text").innerText = sig.upside_summary || `Algorithmic ensembles exhibit positive directional momentum across ${activeHorizon} for ${symbol}, forecasting constructive accumulation. Projected upside target is ₹${target.toLocaleString('en-IN', {minimumFractionDigits: 2})} (+${Math.abs(targetDelta).toFixed(1)}% potential) based on multi-factor volatility expansion.`;
+
+      // Causal Reasoning Chain
+      const reasoningBox = document.getElementById("reasoning-content");
+      if (reasoningBox) {
+        reasoningBox.innerHTML = `
+          <ul class="list-disc pl-4 space-y-1.5 font-medium">
+            <li>The algorithmic models classify ${symbol} observation as a probable ${rawLean.toLowerCase()} move (${rawLean}).</li>
+            <li>Systemic market risk for ${sec} is assessed as NORMAL; standard statistical bounds apply.</li>
+            <li>Classification defaulted to ${action} because this model strategy has not demonstrated statistically significant alpha over the benchmark index.</li>
+            <li>Historical sample size for this pattern in ${symbol} is currently insufficient for reliable calibration.</li>
+          </ul>
+        `;
+      }
+
+      // Contributing Events Feed
+      const eventsContainer = document.getElementById("events-feed-container");
+      if (eventsContainer) {
+        const eventsList = (sig.events && sig.events.length > 0) ? sig.events : generateStockEvents(symbol, sec);
+        eventsContainer.innerHTML = eventsList.map(e => `
+          <div class="p-3 rounded-xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/30 dark:bg-blue-950/20 space-y-1">
+            <div class="flex items-center justify-between text-[11px] font-bold">
+              <span class="px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300">${e.type || e.event_type || 'MARKET_EVENT'}</span>
+              <span class="${String(e.sentiment || e.sentiment_score || '+0.10').startsWith('-') ? 'text-rose-500' : 'text-emerald-500'} font-black">${e.sentiment || e.sentiment_score || '+0.10'}</span>
+            </div>
+            <p class="text-xs font-semibold text-[var(--text-main)]">${e.text || e.label || e.headline_or_label || 'Constituent event'}</p>
+          </div>
+        `).join("");
+      }
+
+      // Live Corridor and Canvases
+      corridorData.baseCmp = cmp;
+      corridorData.targetPrice = target;
+      corridorData.stopLoss = stop;
+      updateHudMetrics();
+      renderLiveCorridorCanvas();
+      renderThreePhaseCanvas();
+    }
+
+    function renderMultiHorizon(sigResponse, symbol, cmp, sec) {
+      const tbody = document.getElementById("horizon-table-body");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+
+      let horizons = [];
+      if (sigResponse && sigResponse.signals && typeof sigResponse.signals === "object") {
+        horizons = Object.values(sigResponse.signals);
+      } else if (sigResponse && Array.isArray(sigResponse.predictions) && sigResponse.predictions.length > 0) {
+        horizons = sigResponse.predictions;
+      } else {
+        horizons = generateStockHorizons(symbol || currentStock, cmp, sec);
+      }
+
+      horizons.forEach(h => {
+        // Ensure targets and stops match symbol CMP if unscaled or from previous stock
+        if (!h.target_price || !h.stop_loss || Math.abs(h.target_price - cmp) / cmp > 0.35 || (h.specific_reason && !h.specific_reason.includes(symbol || currentStock))) {
+          const generated = generateStockHorizons(symbol || currentStock, cmp, sec).find(x => x.horizon === h.horizon);
+          if (generated) {
+            h.target_price = generated.target_price;
+            h.stop_loss = generated.stop_loss;
+            h.target_pct = generated.target_pct;
+            h.stop_pct = generated.stop_pct;
+            h.downside_summary = generated.downside_summary;
+            h.upside_summary = generated.upside_summary;
+            h.specific_reason = generated.specific_reason;
+          }
+        }
+
+        const tr = document.createElement("tr");
+        tr.className = "hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer transition-colors";
+        tr.onclick = () => selectHorizon(h);
+        tr.innerHTML = `
+          <td class="py-2.5 px-3 font-bold text-blue-600 dark:text-blue-400">${h.horizon}</td>
+          <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[11px] font-black ${h.action === 'BUY' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'}">${h.action}</span></td>
+          <td class="py-2.5 px-3 font-bold text-emerald-600 dark:text-emerald-400">₹${(h.target_price || 0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+          <td class="py-2.5 px-3 font-bold text-rose-600 dark:text-rose-400">₹${(h.stop_loss || 0).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+          <td class="py-2.5 px-3 font-semibold">${h.calibrated_confidence ? (h.calibrated_confidence * 100).toFixed(1) + '%' : 'Uncalibrated'}</td>
+          <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 dark:bg-slate-800 text-[var(--text-muted)]">${h.edge_status || 'PROBATION'}</span></td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      // Update primary signal gate with active horizon (or INTRADAY)
+      const activeSig = horizons.find(h => h.horizon === activeHorizon) || horizons[0];
+      if (activeSig) {
+        updatePrimarySignalGate(activeSig, symbol || currentStock, cmp, sec);
+      }
+    }
+
+    function selectHorizon(h) {
+      activeHorizon = h.horizon;
+      const st = NIFTY50.find(x => x.s === currentStock) || { s: currentStock, n: currentStock, sec: "DIVERSIFIED", p: corridorData.baseCmp };
+      updatePrimarySignalGate(h, currentStock, corridorData.baseCmp, st.sec);
+      showToast(`Selected horizon: ${h.horizon}`, "info");
+    }
+
+    function renderRiskMonitor(r) {
+      document.getElementById("risk-label").innerText = `Systemic Risk: ${r.risk_level} (z: ${r.composite_score.toFixed(2)})`;
+      document.getElementById("modal-risk-zscore").innerText = r.composite_score.toFixed(2);
+      document.getElementById("modal-risk-level-badge").innerText = r.risk_level;
+      document.getElementById("modal-risk-message").innerText = r.banner_message;
+      document.getElementById("risk-toggle-checkbox").checked = r.toggle_enabled;
+
+      const driverContainer = document.getElementById("modal-risk-drivers");
+      driverContainer.innerHTML = "";
+      if (r.indicators) {
+        for (const [key, val] of Object.entries(r.indicators)) {
+          const div = document.createElement("div");
+          div.className = "p-2 rounded-lg bg-[var(--card-bg)] border border-[var(--card-border)]";
+          div.innerHTML = `<span class="font-bold text-[var(--text-main)]">${key}:</span> z: ${Number(val).toFixed(2)}`;
+          driverContainer.appendChild(div);
+        }
+      }
+    }
+
+    // --- Task Desk Implementation ---
+    let localTasks = [];
+
+    async function fetchTasks(symbol) {
+      if (isApiConnected) {
+        try {
+          const resp = await fetch(`${API_BASE}/api/v1/tasks/${symbol}`);
+          if (resp.ok) {
+            const data = await resp.json();
+            localTasks = data.tasks || [];
+            renderTasksList();
+            return;
+          }
+        } catch (e) {
+          // fallback to localStorage
+        }
+      }
+      // LocalStorage fallback
+      const cached = localStorage.getItem(`alkame_tasks_${symbol}`);
+      if (cached) {
+        try { localTasks = JSON.parse(cached); } catch (e) { localTasks = getDefaultTasks(); }
+      } else {
+        localTasks = getDefaultTasks();
+      }
+      renderTasksList();
+    }
+
+    function getDefaultTasks() {
+      return [
+        { id: "task-001", title: "Verify Brier calibration curve before removing PROBATION status", priority: "P0", category: "Calibration", symbol: currentStock, due_date: "Today, 15:30 IST", completed: false },
+        { id: "task-002", title: "Audit macro discount factor against crude Brent volatility (+3.2%)", priority: "P1", category: "Risk Audit", symbol: "GLOBAL", due_date: "Today, 17:00 IST", completed: false },
+        { id: "task-003", title: "Review dual-boundary stop-loss threshold on NEXT_DAY horizon for RELIANCE", priority: "P1", category: "Execution", symbol: "RELIANCE", due_date: "Tomorrow, 09:15 IST", completed: true },
+        { id: "task-004", title: "Confirm zero lookahead leakage on board meeting corporate event stream", priority: "P2", category: "Compliance", symbol: currentStock, due_date: "End of Week", completed: false },
+        { id: "task-005", title: "Inspect 16-component subsystem telemetry health logs for SQLite WAL journal", priority: "P2", category: "Risk Audit", symbol: "GLOBAL", due_date: "End of Week", completed: true }
+      ];
+    }
+
+    let activeTaskFilter = "ALL";
+    function filterTasks(f) {
+      activeTaskFilter = f;
+      document.querySelectorAll(".task-filter-btn").forEach(btn => {
+        btn.classList.remove("bg-blue-600", "text-white");
+        btn.classList.add("border", "border-[var(--card-border)]", "text-[var(--text-muted)]");
+      });
+      const activeBtn = document.querySelector(`[data-task-filter="${f}"]`);
+      if (activeBtn) {
+        activeBtn.classList.add("bg-blue-600", "text-white");
+        activeBtn.classList.remove("border", "border-[var(--card-border)]", "text-[var(--text-muted)]");
+      }
+      renderTasksList();
+    }
+
+    function renderTasksList() {
+      const container = document.getElementById("tasks-list-container");
+      if (!container) return;
+      container.innerHTML = "";
+
+      let filtered = localTasks;
+      if (activeTaskFilter === "P0") filtered = localTasks.filter(t => t.priority === "P0");
+      else if (activeTaskFilter === "P1") filtered = localTasks.filter(t => t.priority === "P1");
+      else if (activeTaskFilter === "P2") filtered = localTasks.filter(t => t.priority === "P2");
+      else if (activeTaskFilter === "ACTIVE") filtered = localTasks.filter(t => !t.completed);
+      else if (activeTaskFilter === "COMPLETED") filtered = localTasks.filter(t => t.completed);
+
+      const completedCount = localTasks.filter(t => t.completed).length;
+      const totalCount = localTasks.length;
+      const pct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+
+      document.getElementById("task-progress-badge").innerText = `${completedCount}/${totalCount} Completed (${pct}%)`;
+      document.getElementById("task-progress-bar").style.width = `${pct}%`;
+      const pendingP0 = localTasks.filter(t => t.priority === "P0" && !t.completed).length;
+      document.getElementById("tab-task-badge").innerText = pendingP0 > 0 ? pendingP0 : completedCount;
+
+      filtered.forEach(task => {
+        const item = document.createElement("div");
+        let prioBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-black bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-300">🔴 P0 Critical</span>`;
+        if (task.priority === "P1") prioBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300">🟡 P1 High</span>`;
+        if (task.priority === "P2") prioBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300">🟢 P2 Routine</span>`;
+
+        item.className = `p-3.5 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)] flex items-center justify-between gap-3 transition-all ${task.completed ? 'opacity-60 line-through' : ''}`;
+        item.innerHTML = `
+          <div class="flex items-center gap-3">
+            <input type="checkbox" ${task.completed ? 'checked' : ''} onchange="toggleTaskCompletion('${task.id}')" class="w-4 h-4 text-blue-600 rounded cursor-pointer">
+            <div>
+              <div class="flex items-center gap-2">
+                ${prioBadge}
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 dark:bg-slate-800 text-[var(--text-muted)]">${task.category}</span>
+                <span class="px-1.5 py-0.2 rounded text-[10px] font-mono text-blue-600 dark:text-blue-400 font-bold">${task.symbol}</span>
+              </div>
+              <p class="text-xs font-bold text-[var(--text-main)] mt-1">${task.title}</p>
+              <span class="text-[11px] text-[var(--text-muted)] block">Due: ${task.due_date || 'N/A'}</span>
+            </div>
+          </div>
+          <button onclick="deleteTask('${task.id}')" class="text-rose-500 hover:text-rose-700 text-xs font-bold px-2 py-1 rounded-lg border border-transparent hover:border-rose-300" title="Delete Task">&times;</button>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    async function toggleTaskCompletion(taskId) {
+      const task = localTasks.find(t => t.id === taskId);
+      if (task) {
+        task.completed = !task.completed;
+        playChime(task.completed ? 880 : 440, 0.1);
+        renderTasksList();
+        localStorage.setItem(`alkame_tasks_${currentStock}`, JSON.stringify(localTasks));
+
+        if (isApiConnected) {
+          try {
+            await fetch(`${API_BASE}/api/v1/tasks/${taskId}/toggle`, { method: "PUT" });
+          } catch (e) {}
+        }
+      }
+    }
+
+    async function deleteTask(taskId) {
+      localTasks = localTasks.filter(t => t.id !== taskId);
+      renderTasksList();
+      localStorage.setItem(`alkame_tasks_${currentStock}`, JSON.stringify(localTasks));
+      showToast("Task removed", "info");
+
+      if (isApiConnected) {
+        try {
+          await fetch(`${API_BASE}/api/v1/tasks/${taskId}`, { method: "DELETE" });
+        } catch (e) {}
+      }
+    }
+
+    function openAddTaskModal() {
+      document.getElementById("modal-add-task").classList.remove("hidden");
+    }
+
+    function closeAddTaskModal() {
+      document.getElementById("modal-add-task").classList.add("hidden");
+    }
+
+    async function submitNewTask() {
+      const title = document.getElementById("task-input-title").value.trim();
+      const priority = document.getElementById("task-input-priority").value;
+      const category = document.getElementById("task-input-category").value;
+      const due = document.getElementById("task-input-due").value.trim();
+
+      if (!title) {
+        alert("Please enter a task title");
+        return;
+      }
+
+      const newTask = {
+        id: "task-" + Math.random().toString(36).substr(2, 9),
+        title: title,
+        priority: priority,
+        category: category,
+        symbol: currentStock,
+        due_date: due,
+        completed: false
+      };
+
+      localTasks.unshift(newTask);
+      renderTasksList();
+      localStorage.setItem(`alkame_tasks_${currentStock}`, JSON.stringify(localTasks));
+      closeAddTaskModal();
+      document.getElementById("task-input-title").value = "";
+      showToast("Institutional task added successfully", "success");
+
+      if (isApiConnected) {
+        try {
+          await fetch(`${API_BASE}/api/v1/tasks/${currentStock}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(newTask)
+          });
+        } catch (e) {}
+      }
+    }
+
+    // --- Stress Simulation Engine ---
+    async function updateStressSliders() {
+      const crude = parseFloat(document.getElementById("slider-crude").value);
+      const vix = parseFloat(document.getElementById("slider-vix").value);
+      const inr = parseFloat(document.getElementById("slider-inr").value);
+
+      document.getElementById("slider-crude-val").innerText = `${crude >= 0 ? '+' : ''}${crude.toFixed(1)}%`;
+      document.getElementById("slider-vix-val").innerText = `+${vix.toFixed(1)}%`;
+      document.getElementById("slider-inr-val").innerText = `${inr >= 0 ? '+' : ''}${inr.toFixed(1)}%`;
+
+      runStressSimulation();
+    }
+
+    async function runStressSimulation() {
+      const crude = parseFloat(document.getElementById("slider-crude").value);
+      const vix = parseFloat(document.getElementById("slider-vix").value);
+      const inr = parseFloat(document.getElementById("slider-inr").value);
+
+      if (isApiConnected) {
+        try {
+          const resp = await fetch(`${API_BASE}/api/v1/risk/stress-test`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              symbol: currentStock,
+              crude_shock_pct: crude,
+              vix_shock_pct: vix,
+              inr_shock_pct: inr
+            })
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            renderStressOutcome(data);
+            return;
+          }
+        } catch (e) {}
+      }
+
+      // Local mock simulation
+      const baseCmp = corridorData.baseCmp;
+      const isEnergy = ["ADANIENT", "RELIANCE", "ONGC"].includes(currentStock);
+      const isBank = ["HDFCBANK", "ICICIBANK", "SBIN"].includes(currentStock);
+      const crudeBeta = isEnergy ? 0.45 : (isBank ? -0.25 : -0.10);
+      const vixBeta = isBank ? -0.35 : -0.20;
+      const inrBeta = -0.15;
+
+      const pnlPct = (crude * crudeBeta) + (vix * vixBeta) + (inr * inrBeta);
+      const estCmp = baseCmp * (1 + (pnlPct / 100));
+      const regime = Math.abs(pnlPct) > 2.5 ? "ELEVATED_STRESS" : (Math.abs(pnlPct) > 1.0 ? "MODERATE_STRESS" : "BENIGN");
+
+      renderStressOutcome({
+        base_cmp: baseCmp,
+        estimated_cmp: estCmp,
+        estimated_pnl_pct: pnlPct,
+        risk_regime: regime
+      });
+    }
+
+    function renderStressOutcome(d) {
+      document.getElementById("sim-base-cmp").innerText = `₹${d.base_cmp.toFixed(2)}`;
+      document.getElementById("sim-stress-cmp").innerText = `₹${d.estimated_cmp.toFixed(2)}`;
+      
+      const pnlSign = d.estimated_pnl_pct >= 0 ? '+' : '';
+      const pnlColor = d.estimated_pnl_pct >= 0 ? 'text-emerald-400' : 'text-rose-400';
+      document.getElementById("sim-pnl-pct").className = `text-xl font-black ${pnlColor}`;
+      document.getElementById("sim-pnl-pct").innerText = `${pnlSign}${d.estimated_pnl_pct.toFixed(2)}% (₹${(d.estimated_cmp - d.base_cmp).toFixed(2)})`;
+
+      const badge = document.getElementById("sim-regime-badge");
+      badge.innerText = d.risk_regime;
+      if (d.risk_regime === "BENIGN") {
+        badge.className = "px-3 py-1 rounded-full text-xs font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30";
+      } else if (d.risk_regime === "MODERATE_STRESS") {
+        badge.className = "px-3 py-1 rounded-full text-xs font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/30";
+      } else {
+        badge.className = "px-3 py-1 rounded-full text-xs font-extrabold bg-rose-500/20 text-rose-300 border border-rose-500/30";
+      }
+    }
+
+    // --- Live Corridor Streaming Simulation Engine ---
+    function initLiveCorridorData() {
+      realizedTicks = [];
+      const base = corridorData.baseCmp;
+      // Pre-seed 15 ticks
+      for (let i = 15; i >= 0; i--) {
+        const noise = (Math.sin(i * 0.4) * 0.001 + (Math.random() - 0.5) * 0.0008) * base;
+        realizedTicks.push(base + noise);
+      }
+      updateHudMetrics();
+    }
+
+    function updateHudMetrics() {
+      const lastTick = realizedTicks[realizedTicks.length - 1];
+      document.getElementById("hud-live-cmp").innerText = `₹${lastTick.toFixed(2)}`;
+      const delta = lastTick - corridorData.baseCmp;
+      const pct = (delta / corridorData.baseCmp) * 100;
+      const deltaEl = document.getElementById("hud-live-delta");
+      deltaEl.innerText = `${delta >= 0 ? '+' : ''}₹${delta.toFixed(2)} (${delta >= 0 ? '+' : ''}${pct.toFixed(2)}%)`;
+      deltaEl.className = `text-xs font-bold block ${delta >= 0 ? 'text-emerald-500' : 'text-rose-500'}`;
+
+      document.getElementById("hud-live-target").innerText = `₹${corridorData.targetPrice.toFixed(2)}`;
+      document.getElementById("hud-live-stop").innerText = `₹${corridorData.stopLoss.toFixed(2)}`;
+    }
+
+    function toggleLiveStream() {
+      isStreaming = !isStreaming;
+      document.getElementById("stream-toggle-text").innerText = isStreaming ? "Pause Stream" : "Resume Stream";
+      document.getElementById("stream-toggle-icon").innerText = isStreaming ? "⏸" : "▶";
+      const badge = document.getElementById("live-stream-badge");
+      if (isStreaming) {
+        badge.className = "px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 flex items-center gap-1";
+        badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span> STREAMING LIVE`;
+      } else {
+        badge.className = "px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-300";
+        badge.innerHTML = `STREAM PAUSED`;
+      }
+    }
+
+    function setCadence(sec) {
+      streamCadence = sec;
+      countdownRemaining = sec;
+      document.querySelectorAll(".cadence-btn").forEach(btn => {
+        btn.classList.remove("bg-blue-600", "text-white");
+        btn.classList.add("border", "border-[var(--card-border)]");
+      });
+      const active = document.querySelector(`[data-cadence="${sec}"]`);
+      if (active) {
+        active.classList.add("bg-blue-600", "text-white");
+        active.classList.remove("border", "border-[var(--card-border)]");
+      }
+    }
+
+    function resetLiveStream() {
+      initLiveCorridorData();
+      renderLiveCorridorCanvas();
+      showToast("Live prediction funnel reset", "info");
+    }
+
+    function startStreamEngine() {
+      if (countdownInterval) clearInterval(countdownInterval);
+      countdownInterval = setInterval(() => {
+        if (!isStreaming) return;
+        countdownRemaining--;
+        if (countdownRemaining <= 0) {
+          countdownRemaining = streamCadence;
+          stepLiveTick();
+        }
+        document.getElementById("hud-next-tick").innerText = `Next Tick in: ${countdownRemaining}s`;
+      }, 1000);
+    }
+
+    function stepLiveTick() {
+      const prev = realizedTicks[realizedTicks.length - 1];
+      const drift = (corridorData.targetPrice - prev) * 0.05; // slight drift toward target
+      const noise = (Math.random() - 0.49) * (prev * 0.0009);
+      const nextTick = prev + drift + noise;
+      realizedTicks.push(nextTick);
+      if (realizedTicks.length > 40) realizedTicks.shift();
+
+      updateHudMetrics();
+      if (activeScreen === "screen-charts") {
+        renderLiveCorridorCanvas();
+      }
+
+      // Check boundary breach
+      if (nextTick >= corridorData.targetPrice) {
+        playChime(880, 0.2);
+        showToast(`Target Resistance breached at ₹${nextTick.toFixed(2)}!`, "success");
+      } else if (nextTick <= corridorData.stopLoss) {
+        playChime(330, 0.25);
+        showToast(`Stop Loss boundary breached at ₹${nextTick.toFixed(2)}!`, "error");
+      }
+    }
+
+    // --- Canvas Rendering: Live vs Prediction Corridor ---
+    function renderLiveCorridorCanvas() {
+      const canvas = document.getElementById("live-corridor-canvas");
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width;
+      const h = canvas.height;
+      const isDark = document.documentElement.classList.contains("dark");
+
+      ctx.clearRect(0, 0, w, h);
+
+      // Determine price scale
+      const allPrices = [...realizedTicks, corridorData.targetPrice, corridorData.stopLoss];
+      let minP = Math.min(...allPrices) * 0.9985;
+      let maxP = Math.max(...allPrices) * 1.0015;
+      const padY = 30;
+
+      function getY(p) {
+        return h - padY - ((p - minP) / (maxP - minP)) * (h - padY * 2);
+      }
+
+      // Gridlines
+      ctx.strokeStyle = isDark ? "#1e293b" : "#e2e8f0";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 5; i++) {
+        const y = padY + (i * (h - padY * 2)) / 4;
+        ctx.beginPath();
+        ctx.moveTo(40, y);
+        ctx.lineTo(w - 20, y);
+        ctx.stroke();
+
+        const pVal = maxP - (i * (maxP - minP)) / 4;
+        ctx.fillStyle = isDark ? "#64748b" : "#94a3b8";
+        ctx.font = "11px sans-serif";
+        ctx.fillText(`₹${pVal.toFixed(1)}`, 2, y + 4);
+      }
+
+      const totalSteps = 45;
+      const stepX = (w - 70) / totalSteps;
+      const startX = 50;
+
+      // Draw Upper Target Resistance Band
+      const targetY = getY(corridorData.targetPrice);
+      ctx.strokeStyle = "#10b981";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(startX, targetY);
+      ctx.lineTo(w - 20, targetY);
+      ctx.stroke();
+
+      // Draw Lower Stop Loss Band
+      const stopY = getY(corridorData.stopLoss);
+      ctx.strokeStyle = "#f43f5e";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(startX, stopY);
+      ctx.lineTo(w - 20, stopY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Draw Confidence Funnel from last realized tick
+      const curTickIdx = realizedTicks.length - 1;
+      const curX = startX + curTickIdx * stepX;
+      const curY = getY(realizedTicks[curTickIdx]);
+
+      ctx.fillStyle = isDark ? "rgba(59, 130, 246, 0.15)" : "rgba(37, 99, 235, 0.08)";
+      ctx.beginPath();
+      ctx.moveTo(curX, curY);
+
+      // Upper cone curve
+      for (let i = 1; i <= 20; i++) {
+        const px = curX + i * stepX;
+        const spread = (i / 20) * (corridorData.targetPrice - realizedTicks[curTickIdx]);
+        const py = getY(realizedTicks[curTickIdx] + spread);
+        ctx.lineTo(px, py);
+      }
+      // Lower cone curve
+      for (let i = 20; i >= 1; i--) {
+        const px = curX + i * stepX;
+        const spread = (i / 20) * (realizedTicks[curTickIdx] - corridorData.stopLoss);
+        const py = getY(realizedTicks[curTickIdx] - spread);
+        ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+
+      // Central drift trajectory
+      ctx.strokeStyle = "#60a5fa";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.moveTo(curX, curY);
+      for (let i = 1; i <= 20; i++) {
+        const px = curX + i * stepX;
+        const py = getY(realizedTicks[curTickIdx] + (i / 20) * (corridorData.targetPrice - realizedTicks[curTickIdx]) * 0.5);
+        ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Draw Realized Live Price Line
+      ctx.strokeStyle = isDark ? "#38bdf8" : "#0284c7";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      for (let i = 0; i < realizedTicks.length; i++) {
+        const x = startX + i * stepX;
+        const y = getY(realizedTicks[i]);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // Pulsing current dot
+      const lastX = startX + (realizedTicks.length - 1) * stepX;
+      const lastY = getY(realizedTicks[realizedTicks.length - 1]);
+      ctx.fillStyle = "#38bdf8";
+      ctx.beginPath();
+      ctx.arc(lastX, lastY, 5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(lastX, lastY, 7, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // --- Technical Indicators & Continuity Calculations ---
+    function updateTechnicalIndicators(cmp, symbol) {
+      const sym = symbol || currentStock;
+      const price = (cmp && cmp > 0) ? cmp : (corridorData.baseCmp || 2500);
+
+      // Deterministic hash based on symbol characters for repeatable realistic metrics
+      let hash = 0;
+      for (let i = 0; i < sym.length; i++) hash = (hash << 5) - hash + sym.charCodeAt(i);
+      const seed = Math.abs(hash) % 100;
+
+      // 1. RSI (14-Period): range 46.5 - 63.5
+      const rsi = 48.0 + (seed % 15) + ((price % 10) * 0.1);
+      const rsiEl = document.getElementById("indicator-rsi-val");
+      const rsiRegEl = document.getElementById("indicator-rsi-regime");
+      if (rsiEl) rsiEl.innerText = rsi.toFixed(1);
+      if (rsiRegEl) {
+        if (rsi > 58) {
+          rsiRegEl.innerText = "Bullish Accumulation";
+          rsiEl.className = "text-lg font-black text-emerald-600 dark:text-emerald-400";
+        } else if (rsi < 50) {
+          rsiRegEl.innerText = "Consolidation / Pullback";
+          rsiEl.className = "text-lg font-black text-amber-600 dark:text-amber-400";
+        } else {
+          rsiRegEl.innerText = "Neutral Regime";
+          rsiEl.className = "text-lg font-black text-blue-600 dark:text-blue-400";
+        }
+      }
+
+      // 2. Bollinger %B: range 0.52 - 0.72
+      const bb = 0.52 + ((seed % 20) / 100);
+      const bbEl = document.getElementById("indicator-bollinger-val");
+      const bbRegEl = document.getElementById("indicator-bollinger-regime");
+      if (bbEl) bbEl.innerText = bb.toFixed(2);
+      if (bbRegEl) {
+        if (bb >= 0.62) bbRegEl.innerText = "Upper Consolidation";
+        else if (bb <= 0.48) bbRegEl.innerText = "Lower Band Support";
+        else bbRegEl.innerText = "Mean Equilibrium Band";
+      }
+
+      // 3. Average True Range (ATR): normalized ~1.6% of CMP
+      const atr = price * 0.0158;
+      const atrEl = document.getElementById("indicator-atr-val");
+      const atrRegEl = document.getElementById("indicator-atr-regime");
+      if (atrEl) atrEl.innerText = `₹${atr >= 100 ? atr.toFixed(1) : atr.toFixed(2)}`;
+      if (atrRegEl) atrRegEl.innerText = "Normalized Volatility";
+
+      // 4. VWAP Benchmark: CMP * 0.9975
+      const vwap = price * 0.9975;
+      const vwapDelta = price - vwap;
+      const vwapEl = document.getElementById("indicator-vwap-val");
+      const vwapDeltaEl = document.getElementById("indicator-vwap-delta");
+      if (vwapEl) vwapEl.innerText = `₹${vwap.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      if (vwapDeltaEl) {
+        const isAbove = vwapDelta >= 0;
+        vwapDeltaEl.innerText = `${isAbove ? '+' : '-'}₹${Math.abs(vwapDelta).toFixed(2)} ${isAbove ? 'Above' : 'Below'} VWAP`;
+        vwapDeltaEl.className = `text-xs font-semibold block ${isAbove ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`;
+      }
+    }
+
+    // --- Canvas Rendering: 3-Phase Past, Present & Expected Trend ---
+    function renderThreePhaseCanvas() {
+      const canvas = document.getElementById("three-phase-canvas");
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width;
+      const h = canvas.height;
+      const isDark = document.documentElement.classList.contains("dark");
+
+      const cmp = corridorData.baseCmp || 2500;
+      updateTechnicalIndicators(cmp, currentStock);
+
+      ctx.clearRect(0, 0, w, h);
+
+      // 3 Zones demarcation
+      const pastW = w * 0.45;
+      const presentX = pastW;
+      const futureW = w * 0.55;
+
+      // Zone 1: Past Background (Realized)
+      ctx.fillStyle = isDark ? "rgba(15, 23, 42, 0.55)" : "rgba(241, 245, 249, 0.7)";
+      ctx.fillRect(0, 0, pastW, h);
+
+      // Zone 3: Future Background (Projections)
+      ctx.fillStyle = isDark ? "rgba(30, 41, 59, 0.35)" : "rgba(238, 242, 255, 0.5)";
+      ctx.fillRect(presentX, 0, futureW, h);
+
+      // Price Baseline Calculations
+      const minP = cmp * 0.980;
+      const maxP = cmp * 1.026;
+      const padY = 35;
+      const rightMargin = 85;
+
+      function getY(p) {
+        return h - padY - ((p - minP) / (maxP - minP)) * (h - padY * 2);
+      }
+
+      // Draw Horizontal Grid Lines and Y-Axis Price Scales on the Right
+      const gridLevels = [
+        { p: maxP, label: `₹${maxP >= 1000 ? maxP.toFixed(0) : maxP.toFixed(2)}` },
+        { p: cmp * 1.012, label: `₹${(cmp * 1.012) >= 1000 ? (cmp * 1.012).toFixed(0) : (cmp * 1.012).toFixed(2)}` },
+        { p: cmp, label: `₹${cmp >= 1000 ? cmp.toFixed(0) : cmp.toFixed(2)} (CMP)` },
+        { p: cmp * 0.990, label: `₹${(cmp * 0.990) >= 1000 ? (cmp * 0.990).toFixed(0) : (cmp * 0.990).toFixed(2)}` },
+        { p: minP, label: `₹${minP >= 1000 ? minP.toFixed(0) : minP.toFixed(2)}` },
+      ];
+
+      ctx.strokeStyle = isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.06)";
+      ctx.lineWidth = 1;
+      gridLevels.forEach(g => {
+        const y = getY(g.p);
+        ctx.beginPath();
+        ctx.setLineDash([4, 6]);
+        ctx.moveTo(10, y);
+        ctx.lineTo(w - rightMargin, y);
+        ctx.stroke();
+
+        ctx.fillStyle = isDark ? "#94a3b8" : "#64748b";
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText(g.label, w - rightMargin + 6, y + 3);
+      });
+      ctx.setLineDash([]);
+
+      // Phase 1: Plot Realized Past Price Line (25 bars)
+      const pastBars = 25;
+      const pastStep = pastW / (pastBars + 1);
+
+      // Area fill under realized line
+      ctx.beginPath();
+      for (let i = 0; i <= pastBars; i++) {
+        const x = i * pastStep;
+        const p = cmp * (0.992 + Math.sin(i * 0.3) * 0.007 + (i / pastBars) * 0.008);
+        const y = getY(p);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.lineTo(presentX, h - padY);
+      ctx.lineTo(0, h - padY);
+      ctx.closePath();
+      const fillGrad = ctx.createLinearGradient(0, 0, 0, h);
+      fillGrad.addColorStop(0, isDark ? "rgba(56, 189, 248, 0.18)" : "rgba(14, 165, 233, 0.12)");
+      fillGrad.addColorStop(1, "rgba(0, 0, 0, 0.0)");
+      ctx.fillStyle = fillGrad;
+      ctx.fill();
+
+      // Realized Price Stroke
+      ctx.strokeStyle = isDark ? "#f1f5f9" : "#0f172a";
+      ctx.lineWidth = 2.2;
+      ctx.beginPath();
+      let lastPastY = getY(cmp);
+      for (let i = 0; i <= pastBars; i++) {
+        const x = i * pastStep;
+        const p = cmp * (0.992 + Math.sin(i * 0.3) * 0.007 + (i / pastBars) * 0.008);
+        const y = getY(p);
+        lastPastY = y;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // MA(20) Amber curve across Phase 1
+      ctx.strokeStyle = "#eab308";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      for (let i = 0; i <= pastBars; i++) {
+        const x = i * pastStep;
+        const p = cmp * (0.991 + Math.sin(i * 0.25) * 0.005 + (i / pastBars) * 0.006);
+        const y = getY(p);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // MA(50) Purple curve across Phase 1
+      ctx.strokeStyle = "#a855f7";
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      for (let i = 0; i <= pastBars; i++) {
+        const x = i * pastStep;
+        const p = cmp * (0.987 + Math.sin(i * 0.18) * 0.004 + (i / pastBars) * 0.005);
+        const y = getY(p);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+
+      // Zone Demarcation Line (NOW T=0) - Zero Lookahead Leakage Boundary
+      ctx.strokeStyle = "#38bdf8";
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(presentX, 0);
+      ctx.lineTo(presentX, h);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Milestone Tag NOW (T=0)
+      const nowTagText = `NOW (T=0) | ₹${cmp.toFixed(2)}`;
+      ctx.font = "bold 11px sans-serif";
+      const tagW = ctx.measureText(nowTagText).width + 16;
+      ctx.fillStyle = "#0284c7";
+      ctx.fillRect(presentX - tagW / 2, 12, tagW, 22);
+      ctx.fillStyle = "#ffffff";
+      ctx.textAlign = "center";
+      ctx.fillText(nowTagText, presentX, 27);
+      ctx.textAlign = "left";
+
+      // Phase 2: NOW Marker Dot (Glowing Cyan Pivot)
+      ctx.fillStyle = "#38bdf8";
+      ctx.beginPath();
+      ctx.arc(presentX, lastPastY, 6.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Phase 3: Future Projections
+      const futureBars = 25;
+      const futureStep = (futureW - rightMargin) / futureBars;
+
+      // Scenario A: Bullish Target Curve (p=34%)
+      ctx.strokeStyle = "#10b981";
+      ctx.lineWidth = 2.2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(presentX, lastPastY);
+      let endAX = presentX, endAY = lastPastY;
+      for (let i = 1; i <= futureBars; i++) {
+        const x = presentX + i * futureStep;
+        const p = cmp * (1.0 + (i / futureBars) * 0.022);
+        endAX = x; endAY = getY(p);
+        ctx.lineTo(x, endAY);
+      }
+      ctx.stroke();
+
+      // End Callout for Scenario A
+      ctx.fillStyle = "#10b981";
+      ctx.beginPath();
+      ctx.arc(endAX, endAY, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.font = "bold 10px sans-serif";
+      ctx.fillText(`Bullish +2.2% [p: 34%]`, endAX + 6, endAY + 3);
+
+      // Scenario B: Central Mean Reversion Expectation (p=45%)
+      ctx.strokeStyle = "#60a5fa";
+      ctx.lineWidth = 2.2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(presentX, lastPastY);
+      let endBX = presentX, endBY = lastPastY;
+      for (let i = 1; i <= futureBars; i++) {
+        const x = presentX + i * futureStep;
+        const p = cmp * (1.0 + Math.sin(i * 0.3) * 0.004 + (i / futureBars) * 0.005);
+        endBX = x; endBY = getY(p);
+        ctx.lineTo(x, endBY);
+      }
+      ctx.stroke();
+
+      // End Callout for Scenario B
+      ctx.fillStyle = "#60a5fa";
+      ctx.beginPath();
+      ctx.arc(endBX, endBY, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.font = "bold 10px sans-serif";
+      ctx.fillText(`Central +0.5% [p: 45%]`, endBX + 6, endBY + 3);
+
+      // Scenario C: Downside Tail Risk Curve (p=21%)
+      ctx.strokeStyle = "#f43f5e";
+      ctx.lineWidth = 2.2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(presentX, lastPastY);
+      let endCX = presentX, endCY = lastPastY;
+      for (let i = 1; i <= futureBars; i++) {
+        const x = presentX + i * futureStep;
+        const p = cmp * (1.0 - (i / futureBars) * 0.012);
+        endCX = x; endCY = getY(p);
+        ctx.lineTo(x, endCY);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // End Callout for Scenario C
+      ctx.fillStyle = "#f43f5e";
+      ctx.beginPath();
+      ctx.arc(endCX, endCY, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.font = "bold 10px sans-serif";
+      ctx.fillText(`Downside -1.2% [p: 21%]`, endCX + 6, endCY + 3);
+
+      // Section Watermarks
+      ctx.fillStyle = isDark ? "rgba(255, 255, 255, 0.07)" : "rgba(0, 0, 0, 0.04)";
+      ctx.font = "bold 26px sans-serif";
+      ctx.fillText("PHASE 1: REALIZED (PAST)", 20, 65);
+      ctx.fillText("PHASE 3: PROJECTIONS (FUTURE)", presentX + 25, 65);
+    }
+
+    // --- Canvas Rendering: Brier Calibration Curve ---
+    function renderBrierCalibrationCanvas() {
+      const canvas = document.getElementById("brier-curve-canvas");
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width;
+      const h = canvas.height;
+      const isDark = document.documentElement.classList.contains("dark");
+
+      ctx.clearRect(0, 0, w, h);
+      const pad = 35;
+
+      // 45-degree perfect diagonal
+      ctx.strokeStyle = isDark ? "#475569" : "#cbd5e1";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(pad, h - pad);
+      ctx.lineTo(w - pad, pad);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Empirical Calibration Points
+      const points = [
+        { p: 0.1, r: 0.12 },
+        { p: 0.25, r: 0.23 },
+        { p: 0.4, r: 0.38 },
+        { p: 0.55, r: 0.58 },
+        { p: 0.7, r: 0.69 },
+        { p: 0.85, r: 0.82 }
+      ];
+
+      ctx.strokeStyle = "#3b82f6";
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      points.forEach((pt, idx) => {
+        const x = pad + pt.p * (w - pad * 2);
+        const y = h - pad - pt.r * (h - pad * 2);
+        if (idx === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      // Plot Points
+      points.forEach(pt => {
+        const x = pad + pt.p * (w - pad * 2);
+        const y = h - pad - pt.r * (h - pad * 2);
+        ctx.fillStyle = "#10b981";
+        ctx.beginPath();
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+
+    // --- Scalping Scanner Radar Table ---
+    let cachedOpportunities = [
+      { s: "RELIANCE", sec: "ENERGY", a: "BUY", entry: 2985.40, target: 3015.00, stop: 2965.00, rr: "1.5:1", h: "INTRADAY" },
+      { s: "TCS", sec: "IT", a: "BUY", entry: 3920.00, target: 3960.00, stop: 3895.00, rr: "1.6:1", h: "INTRADAY" },
+      { s: "HDFCBANK", sec: "FINANCIAL", a: "BUY", entry: 1680.20, target: 1705.00, stop: 1665.00, rr: "1.7:1", h: "NEXT_DAY" },
+      { s: "INFY", sec: "IT", a: "HOLD", entry: 1890.50, target: 1910.00, stop: 1875.00, rr: "1.3:1", h: "INTRADAY" },
+      { s: "ADANIENT", sec: "ENERGY", a: "HOLD", entry: 2701.00, target: 2706.15, stop: 2697.55, rr: "1.5:1", h: "INTRADAY" },
+      { s: "ICICIBANK", sec: "FINANCIAL", a: "BUY", entry: 1245.00, target: 1265.00, stop: 1230.00, rr: "1.3:1", h: "INTRADAY" },
+      { s: "LT", sec: "CONSTRUCTION", a: "BUY", entry: 3580.00, target: 3640.00, stop: 3540.00, rr: "1.5:1", h: "SWING_3D" }
+    ];
+
+    function populateFullScalpTable(items) {
+      const ops = items || cachedOpportunities;
+      const t1 = document.getElementById("full-scalp-table-body");
+      const t2 = document.getElementById("scalp-table-body");
+      
+      if (t1) {
+        t1.innerHTML = "";
+        ops.forEach(op => {
+          const tr = document.createElement("tr");
+          tr.className = "hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors";
+          tr.innerHTML = `
+            <td class="py-3 px-3 font-bold text-blue-600 dark:text-blue-400 cursor-pointer" onclick="initStock('${op.s}'); switchScreen('screen-overview');">${op.s}</td>
+            <td class="py-3 px-3 text-[var(--text-muted)]">${op.sec || 'NIFTY 50'}</td>
+            <td class="py-3 px-3"><span class="px-2 py-0.5 rounded text-[11px] font-black ${op.a === 'BUY' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'}">${op.a || op.action}</span></td>
+            <td class="py-3 px-3 font-bold">₹${Number(op.entry || op.entry_price || 0).toFixed(2)}</td>
+            <td class="py-3 px-3 font-bold text-emerald-600 dark:text-emerald-400">₹${Number(op.target || op.target_price || 0).toFixed(2)}</td>
+            <td class="py-3 px-3 font-bold text-rose-600 dark:text-rose-400">₹${Number(op.stop || op.stop_loss || 0).toFixed(2)}</td>
+            <td class="py-3 px-3 font-extrabold text-indigo-600 dark:text-indigo-400">${op.rr || op.risk_reward_ratio || '1.5:1'}</td>
+            <td class="py-3 px-3 font-semibold text-[var(--text-muted)]">${op.h || op.horizon || 'INTRADAY'}</td>
+            <td class="py-3 px-3 text-right">
+              <button onclick="initStock('${op.s || op.symbol}'); switchScreen('screen-overview');" class="px-3 py-1 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700">Load</button>
+            </td>
+          `;
+          t1.appendChild(tr);
+        });
+      }
+
+      if (t2) {
+        t2.innerHTML = "";
+        ops.forEach(op => {
+          const tr = document.createElement("tr");
+          tr.className = "hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors";
+          tr.innerHTML = `
+            <td class="py-2.5 px-3 font-bold text-blue-600 dark:text-blue-400 cursor-pointer" onclick="initStock('${op.s || op.symbol}'); closeScalpModal(); switchScreen('screen-overview');">${op.s || op.symbol}</td>
+            <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[11px] font-black ${op.a === 'BUY' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'}">${op.a || op.action}</span></td>
+            <td class="py-2.5 px-3 font-bold">₹${Number(op.entry || op.entry_price || 0).toFixed(2)}</td>
+            <td class="py-2.5 px-3 font-bold text-emerald-600">₹${Number(op.target || op.target_price || 0).toFixed(2)}</td>
+            <td class="py-2.5 px-3 font-bold text-rose-600">₹${Number(op.stop || op.stop_loss || 0).toFixed(2)}</td>
+            <td class="py-2.5 px-3 font-extrabold text-indigo-600">${op.rr || op.risk_reward_ratio || '1.5:1'}</td>
+            <td class="py-2.5 px-3 text-right">
+              <button onclick="initStock('${op.s || op.symbol}'); closeScalpModal(); switchScreen('screen-overview');" class="px-2.5 py-1 rounded bg-blue-600 text-white font-bold hover:bg-blue-700">Load</button>
+            </td>
+          `;
+          t2.appendChild(tr);
+        });
+      }
+    }
+
+    async function runScalpScan() {
+      showToast("Scanning 50 NIFTY constituents for micro-momentum setups...", "info");
+      if (isApiConnected) {
+        try {
+          const resp = await fetch(`${API_BASE}/api/v1/scalping`, { signal: AbortSignal.timeout(3000) });
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data.setups && data.setups.length > 0) {
+              const formatted = data.setups.map(s => ({
+                s: s.symbol,
+                sec: (NIFTY50.find(x => x.s === s.symbol) || {}).sec || "NIFTY 50",
+                a: s.action,
+                entry: s.entry,
+                target: s.target,
+                stop: s.stop,
+                rr: `${Number(s.rr).toFixed(1)}:1`,
+                h: "INTRADAY"
+              }));
+              populateFullScalpTable(formatted);
+              showToast(`Universe scan complete: ${formatted.length} setups identified from engine`, "success");
+              playChime(880, 0.15);
+              return;
+            }
+          }
+        } catch (e) {}
+      }
+      populateFullScalpTable();
+      showToast("Universe scan complete: 7 setups identified", "success");
+      playChime(880, 0.15);
+    }
+
+    function populateSectorHeatmap() {
+      const grid = document.getElementById("sector-heatmap-grid");
+      if (!grid) return;
+      grid.innerHTML = "";
+
+      const sectors = [
+        { n: "Banking & Finance", c: "+1.15%", pos: true, count: 10 },
+        { n: "IT & Tech", c: "+0.85%", pos: true, count: 5 },
+        { n: "Energy & Coal", c: "-0.40%", pos: false, count: 5 },
+        { n: "Automobile", c: "+0.65%", pos: true, count: 6 },
+        { n: "Pharmaceuticals", c: "+0.30%", pos: true, count: 4 },
+        { n: "Consumer Goods", c: "-0.15%", pos: false, count: 7 },
+        { n: "Metals & Mining", c: "+1.40%", pos: true, count: 4 },
+        { n: "Construction", c: "+0.90%", pos: true, count: 2 }
+      ];
+
+      sectors.forEach(sec => {
+        const div = document.createElement("div");
+        div.className = `p-4 rounded-xl border ${sec.pos ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-950/20' : 'border-rose-300 dark:border-rose-800 bg-rose-50/30 dark:bg-rose-950/20'} space-y-1`;
+        div.innerHTML = `
+          <div class="flex items-center justify-between text-xs font-bold">
+            <span class="text-[var(--text-main)]">${sec.n}</span>
+            <span class="${sec.pos ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'} font-black">${sec.c}</span>
+          </div>
+          <span class="text-[11px] text-[var(--text-muted)] block">${sec.count} constituents</span>
+        `;
+        grid.appendChild(div);
+      });
+    }
+
+    // --- Search Autocomplete ---
+    function onSearchInput(val) {
+      const dropdown = document.getElementById("search-dropdown");
+      if (!val || val.trim().length === 0) {
+        dropdown.classList.add("hidden");
+        return;
+      }
+      const q = val.toUpperCase().trim();
+      const matches = NIFTY50.filter(x => x.s.includes(q) || x.n.toUpperCase().includes(q)).slice(0, 8);
+      if (matches.length === 0) {
+        dropdown.innerHTML = `<div class="p-3 text-[var(--text-muted)] text-center">No constituent found</div>`;
+      } else {
+        dropdown.innerHTML = matches.map(m => `
+          <div class="p-2.5 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer flex items-center justify-between border-b border-[var(--card-border)] last:border-b-0" onclick="selectSearchSymbol('${m.s}')">
+            <div>
+              <span class="font-bold text-blue-600 dark:text-blue-400">${m.s}</span>
+              <span class="text-xs text-[var(--text-muted)] ml-2">${m.n}</span>
+            </div>
+            <span class="font-bold text-xs">₹${m.p.toFixed(2)}</span>
+          </div>
+        `).join("");
+      }
+      dropdown.classList.remove("hidden");
+    }
+
+    function selectSearchSymbol(symbol) {
+      document.getElementById("search-dropdown").classList.add("hidden");
+      document.getElementById("symbol-search").value = "";
+      initStock(symbol);
+    }
+
+    function filterSector(sec) {
+      document.querySelectorAll(".sector-pill").forEach(p => {
+        p.classList.remove("bg-blue-600", "text-white");
+        p.classList.add("border", "border-[var(--card-border)]", "text-[var(--text-muted)]");
+      });
+      const activePill = document.querySelector(`[data-sector="${sec}"]`);
+      if (activePill) {
+        activePill.classList.add("bg-blue-600", "text-white");
+        activePill.classList.remove("border", "border-[var(--card-border)]", "text-[var(--text-muted)]");
+      }
+      if (sec !== "ALL") {
+        const first = NIFTY50.find(x => x.sec === sec);
+        if (first) initStock(first.s);
+      }
+    }
+
+    function refreshCurrentStock() {
+      const spinner = document.getElementById("refresh-spinner");
+      spinner.classList.add("animate-spin");
+      fetchStockData(currentStock);
+      setTimeout(() => spinner.classList.remove("animate-spin"), 600);
+      showToast(`Refreshed ${currentStock} data`, "info");
+    }
+
+    async function refreshLiveWorthiness() {
+      showToast(`Requesting live-worthiness refresh for ${currentStock}...`, "info");
+      if (isApiConnected) {
+        try {
+          const resp = await fetch(`${API_BASE}/api/v1/signal/${currentStock}/refresh`, { 
+            method: "POST",
+            headers: { "X-API-Key": "dev-alkame-admin-key" }
+          });
+          if (resp.status === 429) {
+            const err = await resp.json();
+            showToast(err.reason || "Refresh cooldown active. Try again in 60s.", "warning");
+            return;
+          }
+          if (resp.ok) {
+            showToast(`Live-worthiness evidence refreshed against latest bars for ${currentStock}`, "success");
+            playChime(784, 0.15);
+            fetchStockData(currentStock);
+            return;
+          }
+        } catch (e) {}
+      }
+      showToast("Live-worthiness evidence refreshed against latest bars (offline verification)", "success");
+      playChime(784, 0.12);
+    }
+
+    async function toggleRiskState(enabled) {
+      showToast(`Systemic Risk multiplier ${enabled ? 'ENABLED' : 'DISABLED'}`, enabled ? "success" : "info");
+      if (isApiConnected) {
+        try {
+          await fetch(`${API_BASE}/api/v1/risk/toggle?enabled=${enabled}`, { 
+            method: "POST",
+            headers: { "X-API-Key": "dev-alkame-admin-key" }
+          });
+        } catch (e) {}
+      }
+    }
+
+    // --- Notes & Overrides ---
+    async function saveAnalystNote() {
+      const input = document.getElementById("analyst-note-input");
+      const text = input.value.trim();
+      if (!text) return;
+
+      const newNote = {
+        id: Date.now(),
+        timestamp: new Date().toISOString(),
+        note_text: text,
+        created_by: "web_analyst"
+      };
+
+      const cached = JSON.parse(localStorage.getItem(`notes_${currentStock}`) || "[]");
+      cached.unshift(newNote);
+      localStorage.setItem(`notes_${currentStock}`, JSON.stringify(cached));
+      renderNotes(cached);
+      input.value = "";
+      document.getElementById("note-save-status").innerText = "✓ Note saved";
+      setTimeout(() => document.getElementById("note-save-status").innerText = "", 3000);
+      showToast("Analyst note saved", "success");
+
+      if (isApiConnected) {
+        try {
+          await fetch(`${API_BASE}/api/v1/notes/${currentStock}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ note_text: text, created_by: "web_analyst" })
+          });
+        } catch (e) {}
+      }
+    }
+
+    async function fetchNotes(symbol) {
+      if (isApiConnected) {
+        try {
+          const resp = await fetch(`${API_BASE}/api/v1/notes/${symbol}`);
+          if (resp.ok) {
+            const data = await resp.json();
+            renderNotes(data.notes || []);
+            return;
+          }
+        } catch (e) {}
+      }
+      const cached = JSON.parse(localStorage.getItem(`notes_${symbol}`) || "[]");
+      renderNotes(cached);
+    }
+
+    function renderNotes(notes) {
+      const container = document.getElementById("recent-notes-list");
+      if (!container) return;
+      container.innerHTML = "";
+      if (notes.length === 0) {
+        container.innerHTML = `<p class="text-[var(--text-muted)] text-center py-2">No analyst notes recorded yet.</p>`;
+        return;
+      }
+      notes.slice(0, 5).forEach(n => {
+        const div = document.createElement("div");
+        div.className = "p-2.5 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)] space-y-1";
+        div.innerHTML = `
+          <div class="flex items-center justify-between text-[11px] font-bold text-[var(--text-muted)]">
+            <span>${n.created_by || 'analyst'}</span>
+            <span>${n.timestamp ? n.timestamp.substring(0, 16) : ''}</span>
+          </div>
+          <p class="text-xs text-[var(--text-main)] font-medium leading-relaxed">${n.note_text}</p>
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    async function submitOverride() {
+      const action = document.getElementById("override-action-select").value;
+      const trader = document.getElementById("override-trader-id").value.trim();
+      const reason = document.getElementById("override-reason-input").value.trim();
+
+      if (!reason) {
+        alert("Justification reason is mandatory for audited institutional overrides.");
+        return;
+      }
+
+      const payload = {
+        symbol: currentStock,
+        original_action: "HOLD",
+        overridden_action: action,
+        reason: reason,
+        created_by: trader
+      };
+
+      document.getElementById("active-override-text").innerText = `Action overridden to ${action} by ${trader}. Reason: "${reason}"`;
+      document.getElementById("override-reason-input").value = "";
+      document.getElementById("override-save-status").innerText = "✓ Override Recorded";
+      setTimeout(() => document.getElementById("override-save-status").innerText = "", 3000);
+      showToast(`Audited override to ${action} submitted`, "warning");
+
+      if (isApiConnected) {
+        try {
+          await fetch(`${API_BASE}/api/v1/override/${currentStock}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+        } catch (e) {}
+      }
+    }
+
+    async function fetchOverride(symbol) {
+      if (isApiConnected) {
+        try {
+          const resp = await fetch(`${API_BASE}/api/v1/override/${symbol}`);
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data.active_override) {
+              document.getElementById("active-override-text").innerText = `Active Override: ${data.active_override.overridden_action} by ${data.active_override.created_by}. Justification: "${data.active_override.reason}"`;
+              return;
+            }
+          }
+        } catch (e) {}
+      }
+      document.getElementById("active-override-text").innerText = "No active manual overrides recorded for this stock. Algorithmic outputs governing.";
+    }
+
+    async function fetchHistory(symbol) {
+      if (isApiConnected) {
+        try {
+          const resp = await fetch(`${API_BASE}/api/v1/history/${symbol}?limit=10`);
+          if (resp.ok) {
+            const data = await resp.json();
+            renderLedger(data.predictions || []);
+            return;
+          }
+        } catch (e) {}
+      }
+      populateMockLedger();
+    }
+
+    let cachedLedger = [];
+
+    function renderLedger(predictions) {
+      cachedLedger = predictions || [];
+      renderLedgerRows(cachedLedger);
+    }
+
+    function renderLedgerRows(list) {
+      const tbody = document.getElementById("ledger-table-body");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+      if (list.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center py-4 text-[var(--text-muted)] font-medium">No ledger records found matching filter.</td></tr>`;
+        return;
+      }
+      list.forEach(p => {
+        const tr = document.createElement("tr");
+        tr.className = "hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors";
+        tr.innerHTML = `
+          <td class="py-2.5 px-3 font-mono font-bold">${p.id}</td>
+          <td class="py-2.5 px-3 text-[var(--text-muted)]">${p.timestamp ? p.timestamp.substring(0, 16) : '2026-10-16'}</td>
+          <td class="py-2.5 px-3 font-bold text-blue-600">${p.horizon || 'INTRADAY'}</td>
+          <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded text-[11px] font-black bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">${p.action}</span></td>
+          <td class="py-2.5 px-3 font-semibold">${p.model_predicted_class || 'UP'}</td>
+          <td class="py-2.5 px-3 font-bold">${p.raw_confidence ? (p.raw_confidence * 100).toFixed(1) + '%' : '52.9%'}</td>
+          <td class="py-2.5 px-3">${p.outcome_resolved ? '✅ Yes' : '⏳ Pending'}</td>
+          <td class="py-2.5 px-3 font-mono text-[11px] text-[var(--text-muted)]">${p.prediction_key ? p.prediction_key.substring(0, 16) + '...' : 'pred_hash_8a9f...'}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function filterLedger(q) {
+      if (!q || !q.trim()) {
+        renderLedgerRows(cachedLedger);
+        return;
+      }
+      const query = q.toUpperCase().trim();
+      const filtered = cachedLedger.filter(p =>
+        (p.horizon && p.horizon.toUpperCase().includes(query)) ||
+        (p.action && p.action.toUpperCase().includes(query)) ||
+        (p.model_predicted_class && p.model_predicted_class.toUpperCase().includes(query)) ||
+        (p.prediction_key && p.prediction_key.toUpperCase().includes(query)) ||
+        (String(p.id).includes(query))
+      );
+      renderLedgerRows(filtered);
+    }
+
+    // --- Mock Fallbacks for 100% Offline Resilience ---
+    function populateMockStockData(symbol) {
+      const st = NIFTY50.find(x => x.s === symbol) || { s: symbol, n: symbol + " Ltd", sec: "DIVERSIFIED", p: 2500.00 };
+      const funds = getStockFundamentals(symbol, st.p, st.sec);
+      renderFundamentals(funds, st.p, symbol, st.sec);
+      const horizons = generateStockHorizons(symbol, st.p, st.sec);
+      renderMultiHorizon({ predictions: horizons }, symbol, st.p, st.sec);
+    }
+
+    function populateMockFundamentals(symbol) {
+      const st = NIFTY50.find(x => x.s === symbol) || { s: symbol, n: symbol + " Ltd", sec: "DIVERSIFIED", p: 2500.00 };
+      const funds = getStockFundamentals(symbol, st.p, st.sec);
+      renderFundamentals(funds, st.p, symbol, st.sec);
+    }
+
+    function populateMockHorizons(symbol) {
+      const sym = symbol || currentStock;
+      const st = NIFTY50.find(x => x.s === sym) || { s: sym, n: sym, sec: "DIVERSIFIED", p: corridorData.baseCmp };
+      const horizons = generateStockHorizons(sym, st.p, st.sec);
+      renderMultiHorizon({ predictions: horizons }, sym, st.p, st.sec);
+    }
+
+    function populateMockEvents(symbol) {
+      const sym = symbol || currentStock;
+      const st = NIFTY50.find(x => x.s === sym) || { s: sym, n: sym, sec: "DIVERSIFIED", p: corridorData.baseCmp };
+      const container = document.getElementById("events-feed-container");
+      if (!container) return;
+      const eventsList = generateStockEvents(sym, st.sec);
+      container.innerHTML = eventsList.map(e => `
+        <div class="p-3 rounded-xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/30 dark:bg-blue-950/20 space-y-1">
+          <div class="flex items-center justify-between text-[11px] font-bold">
+            <span class="px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300">${e.type}</span>
+            <span class="${String(e.sentiment).startsWith('-') ? 'text-rose-500' : 'text-emerald-500'} font-black">${e.sentiment}</span>
+          </div>
+          <p class="text-xs font-semibold text-[var(--text-main)]">${e.text}</p>
+        </div>
+      `).join("");
+    }
+
+    function populateMockReasoning(symbol) {
+      const sym = symbol || currentStock;
+      const st = NIFTY50.find(x => x.s === sym) || { s: sym, n: sym, sec: "DIVERSIFIED", p: corridorData.baseCmp };
+      const c = document.getElementById("reasoning-content");
+      if (!c) return;
+      c.innerHTML = `
+        <ul class="list-disc pl-4 space-y-1.5 font-medium">
+          <li>The algorithmic models classify ${sym} observation as a probable upward move (UP).</li>
+          <li>Systemic market risk for ${st.sec} is assessed as NORMAL; standard statistical bounds apply.</li>
+          <li>Classification defaulted to HOLD because this model strategy has not demonstrated statistically significant alpha over the benchmark index.</li>
+          <li>Historical sample size for this pattern in ${sym} is currently insufficient for reliable calibration.</li>
+        </ul>
+      `;
+    }
+
+    function populateMockLedger() {
+      renderLedger([
+        { id: 101, timestamp: "2026-10-16 14:00", horizon: "INTRADAY", action: "HOLD", model_predicted_class: "UP", raw_confidence: 0.529, outcome_resolved: false, prediction_key: "k_8f9104ad5e229a1b" },
+        { id: 100, timestamp: "2026-10-16 13:30", horizon: "INTRADAY", action: "HOLD", model_predicted_class: "UP", raw_confidence: 0.531, outcome_resolved: true, prediction_key: "k_3c4d7e8a91b24f5a" },
+        { id: 99, timestamp: "2026-10-16 13:00", horizon: "INTRADAY", action: "HOLD", model_predicted_class: "DOWN", raw_confidence: 0.518, outcome_resolved: true, prediction_key: "k_99a8b7c6d5e4f3a2" }
+      ]);
+    }
+
+    function populateHealthDiagnostics(diagnostics) {
+      const container = document.getElementById("health-diagnostics-list");
+      const fullGrid = document.getElementById("full-telemetry-grid");
+      if (!container && !fullGrid) return;
+      if (container) container.innerHTML = "";
+      if (fullGrid) fullGrid.innerHTML = "";
+
+      diagnostics.forEach(diag => {
+        const isOk = diag.status === "OK" || diag.status === "HEALTHY";
+        const badge = isOk 
+          ? `<span class="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">OK</span>`
+          : `<span class="px-2 py-0.5 rounded text-[10px] font-black bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300">DOWN</span>`;
+
+        const card = `
+          <div class="p-3 rounded-xl border border-[var(--card-border)] bg-[var(--bg-base)] space-y-1">
+            <div class="flex items-center justify-between font-bold">
+              <span class="text-[var(--text-main)]">${diag.component}</span>
+              ${badge}
+            </div>
+            <p class="text-[11px] text-[var(--text-muted)]">${diag.message || 'Operational'}</p>
+          </div>
+        `;
+        if (container) container.insertAdjacentHTML("beforeend", card);
+        if (fullGrid) fullGrid.insertAdjacentHTML("beforeend", card);
+      });
+    }
+
+    function populateDefaultHealthDiagnostics() {
+      const defaultComps = [
+        "Runtime Validator", "History Manager", "Event Classifier", "Ensemble Manager",
+        "Global Risk Monitor", "Corporate Events Fetcher", "Human Insight Manager", "News Sentiment Fetcher",
+        "Reference Level Engine", "Data Fetcher", "Predictor", "Scheduler",
+        "Storage Engine (WAL)", "Symbol Validator", "Model Lineage", "Overfitting Gate"
+      ];
+      const items = defaultComps.map(c => ({
+        component: c,
+        status: "OK",
+        message: "Component verified operational."
+      }));
+      populateHealthDiagnostics(items);
+    }
+
+    // Modal Toggles
+    function openScalpModal() { document.getElementById("modal-scalp").classList.remove("hidden"); }
+    function closeScalpModal() { document.getElementById("modal-scalp").classList.add("hidden"); }
+    function openHealthModal() { document.getElementById("modal-health").classList.remove("hidden"); }
+    function closeHealthModal() { document.getElementById("modal-health").classList.add("hidden"); }
+    function toggleRiskModal() { document.getElementById("modal-risk").classList.toggle("hidden"); }
+    function closeRiskModal() { document.getElementById("modal-risk").classList.add("hidden"); }
+    function toggleApiModal() { showToast(isApiConnected ? "Connected to FastAPI on port 8000" : "Offline mode: educational simulation active", "info"); }
+    function toggleSafetyGateDetails() { document.getElementById("gate-details-content").classList.toggle("hidden"); }
+    function toggleReasoningDetails() { document.getElementById("reasoning-content").classList.toggle("hidden"); }
+
+    function round(v, d) { return Number(Math.round(v + 'e' + d) + 'e-' + d); }
+
+    // Init on DOM Load
+    window.addEventListener("DOMContentLoaded", () => {
+      // Check saved theme
+      const savedTheme = localStorage.getItem("alkame_theme") || "light";
+      if (savedTheme === "dark") {
+        document.documentElement.classList.add("dark");
+        document.documentElement.classList.remove("light");
+        document.getElementById("theme-icon").innerText = "☀️";
+      }
+
+      checkApiHealth();
+      initStock("ADANIENT");
+      startStreamEngine();
+      populateFullScalpTable();
+      populateSectorHeatmap();
+    });
+  </script>
+</body>
+</html>

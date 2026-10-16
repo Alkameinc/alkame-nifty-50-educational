@@ -20,7 +20,8 @@ from ensemble_manager import EnsembleManager
 from execution_simulator import ExecutionSimulator
 from history_manager import HistoryManager
 from runtime_validator import CalibrationResult, EdgeCheckResult, RuntimeValidator
-from universe_provider import UniverseProvider, universe_provider as default_universe_provider
+from universe_provider import UniverseProvider
+from universe_provider import universe_provider as default_universe_provider
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -886,9 +887,9 @@ class Backtester:
             # Filter events point-in-time
             ts_utc = pd.to_datetime(ts, utc=True)
 
-            def _avail(e: dict) -> bool:
+            def _avail(e: dict, cutoff: pd.Timestamp = ts_utc) -> bool:
                 t_val = e.get("timestamp") or e.get("date")
-                return pd.to_datetime(t_val, utc=True) <= ts_utc if t_val else True
+                return pd.to_datetime(t_val, utc=True) <= cutoff if t_val else True
 
             f_corp = [e for e in corporate_events if _avail(e)] if corporate_events else None
             f_news = [e for e in news_articles if _avail(e)] if news_articles else None

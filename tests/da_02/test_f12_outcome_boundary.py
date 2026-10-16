@@ -1,9 +1,9 @@
 import pandas as pd
 
 from history_manager import HistoryManager
+from model_trainer import ModelTrainer
 from predictor import PredictionSignal
 from scheduler import Scheduler
-from model_trainer import ModelTrainer
 
 
 def _bars():

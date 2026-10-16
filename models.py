@@ -39,6 +39,9 @@ class Prediction(Base):
     is_out_of_sample = Column(Boolean, default=False)
     prediction_key = Column(String, index=True, nullable=True)
     feature_schema_hash = Column(String, nullable=True)
+    event_source_status = Column(String, default="EVENTS_AVAILABLE", server_default="EVENTS_AVAILABLE")
+    config_hash = Column(String, nullable=True)
+    reproducibility_bundle = Column(String, nullable=True)
 
     # DA-02 lineage/provenance. Nullable fields keep legacy rows readable while
     # making unknown provenance explicit rather than inventing facts.

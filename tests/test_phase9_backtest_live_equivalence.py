@@ -1,9 +1,8 @@
 # 1. Standard library imports
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 import sys
 import unittest
-from unittest.mock import MagicMock, patch
+from datetime import timedelta
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -12,36 +11,26 @@ if str(PROJECT_ROOT) not in sys.path:
 # 2. Third-party imports
 import numpy as np
 import pandas as pd
-import pytest
 
 # 3. Local imports
 from backtester import Backtester, BacktestResult
 from config import (
-    ALL_HORIZONS,
-    HORIZON_CONFIG,
-    HORIZON_INTRADAY,
     HORIZON_3D,
     HORIZON_30D,
+    HORIZON_INTRADAY,
 )
 from feature_engineer import (
-    CANONICAL_FEATURE_CATALOG,
     FeatureEngineer,
-    FeatureEquivalenceReport,
     verify_feature_equivalence,
 )
 from predictor import (
-    ACTION_BUY,
     ACTION_HOLD,
-    ACTION_SELL,
-    PredictionSignal,
-    Predictor,
 )
 from runtime_validator import (
-    CalibrationResult,
-    EdgeCheckResult,
-    STATUS_EDGE_CONFIRMED,
     STATUS_NO_EDGE,
     STATUS_SUFFICIENT,
+    CalibrationResult,
+    EdgeCheckResult,
 )
 
 

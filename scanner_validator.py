@@ -1,20 +1,18 @@
 # 1. Standard library imports
-from dataclasses import dataclass, field
-from datetime import datetime
 import logging
-from typing import Any, cast
+from dataclasses import dataclass, field
+from typing import Any
 
 # 2. Third-party imports
 import numpy as np
 import pandas as pd
 
 # 3. Local imports
-from config import SECTOR_MAP
 from execution_simulator import (
-    CostScenario,
     PHASE12_COST_SCENARIOS,
     PHASE12_MANDATORY_SCENARIOS,
     STANDARD_COST_SCENARIOS,
+    CostScenario,
 )
 from sector_provider import sector_map_provider
 
@@ -177,7 +175,7 @@ def compute_herfindahl_index(shares: dict[str, float]) -> float:
 class ScannerValidator:
     """
     SCAN-001: Statistical validator for top-N scanner selection.
-    
+
     Evaluates:
       all eligible signals vs selected top-N signals
     Across all 6 mandated dimensions:
@@ -522,7 +520,7 @@ class ScannerValidator:
     ) -> ScannerValidationReport:
         """
         SCAN-001: Evaluates a series of chronological scanner sweeps.
-        
+
         For each sweep:
           - Gathers all eligible signals meeting live safety criteria
           - Ranks by conviction score descending and slices the top-N

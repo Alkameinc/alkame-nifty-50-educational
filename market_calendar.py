@@ -19,6 +19,50 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # 4. NSE Holidays List & Provider
 # ---------------------------------------------------------------------------
+# Official NSE Equity Holidays for 2024
+OFFICIAL_NSE_2024_HOLIDAYS: set[str] = {
+    "2024-01-22",  # Special Holiday - Ram Mandir Prana Pratishtha
+    "2024-01-26",  # Republic Day
+    "2024-03-08",  # Maha Shivratri
+    "2024-03-25",  # Holi
+    "2024-03-29",  # Good Friday
+    "2024-04-11",  # Id-Ul-Fitr (Ramadan Eid)
+    "2024-04-14",  # Dr. Baba Saheb Ambedkar Jayanti
+    "2024-04-17",  # Shri Ram Navami
+    "2024-04-21",  # Shri Mahavir Jayanti
+    "2024-05-01",  # Maharashtra Day
+    "2024-05-20",  # General Parliamentary Elections - Mumbai
+    "2024-06-17",  # Bakri Id
+    "2024-07-17",  # Muharram
+    "2024-08-15",  # Independence Day
+    "2024-10-02",  # Mahatma Gandhi Jayanti
+    "2024-11-01",  # Diwali Laxmi Pujan
+    "2024-11-15",  # Guru Nanak Jayanti
+    "2024-11-20",  # Maharashtra State Assembly Elections
+    "2024-12-25",  # Christmas
+}
+
+# Official NSE Equity Holidays for 2025
+OFFICIAL_NSE_2025_HOLIDAYS: set[str] = {
+    "2025-01-26",  # Republic Day
+    "2025-02-26",  # Maha Shivratri
+    "2025-03-14",  # Holi
+    "2025-03-31",  # Id-Ul-Fitr
+    "2025-04-10",  # Shri Mahavir Jayanti
+    "2025-04-14",  # Dr. Baba Saheb Ambedkar Jayanti
+    "2025-04-18",  # Good Friday
+    "2025-05-01",  # Maharashtra Day
+    "2025-06-07",  # Bakri Id
+    "2025-07-06",  # Muharram
+    "2025-08-15",  # Independence Day
+    "2025-08-27",  # Ganesh Chaturthi
+    "2025-10-02",  # Mahatma Gandhi Jayanti
+    "2025-10-21",  # Diwali Laxmi Pujan
+    "2025-10-22",  # Diwali Balipratipada
+    "2025-11-05",  # Guru Nanak Jayanti
+    "2025-12-25",  # Christmas
+}
+
 # Official NSE Equity Holidays for 2026 (and common annual fixed holidays)
 # Reference: https://www.nseindia.com/resources/exchange-communication-holidays
 OFFICIAL_NSE_2026_HOLIDAYS: set[str] = {
@@ -47,12 +91,11 @@ OFFICIAL_NSE_2026_HOLIDAYS: set[str] = {
 }
 
 NSE_HOLIDAYS_SET: set[str] = {
-    # 2025 (Reference / fallback)
-    "2025-01-26",
-    "2025-08-15",
-    "2025-10-02",
-    "2025-12-25",
-    # 2026 Official NSE Equity Holidays (Full official list)
+    # 2024 Official NSE Equity Holidays
+    *OFFICIAL_NSE_2024_HOLIDAYS,
+    # 2025 Official NSE Equity Holidays
+    *OFFICIAL_NSE_2025_HOLIDAYS,
+    # 2026 Official NSE Equity Holidays
     *OFFICIAL_NSE_2026_HOLIDAYS,
     # 2027 Key fixed holidays
     "2027-01-26",

@@ -1,5 +1,5 @@
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -8,18 +8,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import numpy as np
 import pandas as pd
-import pytest
-from fastapi.testclient import TestClient
 
-from api import app
 from predictor import (
-    ACTION_BUY,
-    ACTION_HOLD,
-    ACTION_SELL,
-    MultiHorizonSignal,
     PredictionContext,
-    PredictionSignal,
-    Predictor,
 )
 from scheduler import Scheduler
 
@@ -51,7 +42,7 @@ def test_api_002_prediction_context_structure():
     stock_df = _build_test_ohlcv(50)
     index_df = _build_test_ohlcv(50, base_price=24000.0)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ctx = PredictionContext(
         symbol="TCS",
         timestamp=now,

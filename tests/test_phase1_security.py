@@ -1,10 +1,8 @@
-import importlib
 import os
-import re
 import sys
 import uuid
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -13,7 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import pytest
 from fastapi.testclient import TestClient
 
-from api import ClientAuth, app, get_current_client, log_audit_event, require_role
+from api import app
 from config import (
     CORS_ALLOW_CREDENTIALS,
     CORS_ALLOWED_HEADERS,
@@ -21,9 +19,7 @@ from config import (
     CORS_ALLOWED_ORIGINS,
     DEFAULT_DEV_ADMIN_KEY,
 )
-from database import SessionLocal
-from global_risk_monitor import GlobalRiskMonitor, ToggleState
-from models import AuditLog, RiskState
+from global_risk_monitor import GlobalRiskMonitor
 
 
 @pytest.fixture

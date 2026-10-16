@@ -134,7 +134,7 @@ CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.environ.get(
         "ALKAME_CORS_ORIGINS",
-        "http://localhost:8501,http://127.0.0.1:8501,http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000",
+        "http://localhost:8501,http://127.0.0.1:8501,http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000,null",
     ).split(",")
     if origin.strip()
 ]
@@ -335,6 +335,22 @@ BAR_HISTORY_PERIOD = "60d"
 DATA_STALENESS_THRESHOLD_MINUTES = 15  # if last bar older than this during market hours -> flag UNSAFE
 DATA_STALENESS_THRESHOLD_TRADING_DAYS = 1  # if last daily bar is more than 1 trading day old -> flag UNSAFE
 
+
+def interval_to_minutes(interval: str) -> int:
+    """Parse a yfinance-style interval string ('5m', '1m', '1h', '1d') into minutes."""
+    import re
+
+    match = re.match(r"^(\d+)([mhd])$", interval.strip().lower())
+    if not match:
+        return 5
+    value, unit = int(match.group(1)), match.group(2)
+    if unit == "d":
+        return value * 375  # ~6.25 trading hours per day (375 minutes)
+    if unit == "h":
+        return value * 60
+    return value
+
+
 # --- Technical event thresholds --------------------------------------------
 ORB_MINUTES = 15  # opening range breakout window
 GAP_THRESHOLD_PCT = 1.0  # % gap vs prior close to flag a gap event
@@ -409,7 +425,7 @@ HORIZON_CONFIG = {
         "bar_interval": "1m",
         "horizon_bars": 2,
         "deadband_pct_default": 0.05,
-        "history_period": "15d",
+        "history_period": "7d",
         "min_training_samples": 250,
         "retrain_cadence_days": 1,
     },

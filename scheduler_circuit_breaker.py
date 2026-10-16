@@ -1,7 +1,7 @@
 # 1. Standard library imports
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
 import logging
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 # 2. Local imports
@@ -99,7 +99,7 @@ class SchedulerCircuitBreaker:
 
     def record_success(self, timestamp: datetime | None = None) -> None:
         """Records a successful scheduler cycle and resets failure count."""
-        now = timestamp or datetime.now(timezone.utc)
+        now = timestamp or datetime.now(UTC)
         self.metrics.consecutive_failures = 0
         self.metrics.successful_cycles += 1
         self.metrics.total_cycles += 1
@@ -114,7 +114,7 @@ class SchedulerCircuitBreaker:
         Records a failed cycle, updates error state, and transitions state machine.
         Trips breaker to HALTED if consecutive failures exceed max_failures.
         """
-        now = timestamp or datetime.now(timezone.utc)
+        now = timestamp or datetime.now(UTC)
         self.metrics.consecutive_failures += 1
         self.metrics.failed_cycles += 1
         self.metrics.total_cycles += 1
@@ -137,7 +137,7 @@ class SchedulerCircuitBreaker:
 
     def trip(self, reason: str, timestamp: datetime | None = None) -> None:
         """Explicitly trips the circuit breaker to HALTED state."""
-        now = timestamp or datetime.now(timezone.utc)
+        now = timestamp or datetime.now(UTC)
         self.state = SCHEDULER_STATE_HALTED
         self.metrics.circuit_breaker_tripped = True
         self.metrics.tripped_at = now

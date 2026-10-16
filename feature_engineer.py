@@ -1,7 +1,6 @@
 # 1. Standard library imports
-from dataclasses import dataclass
 import logging
-import re
+from dataclasses import dataclass
 from typing import Any
 
 # 2. Third-party imports
@@ -37,27 +36,25 @@ from config import (
     VOLUME_SPIKE_LOOKBACK_BARS,
     VOLUME_SPIKE_MULTIPLIER,
     configure_logging,
+    interval_to_minutes,
 )
-from reference_level_engine import ReferenceLevelDeltas
 from magic_numbers_config import (
-    RSI_NEUTRAL_VALUE,
-    DEFAULT_MA_PERIOD,
-    HORIZON_LOOKBACK_MAP,
     DEFAULT_LOOKBACK_PERIOD,
-    RESISTANCE_HIGH_QUANTILE,
-    RESISTANCE_LOW_QUANTILE,
-    SUPPORT_HIGH_QUANTILE,
-    RESISTANCE_BAND_LOWER_THRESHOLD,
-    RESISTANCE_BAND_UPPER_THRESHOLD,
-    TRADING_DAYS_PER_MONTH_APPROX,
-    TRADING_DAYS_PER_QUARTER_APPROX,
+    DEFAULT_MA_PERIOD,
+    DEFAULT_TEST_BARS_PER_DAY,
+    DEFAULT_TEST_DAYS,
+    HORIZON_LOOKBACK_MAP,
+    LONG_TEST_DAYS,
     MUTATION_TEST_PRICE_DELTA,
     MUTATION_TEST_VOLUME_MULTIPLIER,
-    DEFAULT_TEST_DAYS,
-    DEFAULT_TEST_BARS_PER_DAY,
-    LONG_TEST_DAYS,
-    MINUTES_PER_HOUR,
+    RESISTANCE_HIGH_QUANTILE,
+    RESISTANCE_LOW_QUANTILE,
+    RSI_NEUTRAL_VALUE,
+    SUPPORT_HIGH_QUANTILE,
+    TRADING_DAYS_PER_MONTH_APPROX,
+    TRADING_DAYS_PER_QUARTER_APPROX,
 )
+from reference_level_engine import ReferenceLevelDeltas
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -335,14 +332,7 @@ def validate_feature_contract(
 # ---------------------------------------------------------------------------
 # 6. Classes and functions
 # ---------------------------------------------------------------------------
-def _interval_to_minutes(interval: str) -> int:
-    """Parse a yfinance-style interval string ('5m', '1m', '1h') into minutes."""
-    match = re.match(r"^(\d+)([mh])$", interval.strip().lower())
-    if not match:
-        logger.error(f"Could not parse interval '{interval}', defaulting to 5 minutes.")
-        return 5
-    value, unit = int(match.group(1)), match.group(2)
-    return value * MINUTES_PER_HOUR if unit == "h" else value
+_interval_to_minutes = interval_to_minutes
 
 
 def _validate_ohlcv(df: pd.DataFrame, name: str = "df") -> bool:
