@@ -87,7 +87,8 @@ def test_render_dashboard(mock_get_sched, mock_st_local):
     mock_st_local.sidebar.button.return_value = False
 
     def mock_columns(n, *args, **kwargs):
-        return [MagicMock() for _ in range(n)]
+        count = len(n) if isinstance(n, (list, tuple)) else n
+        return [MagicMock() for _ in range(count)]
 
     mock_st_local.columns.side_effect = mock_columns
 
@@ -122,7 +123,8 @@ def test_render_dashboard_refresh(mock_get_sched, mock_st_local):
     mock_st_local.sidebar.button.return_value = True  # refresh_backtest
 
     def mock_columns(n, *args, **kwargs):
-        return [MagicMock() for _ in range(n)]
+        count = len(n) if isinstance(n, (list, tuple)) else n
+        return [MagicMock() for _ in range(count)]
 
     mock_st_local.columns.side_effect = mock_columns
 

@@ -28,6 +28,11 @@ DB_PATH = DB_DIR / "predictor.sqlite3"
 MACRO_CALENDAR_PATH = DATA_DIR / "macro_calendar.csv"
 SECTOR_MAP_PATH = DATA_DIR / "sector_map.csv"
 
+# --- Regulatory Compliance & Operating Mode (SEBI Guidelines) ----------
+OPERATING_MODE = os.environ.get("OPERATING_MODE", "MARKET_INTELLIGENCE_EDUCATIONAL").upper()
+SEBI_COMPLIANCE_MODE = True
+PREDICTIONS_ENABLED = False  # Disabled for public release & SEBI compliance
+
 REQUIRED_DIRS = [DATA_DIR, CACHE_DIR, MODELS_DIR, LOGS_DIR, DB_DIR]
 
 

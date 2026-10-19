@@ -13,6 +13,8 @@ async function handleResponse(res) {
   return res.json();
 }
 
+export const fetchInsights = (symbol) => fetch(`${API_BASE}/insights/${encodeURIComponent(symbol)}`, { headers: headers() }).then(handleResponse);
+export const fetchMarketBreadth = () => fetch(`${API_BASE}/market-breadth`, { headers: headers() }).then(handleResponse);
 export const fetchSignal   = (symbol) => fetch(`${API_BASE}/signal/${encodeURIComponent(symbol)}`, { headers: headers() }).then(handleResponse);
 export const fetchSymbols  = ()       => fetch(`${API_BASE}/symbols`, { headers: headers() }).then(handleResponse);
 export const fetchHealth   = ()       => fetch(`/healthz`, { headers: headers() }).then(handleResponse);

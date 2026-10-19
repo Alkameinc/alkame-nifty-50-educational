@@ -112,274 +112,129 @@ def render_dashboard() -> None:
     st.set_page_config(page_title=PAGE_TITLE, layout="wide")
     st.title(PAGE_TITLE)
     st.caption(
-        "Institutional-grade market intelligence for the NIFTY 50 — decision support only. "
-        "You place every trade yourself, through your own broker."
+        "Institutional-grade Market Intelligence for the NIFTY 50 — Descriptive Analytics & Research Only."
     )
 
-    scheduler = get_scheduler()
-    history_manager = get_history_manager()
+    # Statutory Compliance Notice
+    st.warning(
+        "⚠️ **STATUTORY REGULATORY & EDUCATIONAL NOTICE (SEBI COMPLIANT)**: "
+        "Alkame Nifty 50 operates strictly as an educational and informational research platform. "
+        "No investment advice, trading recommendations, price targets, or stop-loss calls are provided. "
+        "All data and indicators represent mathematical derivations, public filings, and historical prices."
+    )
+
+    from insights_engine import insights_engine
     human_insight_manager = get_human_insight_manager()
 
     symbol = st.sidebar.selectbox("Select stock", NIFTY50_SYMBOLS)
-    refresh_backtest = st.sidebar.button("Refresh backtest / live-worthiness")
     st.sidebar.divider()
-    st.sidebar.caption(
-        "A HOLD with a clear reason is a successful output, not a failure. " "Downside is always shown before upside."
-    )
+    st.sidebar.caption("Descriptive market data and point-in-time corporate event tracking.")
 
-    # --- Global risk banner: always visible, never silently applied ---
-    try:
-        risk_monitor = scheduler.predictor.global_risk_monitor
-        risk_reading = risk_monitor.compute_composite_risk()
-        toggle_state = risk_monitor.get_toggle_state()
-        banner_style = risk_banner_style(risk_reading.risk_level)
-        getattr(st, banner_style)(risk_reading.banner_message)
+    # --- Fetch Market Intelligence Snapshot ---
+    with st.spinner(f"Compiling intelligence snapshot for {symbol}..."):
+        try:
+            snapshot = insights_engine.get_stock_insights(symbol)
+        except Exception as e:
+            st.error(f"Could not load market insights for {symbol}: {e}")
+            return
 
-        if risk_reading.risk_level != "NORMAL":
-            enable = st.checkbox("Enable risk-adjusted predictions", value=toggle_state.enabled)
-            if enable != toggle_state.enabled:
-                reason = st.text_input("Reason for this change", value="Manual toggle from dashboard")
-                risk_monitor.set_toggle(enable, reason=reason, current_level=risk_reading.risk_level)
-                st.rerun()
-    except Exception as e:
-        logger.error(f"Failed rendering global risk banner: {e}")
-        st.warning("Could not compute the global risk reading right now.")
+    # --- Global Risk Banner ---
+    macro_ctx = snapshot.macro_context
+    risk_level = macro_ctx.get("composite_risk_level", "NORMAL")
+    banner_msg = macro_ctx.get("banner_message", f"Systemic Market Risk: {risk_level}")
+    getattr(st, risk_banner_style(risk_level))(banner_msg)
 
-    st.divider()
+    # --- Header Metrics & Valuation ---
+    cmp = snapshot.cmp
+    day_chg = snapshot.day_change_pct
+    val = snapshot.valuation
+    tech = snapshot.technical
 
-    # --- Fetch data for selected symbol ---
-    yf_ticker = to_yfinance_ticker(symbol)
-    with st.spinner(f"Fetching data for {symbol}..."):
-        raw_stock = scheduler.data_fetcher.fetch_ohlcv(yf_ticker, allow_stale=True)
-        raw_index = scheduler.data_fetcher.fetch_nifty_index(allow_stale=True)
-
-    stock_df = getattr(raw_stock, "df", raw_stock)
-    index_df = getattr(raw_index, "df", raw_index)
-
-    if (
-        stock_df is None
-        or index_df is None
-        or not isinstance(stock_df, pd.DataFrame)
-        or not isinstance(index_df, pd.DataFrame)
-    ):
-        st.error(
-            "Could not fetch live market data right now (network issue or data provider unavailable). "
-            "No signal can be safely shown without real data."
-        )
-        return
-
-    if refresh_backtest:
-        with st.spinner("Running backtest to refresh live-worthiness — this can take a minute..."):
-            scheduler.refresh_live_worthiness(symbol, stock_df, index_df)
-        st.success("Live-worthiness refreshed.")
-
-    scheduler.resolve_pending_outcomes(symbol, stock_df)
-    event_context = scheduler.get_event_context(symbol)
-    cycle_res = scheduler.run_one_cycle_for_symbol(
-        symbol,
-        stock_df,
-        index_df,
-        macro_events=event_context.macro_events,
-        corporate_events=event_context.corporate_events,
-        news_articles=event_context.news_articles,
-    )
-    signal = getattr(cycle_res, "signal", cycle_res)
-
-    if signal is None:
-        st.error("Signal could not be generated for this stock right now.")
-        return
-
-    # --- Fundamental Metrics & Data Points ---
-    with st.spinner(f"Loading fundamentals for {symbol}..."):
-        fetcher = getattr(scheduler, "data_fetcher", None) or DataFetcher()
-        if hasattr(fetcher, "fetch_stock_fundamentals"):
-            fundamentals = fetcher.fetch_stock_fundamentals(yf_ticker)
-        else:
-            fundamentals = DataFetcher().fetch_stock_fundamentals(yf_ticker)
-
-    cmp = stock_df["Close"].iloc[-1] if not stock_df.empty else 0.0
-    st.subheader(f"📊 {symbol} Key Data Points & Valuation")
-
-    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
-    with col_f1:
-        st.metric("Current Price (CMP)", f"₹{cmp:,.2f}")
-        st.metric("P/E Ratio", str(fundamentals.get("pe_ratio", "N/A")))
-    with col_f2:
-        st.metric("Market Cap", str(fundamentals.get("market_cap", "N/A")))
-        st.metric("Price / Book (P/B)", str(fundamentals.get("price_to_book", "N/A")))
-    with col_f3:
-        st.metric("52-Week High", str(fundamentals.get("fifty_two_week_high", "N/A")))
-        st.metric("Trailing EPS", str(fundamentals.get("eps", "N/A")))
-    with col_f4:
-        st.metric("52-Week Low", str(fundamentals.get("fifty_two_week_low", "N/A")))
-        st.metric("Dividend Yield", str(fundamentals.get("dividend_yield", "N/A")))
-
-    st.caption(f"Sector: **{fundamentals.get('sector', 'N/A')}** | Industry: **{fundamentals.get('industry', 'N/A')}**")
-
-    # Valuation Evaluation Card (Underpriced / Fair Priced / Overpriced)
-    val_status = str(fundamentals.get("valuation_status", "FAIR PRICED"))
-    val_badge = str(fundamentals.get("valuation_badge", "🟡 FAIR PRICED"))
-    val_rationale = str(fundamentals.get("valuation_rationale", "Valuation metrics evaluated against baseline norms."))
-
-    val_box_type = "info"
-    if "UNDERPRICED" in val_status:
-        st.success(f"**Valuation Status: {val_badge}**\n\n{val_rationale}")
-    elif "OVERPRICED" in val_status:
-        st.warning(f"**Valuation Status: {val_badge}**\n\n{val_rationale}")
-    else:
-        st.info(f"**Valuation Status: {val_badge}**\n\n{val_rationale}")
-
-    st.divider()
-
-    # Extract primary/intraday prediction signal if MultiHorizonSignal is returned
-    if isinstance(signal, MultiHorizonSignal) and signal.signals:
-        multi_sig: MultiHorizonSignal | None = signal
-        sig_map = signal.signals
-        active_signal: PredictionSignal = sig_map.get(signal.primary_horizon) or next(iter(sig_map.values()))
-    elif isinstance(signal, PredictionSignal):
-        multi_sig = None
-        active_signal = signal
-    else:
-        st.error("Invalid signal format returned.")
-        return
-
-    # --- Signal panel: downside ALWAYS before upside ---
-    st.subheader(f"{symbol} — {format_action_label(active_signal.action)}")
-    st.caption(format_confidence_display(active_signal))
-
-    col_sig1, col_sig2, col_sig3 = st.columns(3)
-    with col_sig1:
-        st.metric("Active Horizon", active_signal.horizon)
-    with col_sig2:
-        tgt_txt = f"₹{active_signal.target_price:,.2f}" if active_signal.target_price is not None else "N/A"
-        tgt_delta = (
-            f"{((active_signal.target_price - cmp) / cmp) * 100:+.1f}%"
-            if active_signal.target_price and cmp > 0
-            else None
-        )
-        st.metric("Expected Target Price", tgt_txt, delta=tgt_delta)
-    with col_sig3:
-        stop_txt = f"₹{active_signal.stop_loss:,.2f}" if active_signal.stop_loss is not None else "N/A"
-        stop_delta = (
-            f"{((active_signal.stop_loss - cmp) / cmp) * 100:+.1f}%" if active_signal.stop_loss and cmp > 0 else None
-        )
-        st.metric("Risk Threshold / Stop Loss", stop_txt, delta=stop_delta, delta_color="inverse")
-
-    if active_signal.suppressed:
-        st.info(
-            f"**Safety Gate Active**: The raw AI model leans **{active_signal.model_predicted_class}** (confidence: {active_signal.raw_confidence:.1%}), but the final recommendation is held at **HOLD** because runtime safety checks (backtest alpha edge or historical calibration) must be proven before risking capital."
-        )
-        if active_signal.suppression_reasons:
-            with st.expander("Why was this held? (Safety Gate Details)", expanded=True):
-                for reason in active_signal.suppression_reasons:
-                    st.write(f"• {reason}")
-
-    if multi_sig and len(multi_sig.signals) > 1:
-        st.markdown("### ⏱️ Multi-Horizon Forecasts & Expected Price Targets")
-
-        # Build clean structured summary table for all horizons
-        horizon_rows = []
-        for h, h_sig in multi_sig.signals.items():
-            action_badge = format_action_label(h_sig.action)
-            lean_badge = (
-                f"{h_sig.model_predicted_class} ↗"
-                if h_sig.model_predicted_class == "UP"
-                else (
-                    f"{h_sig.model_predicted_class} ↘"
-                    if h_sig.model_predicted_class == "DOWN"
-                    else f"{h_sig.model_predicted_class} ↔"
-                )
-            )
-            target_str = f"₹{h_sig.target_price:,.2f}" if h_sig.target_price is not None else "N/A"
-            stop_str = f"₹{h_sig.stop_loss:,.2f}" if h_sig.stop_loss is not None else "N/A"
-            expected_change = ""
-            if h_sig.target_price is not None and cmp > 0:
-                chg = ((h_sig.target_price - cmp) / cmp) * 100.0
-                expected_change = f" ({chg:+.1f}%)"
-
-            horizon_rows.append(
-                {
-                    "Horizon": h,
-                    "Action": action_badge,
-                    "Model Lean": lean_badge,
-                    "Expected Target": f"{target_str}{expected_change}",
-                    "Risk Threshold / Stop": stop_str,
-                    "AI Confidence": f"{h_sig.raw_confidence:.0%}",
-                    "Safety Gate": (
-                        "Safe to Trade"
-                        if h_sig.is_safe_to_trade_live and not h_sig.suppressed
-                        else "Held (Educational)"
-                    ),
-                }
-            )
-
-        st.dataframe(pd.DataFrame(horizon_rows), use_container_width=True, hide_index=True)
-
-    st.markdown("**Downside — read this first:**")
-    st.write(active_signal.downside_summary)
-    st.markdown("**Upside:**")
-    st.write(active_signal.upside_summary)
-
-    with st.expander("Full reasoning"):
-        for r in active_signal.reasoning:
-            st.write(f"- {r}")
-
-    if active_signal.contributing_events:
-        st.markdown("**Events tagged as affecting this stock:**")
-        st.dataframe(pd.DataFrame(format_events_for_table(active_signal.contributing_events)), use_container_width=True)
-    else:
-        st.caption("No specific events currently tagged as affecting this stock.")
-
-    st.divider()
-
-    # --- Human insight panel ---
-    st.subheader("Your notes & overrides")
-    col1, col2 = st.columns(2)
+    st.subheader(f"📊 {symbol} Overview & Valuation Matrix")
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
-        note_text = st.text_area("Add a note")
-        if st.button("Save note") and note_text.strip():
-            human_insight_manager.add_note(symbol, note_text, related_action=active_signal.action)
-            st.success("Note saved.")
-        notes = human_insight_manager.get_notes(symbol, limit=5)
-        if notes:
-            st.caption("Recent notes:")
-            for n in notes:
-                st.caption(f"- {n.timestamp[:16]}: {n.note_text}")
+        st.metric("Current Market Price (CMP)", f"₹{cmp:,.2f}", delta=f"{day_chg:+.2f}%")
+        st.metric("P/E Ratio", str(val.get("pe_ratio", "N/A")))
     with col2:
-        default_idx = OVERRIDE_ACTIONS.index(active_signal.action) if active_signal.action in OVERRIDE_ACTIONS else 2
-        override_action = st.selectbox("Override action", OVERRIDE_ACTIONS, index=default_idx)
-        override_reason = st.text_input("Reason for override (required)")
-        if st.button("Apply override"):
-            if not override_reason.strip():
-                st.error("A reason is required to record an override.")
-            else:
-                human_insight_manager.apply_override_to_signal(active_signal, override_action, override_reason)
-                st.success(f"Override recorded: {active_signal.action} -> {override_action}")
+        st.metric("Market Cap", str(val.get("market_cap", "N/A")))
+        st.metric("Price / Book (P/B)", str(val.get("price_to_book", "N/A")))
+    with col3:
+        st.metric("52-Week High", f"₹{tech.fifty_two_week_high:,.2f}" if tech.fifty_two_week_high else "N/A", delta=f"{tech.pct_from_52w_high:+.1f}% from high" if tech.pct_from_52w_high else None)
+        st.metric("Trailing EPS", str(val.get("eps", "N/A")))
+    with col4:
+        st.metric("52-Week Low", f"₹{tech.fifty_two_week_low:,.2f}" if tech.fifty_two_week_low else "N/A", delta=f"{tech.pct_from_52w_low:+.1f}% from low" if tech.pct_from_52w_low else None)
+        st.metric("Dividend Yield", str(val.get("dividend_yield", "N/A")))
+
+    st.caption(f"Sector: **{val.get('sector', 'N/A')}** | Industry: **{val.get('industry', 'N/A')}**")
+    st.divider()
+
+    # --- Technical Indicators & Reference Levels ---
+    st.subheader(f"🧭 Technical Posture & Structural Reference Levels")
+    t_col1, t_col2, t_col3, t_col4 = st.columns(4)
+    with t_col1:
+        st.metric("RSI (14-Day)", f"{tech.rsi_14:.1f}")
+        st.caption(f"Condition: **{tech.rsi_status}**")
+    with t_col2:
+        st.metric("Volume vs 20D Avg", f"{tech.volume_ratio:.2f}x" if tech.volume_ratio else "N/A")
+        st.caption(f"Activity: **{'🔥 Volume Surge' if tech.volume_surge else 'Normal Flow'}**")
+    with t_col3:
+        st.metric("Trend Posture", tech.trend_posture)
+        st.caption(f"EMA 20: ₹{tech.ema_20} | EMA 50: ₹{tech.ema_50}")
+    with t_col4:
+        st.metric("VWAP Benchmark", f"₹{tech.vwap:,.2f}" if tech.vwap else "N/A")
+        st.caption(f"Position: **{tech.vwap_relation}**")
+
+    # Camarilla Reference Levels Expander
+    with st.expander("📐 View Camarilla & Standard Pivot Points (Intraday Reference)", expanded=True):
+        p_c1, p_c2 = st.columns(2)
+        with p_c1:
+            st.markdown("**Camarilla Pivot Levels**")
+            cam = tech.pivots_camarilla
+            st.write(f"- Resistance (H4): ₹{cam.get('H4', 'N/A')} | (H3): ₹{cam.get('H3', 'N/A')}")
+            st.write(f"- Support (L3): ₹{cam.get('L3', 'N/A')} | (L4): ₹{cam.get('L4', 'N/A')}")
+        with p_c2:
+            st.markdown("**Prior Day Baseline**")
+            st.write(f"- High: ₹{tech.prior_day_high:,.2f} | Low: ₹{tech.prior_day_low:,.2f}")
+            st.write(f"- Close: ₹{tech.prior_day_close:,.2f}")
 
     st.divider()
 
-    # --- Performance / calibration panel ---
-    st.subheader("Performance & calibration")
-    snapshot = scheduler.get_cached_live_worthiness(symbol)
-    if snapshot:
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Backtest alpha vs NIFTY", f"{snapshot.edge_check_result.alpha_pct:.2f}%")
-        c2.metric("Calibration status", snapshot.calibration_result.status)
-        ece = snapshot.calibration_result.expected_calibration_error
-        c3.metric("Calibration error (ECE)", f"{ece:.3f}" if ece is not None else "N/A")
+    # --- Corporate Events & Announcements ---
+    st.subheader("📡 Corporate Announcements & Filings (NSE)")
+    if snapshot.corporate_events:
+        st.dataframe(pd.DataFrame(snapshot.corporate_events), use_container_width=True)
     else:
-        st.info("No backtest run yet for this symbol — click 'Refresh backtest / live-worthiness' in the sidebar.")
+        st.info("No corporate filings or board meetings recorded in the current window.")
+
+    # --- News Sentiment & Qualitative Intelligence ---
+    st.subheader("📰 Public News Sentiment & Polarity")
+    sentiment = snapshot.news_sentiment
+    s_col1, s_col2 = st.columns([1, 3])
+    with s_col1:
+        st.metric("Sentiment Polarity", sentiment.get("sentiment_label", "NEUTRAL"))
+        st.caption(f"Score: {sentiment.get('sentiment_score', 0.0):+.2f} ({sentiment.get('articles_analyzed', 0)} articles)")
+    with s_col2:
+        headlines = sentiment.get("recent_headlines", [])
+        if headlines:
+            for item in headlines:
+                st.write(f"• **{item.get('title')}** ({item.get('source')})")
+        else:
+            st.caption("No recent headlines indexed for this ticker.")
 
     st.divider()
 
-    # --- Historical predictions ---
-    st.subheader("Recent prediction history")
-    history = history_manager.get_predictions(symbol, limit=20)
-    df = prediction_records_to_dataframe(history)
-    if not df.empty:
-        st.dataframe(df, use_container_width=True)
-    else:
-        st.caption("No prediction history yet for this symbol.")
+    # --- Institutional Analyst Research Notes ---
+    st.subheader("📝 Analyst Research Notes")
+    note_text = st.text_area("Record research note or event observation:")
+    if st.button("Save Research Note") and note_text.strip():
+        human_insight_manager.add_note(symbol, note_text, related_action="OBSERVATION")
+        st.success("Research note logged successfully.")
+
+    notes = human_insight_manager.get_notes(symbol, limit=5)
+    if notes:
+        st.caption("Recent logged notes:")
+        for n in notes:
+            st.caption(f"- {n.timestamp[:16]}: {n.note_text}")
 
 
 # ---------------------------------------------------------------------------

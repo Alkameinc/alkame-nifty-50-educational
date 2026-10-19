@@ -1,404 +1,216 @@
-# Alkame-Nifty50 — Educational Repository
+# Alkame-Nifty50 — Educational Market Intelligence Platform
 
-> **DBERT Labs Internship 2026**
-> **Domain:** Data Analyst
-> **Program Details:** https://dbert.online · https://internship.dbert.online
-> This repository is a component of the DBERT Labs structural training track. All modifications, upgrade branches, and submitted pull requests are developed under professional educational guidelines.
+> **DBERT Labs Internship 2026**  
+> **Domain:** Quantitative Research & Data Analytics  
+> **Program Details:** https://dbert.online · https://internship.dbert.online  
+> This repository is a component of the DBERT Labs structural training track. All modifications, architectural designs, and research tools are developed under professional educational guidelines.
 
-**NIFTY 50 Intraday Market Intelligence Engine**
-*Human-in-the-loop · Calibration-gated · Event-aware · Scalping-ready · API-first*
-
-> ⚠️ **Educational Repository** — This project is shared for learning purposes only. It does not constitute financial advice. Read the [Legal & Regulatory Notice](#legal--regulatory-notice) section before any use.
+**NIFTY 50 Intraday Market Intelligence & Research Cockpit**  
+*Educational · Multi-source Intelligence · Volume & Momentum Radar · SEBI Compliant · API-first*
 
 ---
 
-## Overview
-
-Alkame-Nifty50 is an open-source, research-grade intraday signal engine for the NIFTY 50 index. It is built around four core design principles:
-
-- **Risk-first**: `HOLD` with a reason is a valid — and often correct — output.
-- **Calibration before confidence**: No signal confidence is ever surfaced until runtime calibration checks pass.
-- **Human-in-the-loop**: Trader overrides, notes, and feedback are first-class citizens of the pipeline.
-- **Modular and API-first**: Every major component is independently testable and externally accessible via a REST API layer.
-
-The full methodology, regulatory framework, and system architecture are governed by the [`ENGINEERING_CONTRACT.md`](./ENGINEERING_CONTRACT.md). Master verification reports and remediation logs are archived in [`docs/audits/`](./docs/audits/).
-
-This project is built and maintained by interns and mentors of the **[DBERT AI Internship Program](https://internship.dbert.online)** — see the [DBERT Internship Program](#dbert-internship-program) section below to get involved.
+> [!IMPORTANT]
+> ### ⚖️ Statutory Legal & Regulatory Notice (SEBI Compliance)
+> **This platform is strictly for academic, educational, and informational research purposes.**
+> In accordance with the **Securities and Exchange Board of India (Research Analysts) Regulations, 2014** and **SEBI (Investment Advisers) Regulations, 2013**:
+> - Alkame-Nifty50 **does NOT** provide any investment advice, trading tips, or financial recommendations.
+> - Alkame-Nifty50 **does NOT** issue directional `BUY` or `SELL` trade calls, projected price targets, or algorithmic stop-loss recommendations.
+> - All outputs, visual corridors, pivot levels, and technical indicators are mathematical computations derived purely from publicly available historical data and regulatory filings.
+> - Any directional predictive modeling or machine learning weight sets are strictly quarantined locally for offline computational research (`_local_research/`) and are never distributed or served publicly.
+> - Securities trading and derivatives involve substantial financial risk. Users must consult a SEBI-registered Investment Adviser before making any financial decisions.
 
 ---
 
-## What's New — Recent Improvements
+## 🏛️ Overview
 
-This release significantly expands the system beyond the original signal pipeline into an institutional research platform.
+Alkame-Nifty50 is an open-source, research-grade **Market Intelligence & Quantitative Analytics Platform** for the National Stock Exchange (NSE) NIFTY 50 universe. 
 
-### 🎥 Product Walkthrough & Demo Video
-A full, captioned institutional video walkthrough of the complete system and multi-screen UI is available in [`alkame_nifty50_demo.mp4`](./alkame_nifty50_demo.mp4).
+Rather than issuing speculative price predictions or trading recommendations, Alkame unifies high-frequency market data, corporate filings, macro indicators, and factual technical metrics into a clean, institutional-grade analytical cockpit:
 
-### 🆕 Institutional Research Suite Frontend (`alkame_dashboard.html`)
-An enterprise-grade, dual-theme (Dark & Light mode) multi-screen research cockpit accessible at `http://localhost:8000/dashboard` or as a standalone file:
-- **Phase 1-3 Macro-Micro Continuity Forecasting**: Temporal continuity connecting Historical Realized Data ➔ NOW Decision Pivot (T=0) ➔ Probabilistic Scenario Funnels (Bullish, Central Expectation, Downside Tail) dynamically scaled to constituent price levels with dynamic ATR, RSI, Bollinger %B, and VWAP.
-- **Live Prediction Corridor Canvas**: Auto-streaming multi-horizon prediction bounds plotted against incoming market ticks with 2s, 5s, 10s cadence controls.
-- **Multi-Horizon Forecast Matrix**: Simultaneous predictive modeling across 8 distinct horizons (1m, 5m, 15m, 30m, 1h, 1d, 1w, 1M) with dual-boundary safety gates.
-- **16-Subsystem Telemetry Matrix**: Live health diagnostic status for Ensemble Manager, Event Classifier, Corporate Events Fetcher, Data Fetcher, and Storage engines.
-- **Intraday Scalping Radar & Universe Scanner**: Real-time constituent sweeps with volume anomalies and multi-factor ranking.
-- **Macro Shock & Risk Stress Simulator**: Real-time sensitivity modeling against Brent Crude shocks, India VIX spikes, and USD/INR shifts.
-- **Institutional Task Desk & Audit Log**: Persistent task management with priority chips (P0, P1, P2) and analyst notes.
-
-![Alkame Institutional Dashboard](docs/images/dashboard_night_overview.png)
-
-### 🆕 REST API Layer (`api.py`)
-A FastAPI-based REST API now exposes core engine capabilities over HTTP. Enables integration with external dashboards, bots, and automation workflows without touching internal Python code directly.
-
-### 🆕 Scalping Engine (`scalping.py`)
-Dedicated short-horizon scalping logic for high-frequency intraday opportunities on NIFTY 50 constituents. Works alongside the main prediction pipeline with its own risk guardrails.
-
-### 🆕 Market Scanner (`scanner.py`)
-A multi-stock scanner that sweeps all NIFTY 50 constituents on a configurable cadence and surfaces top-ranked opportunities based on ensemble signal strength, volume anomalies, and event context.
-
-### 🆕 Position Planner (`position_planner.py`)
-Translates raw BUY/SELL signals into actionable position plans — entry price, target, stop-loss, and position sizing — based on configurable capital and risk parameters.
-
-### 🆕 Narrative Builder (`narrative_builder.py`)
-Generates human-readable, plain-English summaries of each signal decision explaining *why* the engine recommends BUY, SELL, or HOLD — covering technical factors, macro events, sentiment, and calibration status.
-
-### 🆕 Reference Level Engine (`reference_level_engine.py`)
-Computes and maintains dynamic support/resistance reference levels (weekly pivots, prior-day high/low, VWAP anchors) used by the predictor, position planner, and dashboard.
-
-### 🆕 System Health Monitor (`health_monitor.py`)
-Always-on health checks tracking data feed freshness, model staleness, API quota consumption, and pipeline latency. Surfaces warnings before failures cascade into bad signals.
-
-### 🆕 Automation Directory (`automation/`)
-Shell and Python scripts for unattended scheduled operation — cron-friendly wrappers around `scheduler.py`, log rotation helpers, and restart-on-failure scripts for always-on Linux/EC2 deployment.
-
-### ⚙️ Improved Scheduler (`scheduler.py`)
-Major expansion: now coordinates scanner sweeps, health monitoring, scalping runs, and reference level updates — not just the core prediction loop. Supports graceful shutdown and configurable symbol subsets.
-
-### ⚙️ Enhanced Predictor (`predictor.py`)
-Now integrates reference levels and narrative generation directly into the output object. Each prediction result includes structural context and a human-readable explanation alongside the BUY/SELL/HOLD signal.
-
-### ⚙️ Expanded Feature Engineer (`feature_engineer.py`)
-Additional technical indicators including volume-weighted signals and multi-timeframe momentum features. Strict no-lookahead discipline maintained across all new additions.
-
-### ⚙️ Richer History Manager (`history_manager.py`)
-Expanded schema captures position plan data, narrative summaries, and health snapshots alongside predictions — improving post-hoc analysis and outcome tracking significantly.
+- **Descriptive Over Prescriptive**: Purely factual indicators (RSI-14, 20/50/200 EMAs, Bollinger Bands, ATR, VWAP, Camarilla pivots) without directional bias.
+- **Multi-Source Context**: Integrates NSE regulatory announcements, corporate board meetings, RBI monetary policy events, global risk drivers (India VIX, Crude Oil, USD/INR), and news sentiment.
+- **Market Breadth & Volume Radar**: Live constituent sweeps tracking volume surges vs. 20-day averages, advance/decline ratios, and 52-week proximity.
+- **Offline Research Isolation**: Algorithmic models and backtesting harnesses are quarantined in `_local_research/` (excluded from git) to maintain a clean educational open-source repository.
+- **Triple-Frontend Architecture**:
+  1. **Institutional Cockpit HTML** (`alkame_dashboard.html`): High-contrast Dark/Light trading desk UI with zero build dependencies.
+  2. **Modern React Vite Web App** (`frontend/`): Responsive modular SPA with Tailwind CSS, Lucide icons, and real-time polling.
+  3. **Streamlit Analytics Studio** (`app.py`): Rapid desktop research tool for interactive filtering and exploratory analysis.
 
 ---
 
-## Project Structure
+## 🚀 Key Features
 
-| File / Directory | Purpose |
-|---|---|
-| `config.py` | Central configuration — tickers, sectors, thresholds, paths |
-| `macro_calendar.py` | RBI/Budget/election/festive calendar (human-maintained CSV) |
-| `data_fetcher.py` | yfinance OHLCV data with retry + cache fallback |
-| `corporate_events_fetcher.py` | NSE corporate announcements, board meetings, block/bulk deals |
-| `news_sentiment_fetcher.py` | marketaux + Google News RSS sentiment |
-| `event_classifier.py` | Unifies all events, tags scope (MARKET / SECTOR / STOCK) |
-| `global_risk_monitor.py` | Always-on composite risk score + human-gated toggle |
-| `reference_level_engine.py` | Dynamic support/resistance levels, VWAP anchors, pivot points |
-| `feature_engineer.py` | Technical indicators with multi-timeframe momentum; strict no-lookahead |
-| `model_trainer.py` | Per-stock direction classifier, time-based split |
-| `ensemble_manager.py` | Multi-model soft-voting ensemble with agreement scoring |
-| `runtime_validator.py` | Calibration + edge-vs-NIFTY checks — the safety gate |
-| `predictor.py` | Combines everything into one final BUY / SELL / HOLD signal with narrative |
-| `position_planner.py` | Converts signals into entry/target/stop-loss/position-size plans |
-| `scalping.py` | Short-horizon scalping signals for intraday high-frequency opportunities |
-| `scanner.py` | Multi-stock sweep; ranks NIFTY 50 constituents by signal strength |
-| `narrative_builder.py` | Generates plain-English signal explanations for each prediction |
-| `human_insight_manager.py` | Trader notes, overrides, feedback (SQLite) |
-| `history_manager.py` | Persists predictions, events, plans, narratives; resolves outcomes (SQLite) |
-| `health_monitor.py` | Data feed freshness, model staleness, API quota, pipeline latency checks |
-| `backtester.py` | Historical replay with slippage/costs, real alpha calculation |
-| `scheduler.py` | Orchestrates the full pipeline on a market-hours loop |
-| `api.py` | FastAPI REST API — signals, scanner results, and history over HTTP |
-| `alkame_dashboard.html` | Institutional Multi-Screen Research Suite (Live charts, risk simulator, telemetry, tasks) |
-| `alkame_nifty50_demo.mp4` | Full-feature product video walkthrough demonstrating end-to-end capabilities |
-| `ENGINEERING_CONTRACT.md` | Core engineering contract & 18 architectural invariants |
-| `docs/audits/` | Master verification reports, release gate audits, and remediation logs |
-| `market_calendar.py` | NSE trading calendar & holiday scheduler |
-| `app.py` | Streamlit dashboard |
-| `train_all.py` | Batch training script for all NIFTY 50 models |
-| `automation/` | Cron wrappers, log rotation, restart-on-failure scripts for server deployment |
+### 1. Unified Market Insights Engine (`insights_engine.py`)
+Central analytical service producing structured market intelligence (`GET /api/v1/insights/{symbol}`):
+- **Technical Posture**: Factual RSI-14, moving average alignments (EMA 20, EMA 50, SMA 200), Bollinger Band %B & bandwidth, ATR volatility.
+- **Mathematical Reference Channels**: Camarilla pivot floors and ceilings (H3, H4, L3, L4), standard floor pivots (P, R1, S1, R2, S2), and prior session high/low bounds.
+- **Fundamentals & Valuation**: Trailing P/E, Price-to-Book, Market Cap, EPS, and Dividend Yield.
+- **Corporate Filings**: Direct feed from NSE regulatory announcements, financial results schedules, and board actions.
+- **Macro Risk Matrix**: RBI repo corridor, Union Budget schedule, and global contagion monitors (Brent crude, USD/INR, India VIX).
+- **News Polarity**: Factual sentiment classification across audited financial news feeds.
+
+### 2. Market Breadth & Intraday Volume Radar (`GET /api/v1/market-breadth`)
+Sweeps all 50 NIFTY constituents to track real-time liquidity and momentum without trade signals:
+- Advance / Decline / Unchanged constituent distribution.
+- Volume surges where current session volume exceeds $1.5\times$ 20-day average.
+- Proximity percentages to 52-week high and 52-week low.
+- Constituent sorting by momentum and volume anomaly.
+
+### 3. Institutional Research Cockpit (`alkame_dashboard.html`)
+An enterprise dashboard designed for data analysts and institutional researchers:
+- **Regime Posture Gate**: Descriptive summary of RSI, volume ratio, and Camarilla channels.
+- **Multi-Timeframe Technical Matrix**: Intraday to multi-week trend and moving average posture.
+- **Live Market Stream & Volatility Channels**: High-refresh canvas plotting real-time prices within VWAP and Camarilla boundaries.
+- **System Diagnostics Matrix**: 16-subsystem health telemetry verifying data provider latency, database connections, and cache states.
+- **Audit Ledger**: Comprehensive historical log with cryptographic hashes for reproducible research.
 
 ---
 
-## Architecture at a Glance
+## 📁 Repository Structure
 
 ```
-Market Data (yfinance)          NSE Corporate Events
-        │                               │
-        ▼                               ▼
-  data_fetcher.py          corporate_events_fetcher.py
-        │                               │
-        └──────────────┬────────────────┘
-                       ▼
-              event_classifier.py  ◄── macro_calendar.py
-                       │                news_sentiment_fetcher.py
-                       ▼                global_risk_monitor.py
-             reference_level_engine.py
-                       │
-                       ▼
-             feature_engineer.py
-                       │
-              ┌────────┴────────┐
-              ▼                 ▼
-        model_trainer.py   ensemble_manager.py
-              │                 │
-              └────────┬────────┘
-                       ▼
-              runtime_validator.py  (safety gate)
-                       │
-                       ▼
-                  predictor.py
-              ┌────────┴────────┐
-              ▼                 ▼
-      position_planner.py  narrative_builder.py
-              │                 │
-              └────────┬────────┘
-                       ▼
-          ┌────────────┼────────────┐
-          ▼            ▼            ▼
-       app.py        api.py    history_manager.py
-    (dashboard)   (REST API)   (SQLite storage)
-                       │
-              scanner.py / scalping.py
-                       │
-              health_monitor.py
-                       │
-              scheduler.py  ◄── automation/
+alkame-nifty-50-educational/
+├── alkame_dashboard.html           # Institutional Cockpit (Standalone Dual-Theme HTML)
+├── api.py                          # FastAPI REST Backend Layer
+├── api_schemas.py                  # Pydantic Schemas for Requests & Responses
+├── app.py                          # Streamlit Research Dashboard
+├── config.py                       # System Configuration (SEBI_COMPLIANCE_MODE=True)
+├── insights_engine.py              # Central Market Intelligence & Breadth Engine
+├── prediction_types.py             # Neutral Educational Data Contracts & Schemas
+├── corporate_events_fetcher.py     # NSE Announcements & Filings Collector
+├── data_fetcher.py                 # Multi-Tier yfinance Data Fetcher with Cache
+├── event_classifier.py             # Event Taxonomy (MARKET / SECTOR / STOCK)
+├── global_risk_monitor.py          # Macro Risk Factors (VIX, Crude, USD/INR)
+├── health_monitor.py               # 16-Subsystem Health Diagnostic Registry
+├── history_manager.py              # SQLite Historical Data & Snapshot Store
+├── human_insight_manager.py        # Analyst Notes & Research Task Store
+├── macro_calendar.py               # Macroeconomic Event Calendar
+├── news_sentiment_fetcher.py       # News Feed Parser & Polarity Scorer
+├── reference_level_engine.py       # Camarilla & Standard Pivot Calculations
+├── sector_provider.py              # NIFTY 50 Sector Classification Provider
+│
+├── frontend/                       # Modern React 19 + Vite 6 Frontend
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── StockInsightsCard.jsx   # Technical & Corporate Intelligence Card
+│   │   │   └── MarketBreadthPanel.jsx  # Universe Volume & Momentum Radar
+│   │   ├── App.jsx                     # Main Application Layout
+│   │   └── api.js                      # API Client Layer
+│   └── package.json
+│
+├── tests/                          # Automated Pytest Suite
+│   ├── test_insights_engine.py     # Insights Engine & REST Endpoint Tests
+│   ├── test_dashboard_api_endpoints.py # Core API Contract Tests
+│   └── test_app.py                 # Streamlit UI Tests
+│
+└── _local_research/                # [GIT-IGNORED] Offline Machine Learning Research
+    ├── models/                     # Trained Joblib/Pkl Weight Bundles
+    ├── model_trainer.py            # Local ML Training Harness
+    ├── backtester.py               # Quantitative Historical Backtester
+    └── predictor.py                # Raw ML Directional Classifiers
 ```
 
 ---
 
-## Requirements
+## ⚡ Quick Start
 
-- Python 3.10+
-- A free [marketaux](https://www.marketaux.com) API key
-- *(Optional)* An [IMD API key](https://api.imd.gov.in) for live monsoon data
+### 1. Prerequisites
+- Python 3.11 or 3.12
+- Node.js 18+ (for React frontend)
 
-Install dependencies:
-
+### 2. Environment Setup
 ```bash
+# Clone the repository
+git clone https://github.com/Alkameinc/alkame-nifty-50-educational.git
+cd alkame-nifty-50-educational
+
+# Create and activate virtual environment
+python -m venv venv
+# On Windows:
+.\venv\Scripts\activate
+# On Linux/macOS:
+source venv/bin/activate
+
+# Install Python dependencies
 pip install -r requirements.txt
 ```
 
----
+### 3. Launching the Services
 
-## Configuration
-
-Set your API key as an environment variable. **Never hardcode keys into source files.**
-
+#### Option A: FastAPI Backend & Institutional Cockpit (Recommended)
 ```bash
-# macOS / Linux
-export MARKETAUX_API_KEY="your_key_here"
-
-# Windows (Command Prompt)
-set MARKETAUX_API_KEY=your_key_here
-
-# Windows (PowerShell)
-$env:MARKETAUX_API_KEY="your_key_here"
+# Start FastAPI backend
+python -m uvicorn api:app --host 127.0.0.1 --port 8000 --reload
 ```
+Once started:
+- **Cockpit UI**: Open `http://127.0.0.1:8000/dashboard` in your browser.
+- **API Swagger Docs**: Visit `http://127.0.0.1:8000/docs`.
 
-Without `IMD_API_KEY`, monsoon status falls back to manual entry via `macro_calendar.py`.
-
----
-
-## Verification (Run Before First Use)
-
-Each module includes a self-test. Run them in order to confirm your setup:
-
+#### Option B: React Vite Modern Frontend
 ```bash
-python config.py
-python macro_calendar.py
-python data_fetcher.py
-python corporate_events_fetcher.py    # Run from a home/office connection — NSE blocks many cloud/VPN IPs
-python news_sentiment_fetcher.py
-python event_classifier.py
-python global_risk_monitor.py
-python reference_level_engine.py
-python feature_engineer.py
-python model_trainer.py
-python ensemble_manager.py
-python runtime_validator.py
-python predictor.py
-python position_planner.py
-python narrative_builder.py
-python scalping.py
-python scanner.py
-python human_insight_manager.py
-python history_manager.py
-python health_monitor.py
-python backtester.py
-python scheduler.py
-python api.py                         # Starts the FastAPI REST API server (or: uvicorn api:app --host 0.0.0.0 --port 8000)
-python app.py                         # Pure-logic self-test only; see Running section for dashboard
+cd frontend
+npm install
+npm run dev
 ```
+Open `http://localhost:3000` to interact with the React interface.
 
-Each script prints `STATUS: PASS` or `STATUS: FAIL` at the end.
-
-> **Note:** `data_fetcher.py`, `corporate_events_fetcher.py`, `news_sentiment_fetcher.py`, `global_risk_monitor.py`, `predictor.py`, and `scheduler.py` touch live external services and may take up to a minute or two.
-
----
-
-
-## Recent Engineering Audits & Bug Fixes
-
-> **Update (September 2026):** We have completed a comprehensive engineering audit. All critical vulnerabilities, bugs, and missing implementations tracked in the original ALKAME_NIFTY50_ENGINEERING_AUDIT_AND_BUG_TRACKER.md have been fully resolved. 
-> 
-> Highlights of the completed fixes include:
-> - **API Hardening:** Fixed broken root endpoints, added Kubernetes-style /healthz probes, and enforced X-Content-Type-Options and Content-Security-Policy security headers.
-> - **Database Migrations:** Fixed Alembic migration scripts (env.py) to correctly detect schema changes without dropping existing tables, and properly added model lineage fields.
-> - **Testing & Formatting:** Raised test coverage to 60.7%+, enforced Black formatting across all Python files and Jupyter Notebooks, and automated PR checks.
-> - **Authentication & Operations:** Secured sensitive endpoints like /api/v1/admin/audit-logs behind API key checks and removed stray returns that caused module import SyntaxErrors.
-
-## Running
-
-**Terminal 1 — Signal Scheduler**
-
-```bash
-python scheduler.py
-```
-
-> Wire up `run_forever()` with a real `symbol_data_provider` callable (using `data_fetcher.py`) when ready for continuous operation. The integration point is intentionally left open — your symbol list, refresh cadence, and error-handling preferences for unattended operation are worth deciding deliberately.
-
-**Terminal 2 — REST API Server**
-
-```bash
-uvicorn api:app --host 0.0.0.0 --port 8000
-```
-
-> Defaults to `http://localhost:8000` (interactive API documentation available at `http://localhost:8000/docs`). Endpoints include signal retrieval, scanner results, health status, and prediction history. Refer to inline docstrings in `api.py` for full endpoint documentation. Alternatively, run `python api.py`. **Add API key middleware before any public or network-exposed deployment.**
-
-**Terminal 3 — Dashboard**
-
+#### Option C: Streamlit Analytics Studio
 ```bash
 streamlit run app.py
 ```
+Open `http://localhost:8501` for exploratory analysis.
 
-**Automated / Server Deployment**
+---
 
+## 🌐 REST API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/v1/insights/{symbol}` | **Primary**: Factual technical indicators, Camarilla pivots, valuations, corporate filings, macro context, and news sentiment. |
+| `GET` | `/api/v1/market-breadth` | **Primary**: Universe volume radar, volume surge ratios vs. 20D average, advances/declines, and 52W proximity. |
+| `GET` | `/api/v1/fundamentals/{symbol}` | Valuation multiples, market capitalization, 52-week ranges, and sector data. |
+| `GET` | `/api/v1/symbols` | List of 50 active NIFTY index constituent symbols. |
+| `GET` | `/api/v1/chart/{symbol}` | OHLCV historical candlestick data formatted for charting. |
+| `GET` | `/api/v1/health` | Comprehensive 16-subsystem health diagnostic matrix. |
+| `GET` | `/api/v1/risk/reading` | Global risk monitor reading (India VIX, Crude Oil, USD/INR). |
+| `GET` | `/api/v1/scalping` | Educational notice directing consumers to `/api/v1/market-breadth`. |
+| `GET` | `/dashboard` | Serves the standalone Institutional Cockpit HTML application. |
+
+---
+
+## 🧪 Testing & Verification
+
+Run the test suite to verify data pipelines and API schema integrity:
 ```bash
-# Use scripts in automation/ for unattended cron-based operation
-# Example: run every 15 minutes during market hours
-# */15 9-16 * * 1-5 /path/to/automation/run_scheduler.sh
+# Run insights engine and API tests
+pytest tests/test_insights_engine.py tests/test_dashboard_api_endpoints.py tests/test_app.py -v
+
+# Run React frontend build test
+cd frontend && npm run build
 ```
 
 ---
 
----
+## 🔬 Local Research Isolation
 
-## Educational Research Framework Notice
-
-> **Educational and Research Use Only**: This repository is an educational research framework for exploring NIFTY 50 statistical machine learning, probability calibration, risk-gated signal generation, and event classification. It is **not** financial advice, a trading recommendation system, or guaranteed to be profitable.
-
----
-
-## Safety & Governance Principles
-
-1. **Probability Calibration**: Raw model confidence is never presented as calibrated probability. Calibrated confidence is only shown after passing empirical accuracy verification on real historical outcomes, strictly partitioned by `(symbol, horizon, model_version)`.
-2. **Feature Leakage Prevention**: Opening Range Breakout (ORB) features are strictly causal: bars inside the opening range receive no lookahead levels, and post-ORB levels become available only after the opening window has closed.
-3. **Data Freshness State**: Provenance is explicitly tracked as `LIVE`, `CACHED_FRESH`, `CACHED_STALE`, or `UNAVAILABLE`. Stale cache is never silently treated as live market data.
-4. **Authoritative Market Calendar**: `market_calendar.py` enforces official NSE trading holidays, trading sessions, and timezone-aware market-open transitions.
-5. **Fail-Closed Event Handling**: Unreachable or degraded news/macro event feeds report explicit partial/unavailable statuses rather than silently masquerading as "no events".
-6. **Refresh Protection**: Expensive backtest and calibration refresh endpoints enforce concurrency guards and cooldown rate limiting.
+In strict compliance with open-source and regulatory boundaries, machine learning training workflows and predictive models are **not tracked in the Git repository**:
+- Model artifacts (`models/*.joblib`, `models/*.pkl`, `models/*.json`) are excluded in `.gitignore`.
+- Algorithmic research scripts (`model_trainer.py`, `backtester.py`, `scalping.py`, `ensemble_manager.py`) are backed up in `_local_research/` for offline mathematical experimentation.
+- The public codebase remains 100% functional as an informational market intelligence platform without requiring proprietary model files.
 
 ---
 
-## Known Limitations
+## 🤝 DBERT Internship Program
 
-- **NIFTY 50 constituent list** and sector map should be verified semi-annually against NSE's index reviews (March & September).
-- **Festive-window dates** are approximate (lunar calendar shifts yearly) — verify each year in `macro_calendar.csv`.
-- **`corporate_events_fetcher.py`** may be blocked from cloud/VPN IPs by NSE's anti-bot protections — run from a normal residential/office connection.
-- **Scalping signals** carry inherently higher noise at very short timeframes; always validate against `runtime_validator.py` output before acting.
-- **`api.py`** provides local in-memory rate limiting and concurrency protection. Add API key middleware before any public internet deployment.
+This project is part of the **DBERT AI Internship Program**.  
+- Program Portal: [https://internship.dbert.online](https://internship.dbert.online)  
+- Organization: [https://dbert.online](https://dbert.online)  
+- Track: Data Analyst & Quantitative Market Intelligence  
 
----
-
-## DBERT Internship Program
-
-This repository — including the API layer, scalping engine, market scanner, position planner, narrative builder, and automation scripts — is built and maintained by student interns as part of the **[DBERT AI/ML Internship Program](https://internship.dbert.online)**, a hands-on remote internship for engineers who want real production experience instead of toy projects.
-
-**Why do a DBERT internship?**
-
-DBERT internships give you verifiable, portfolio-ready experience across the exact skill areas used in this project:
-
-- **AI/ML Engineering Internship** — feature engineering, ensemble model training, calibration and backtesting on real market data
-- **Full-Stack Development Internship** — FastAPI REST APIs, Streamlit dashboards, SQLite-backed data pipelines
-- **Quantitative & Algorithmic Trading Internship** — signal design, scalping strategies, position planning, and risk modelling
-- **DevOps & Cloud Deployment Internship** — AWS EC2, Nginx, cron automation, health monitoring, and CI-style deployment pipelines
-- **Open-Source & LLM Internship tracks** — contributing to production-grade, open-source AI systems with real-world mentorship
-
-Every DBERT intern works on live GitHub repositories (like this one), receives code review from mentors, and earns a **verified internship certificate** on completion — recognized proof of hands-on AI, ML, full-stack, and fintech engineering experience for your resume, LinkedIn, and placement applications.
-
-**Who should apply:**
-
-- Engineering and CS students looking for a *remote AI/ML internship in India* or worldwide
-- Developers wanting real *Python, FastAPI, and machine learning internship* experience
-- Anyone interested in an *algorithmic trading internship* or *fintech internship* working with live NIFTY 50 market data
-- Contributors who want *open-source internship* experience on a public GitHub project
-
-> 🎓 **Apply now:** [internship.dbert.online](https://internship.dbert.online) — Free, remote, project-based internship with certification.
-
-If you found this repository through GitHub, search, or a recommendation, and you're evaluating internship options, DBERT's programs are structured around exactly this kind of production codebase — not simulations. Explore open roles, submit your application, and start contributing to projects like Alkame-Nifty50 at **[internship.dbert.online](https://internship.dbert.online)**.
-
-If you are already a DBERT intern working on this codebase, refer to your assigned project brief for module-specific deliverables and evaluation criteria.
+All contributions must follow the educational charter and SEBI non-advisory compliance rules outlined in this document.
 
 ---
 
-## 🚀 Running the Production Platform
-
-### 1. Launching FastAPI Backend & Dashboard
-```bash
-# Start FastAPI backend server
-python -m uvicorn api:app --host 127.0.0.1 --port 8000
-```
-Open your browser and navigate to:
-- **Institutional Research Suite**: [http://localhost:8000/dashboard](http://localhost:8000/dashboard)
-- **Interactive OpenAPI Documentation**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Subsystem Telemetry Health Check**: [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health)
-
-### 2. Standalone Offline Dashboard
-You can also directly double-click or open `alkame_dashboard.html` in any modern web browser for 100% offline educational simulation without any external dependencies.
-
-### 3. Running Automated Tests & Verification Audits
-```bash
-# Run pytest test suite
-pytest
-
-# Run Playwright end-to-end browser verification audit
-python verify_telemetry_and_charts.py
-```
-
-
-## Legal & Regulatory Notice
-
-> 📖 Read this section carefully before sharing this project or its outputs with anyone outside your own research team.
-
-This repository is published for **educational and research purposes only**.
-
-- Distributing signals to any third party — even for free — very likely requires **Research Analyst (RA) registration** under SEBI (Research Analysts) Regulations, 2014.
-- This is not optional legal housekeeping. It is the single most important compliance gate before any public or commercial deployment.
-- Consult a **SEBI-registered securities counsel** before any distribution, productization, or public launch.
-
-Nothing in this repository constitutes investment advice, a solicitation to trade, or a guarantee of returns.
-
----
-
-## Contributing
-
-Pull requests are welcome for bug fixes, improved data sources, and backtesting methodology. Please open an issue first to discuss significant changes. See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for guidelines. Interested in contributing as part of a structured program? Check out the [DBERT Internship Program](#dbert-internship-program) above.
-
----
-
-## License
-
-**Educational / Personal Use Only — Commercial Use Prohibited**
-
-This repository is publicly available for educational, academic, research, and personal learning purposes. You are welcome to read, study, and modify the source code for your own non-commercial educational or personal use.
-
-Commercial use, redistribution, resale, incorporation into commercial products or services, SaaS deployment, and development of competing commercial products are strictly prohibited without prior written permission from Alkameinc.
-
-Please see the [LICENSE.md](LICENSE.md) file for the complete terms.
-
-*Copyright © 2026 Alkameinc. All Rights Reserved.*
-
+## 📄 License
+This repository is licensed under the Apache 2.0 License. See [LICENSE](LICENSE) for details.

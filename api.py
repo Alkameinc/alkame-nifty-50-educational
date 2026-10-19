@@ -18,6 +18,8 @@ from api_schemas import (
     FundamentalsResponse,
     HealthResponse,
     HistoryResponse,
+    MarketBreadthResponse,
+    MarketInsightsResponse,
     ModelValidityOut,
     MultiHorizonSignalResponse,
     NoteOut,
@@ -33,7 +35,9 @@ from api_schemas import (
     TaskOut,
     TaskPayload,
     TasksResponse,
+    TechnicalSnapshotOut,
 )
+from insights_engine import COMPLIANCE_DISCLAIMER, insights_engine
 from config import (
     API_AUTH_ENABLED,
     API_KEYS_ROLE_MAP,
@@ -50,14 +54,32 @@ from health_monitor import registry as health_registry
 from history_manager import HistoryManager
 from human_insight_manager import HumanInsightManager
 from market_data_provider import DataStatus, MarketDataResult
-from model_validity import (
-    VALIDITY_LIVE_ELIGIBLE,
-    ModelValidityResult,
-    can_serve_live_signal,
-    evaluate_model_validity,
-)
+try:
+    from model_validity import (
+        VALIDITY_LIVE_ELIGIBLE,
+        ModelValidityResult,
+        can_serve_live_signal,
+        evaluate_model_validity,
+    )
+except ImportError:
+    VALIDITY_LIVE_ELIGIBLE = "LIVE_ELIGIBLE"
+
+    class ModelValidityResult:
+        def __init__(self, symbol="", horizon="", validity_status="EDUCATIONAL_MODE", is_live_eligible=False, reasons=None, edge_status="RESEARCH_ONLY"):
+            self.symbol = symbol
+            self.horizon = horizon
+            self.validity_status = validity_status
+            self.is_live_eligible = is_live_eligible
+            self.reasons = reasons or ["Predictions disabled in educational mode."]
+            self.edge_status = edge_status
+
+    def can_serve_live_signal(health, validity):
+        return False, ["Predictions disabled under SEBI educational compliance."]
+
+    def evaluate_model_validity(symbol, horizon="INTRADAY"):
+        return ModelValidityResult(symbol=symbol, horizon=horizon)
+
 from models import AuditLog
-from scalping import ScalpingEngine
 from scheduler import LiveWorthinessSnapshot, Scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -244,7 +266,6 @@ except Exception as err:
 scheduler = Scheduler()
 history_manager = HistoryManager()
 human_insight_manager = HumanInsightManager()
-scalping_engine = ScalpingEngine(scheduler.predictor, scheduler.data_fetcher, scheduler.predictor.feature_engineer)
 
 
 def translate_health_message(component: str, status: str) -> str:
@@ -355,6 +376,27 @@ def get_model_validity(symbol: str, horizon: str = "INTRADAY"):
 def healthz():
     """Kubernetes-style liveness probe - alias for /api/v1/health."""
     return get_health()
+
+
+@app.get("/api/v1/insights/{symbol}", response_model=MarketInsightsResponse, tags=["Market Intelligence"])
+def get_insights(symbol: str):
+    if symbol not in NIFTY50_SYMBOLS:
+        raise HTTPException(status_code=404, detail="Invalid symbol")
+    try:
+        insights = insights_engine.get_stock_insights(symbol)
+        return insights
+    except Exception as e:
+        logger.error(f"Error generating insights for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate insights: {str(e)}")
+
+
+@app.get("/api/v1/market-breadth", response_model=MarketBreadthResponse, tags=["Market Intelligence"])
+def get_market_breadth_route():
+    try:
+        return insights_engine.get_market_breadth()
+    except Exception as e:
+        logger.error(f"Error computing market breadth: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to compute market breadth: {str(e)}")
 
 
 @app.get("/api/v1/symbols", response_model=SymbolsResponse)
@@ -489,23 +531,27 @@ def get_signal(symbol: str):
         edge_status_val = validity_res.edge_status if validity_res else "NOT_VALIDATED"
         is_live_eligible_val = bool(can_serve and validity_res.is_live_eligible and calibrated_conf is not None)
 
+        # SEBI Compliance: Enforce neutral educational presentation
+        sig_action = "HOLD"
+        verdict_text = "Educational Market Intelligence: Directional trading recommendations, targets, and stops are withheld in compliance with SEBI educational guidelines."
+
         all_horizons_data[hor] = {
             "horizon": hor,
             "action": sig_action,
             "verdict_text": verdict_text,
             "model_score": raw_score,
-            "calibrated_probability": calibrated_conf,
-            "calibration_status": calib_status,
-            "edge_status": edge_status_val,
-            "live_eligible": is_live_eligible_val,
-            "confidence": calibrated_conf,
+            "calibrated_probability": None,
+            "calibration_status": "EDUCATIONAL_HOLD",
+            "edge_status": "RESEARCH_ONLY",
+            "live_eligible": False,
+            "confidence": None,
             "raw_confidence": raw_score,
-            "risk_adjusted_confidence": getattr(sig, "risk_adjusted_confidence", raw_score),
-            "calibrated_confidence": calibrated_conf,
+            "risk_adjusted_confidence": raw_score,
+            "calibrated_confidence": None,
             "current_price": float(stock_df["Close"].iloc[-1]) if not stock_df.empty else None,
-            "target_price": sig.target_price,
-            "stop_loss": sig.stop_loss,
-            "peak_potential_price": getattr(sig, "peak_potential_price", None),
+            "target_price": None,
+            "stop_loss": None,
+            "peak_potential_price": None,
             "downside_summary": sig.downside_summary,
             "upside_summary": sig.upside_summary,
             "events": events,
@@ -715,21 +761,11 @@ def refresh_backtest(
 
 @app.get("/api/v1/scalping")
 def get_scalping():
-    setups = scalping_engine.find_opportunities(limit=5)
-    result = []
-    for s in setups:
-        result.append(
-            {
-                "symbol": s.symbol,
-                "action": s.action,
-                "entry": s.entry_price,
-                "target": s.target_price,
-                "stop": s.stop_loss,
-                "confidence": s.confidence,
-                "rr": s.risk_reward_ratio,
-            }
-        )
-    return {"setups": result}
+    return {
+        "setups": [],
+        "message": "Directional scalping recommendations disabled in compliance with SEBI educational guidelines. Please refer to /api/v1/market-breadth for volume and momentum monitoring.",
+        "disclaimer": COMPLIANCE_DISCLAIMER,
+    }
 
 
 from config import HORIZON_CONFIG

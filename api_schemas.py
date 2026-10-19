@@ -195,3 +195,75 @@ class StressTestResponse(BaseModel):
     var_99_pct: float
     risk_regime: str
     factor_sensitivities: dict[str, float]
+
+
+class TechnicalSnapshotOut(BaseModel):
+    symbol: str
+    cmp: float
+    rsi_14: float
+    rsi_status: str
+    ema_20: float | None = None
+    ema_50: float | None = None
+    sma_200: float | None = None
+    trend_posture: str
+    bollinger_upper: float | None = None
+    bollinger_middle: float | None = None
+    bollinger_lower: float | None = None
+    bollinger_pct_b: float | None = None
+    bollinger_bandwidth: float | None = None
+    atr_14: float | None = None
+    atr_pct: float | None = None
+    volume_latest: int
+    volume_20d_sma: float | None = None
+    volume_ratio: float | None = None
+    volume_surge: bool
+    vwap: float | None = None
+    vwap_relation: str
+    pivots_camarilla: dict[str, float] = Field(default_factory=dict)
+    pivots_standard: dict[str, float] = Field(default_factory=dict)
+    prior_day_high: float | None = None
+    prior_day_low: float | None = None
+    prior_day_close: float | None = None
+    fifty_two_week_high: float | None = None
+    fifty_two_week_low: float | None = None
+    pct_from_52w_high: float | None = None
+    pct_from_52w_low: float | None = None
+
+
+class MarketInsightsResponse(BaseModel):
+    symbol: str
+    timestamp: str
+    cmp: float
+    day_change_pct: float
+    technical: TechnicalSnapshotOut
+    valuation: dict[str, Any]
+    corporate_events: list[dict[str, Any]]
+    macro_context: dict[str, Any]
+    news_sentiment: dict[str, Any]
+    disclaimer: str
+
+
+class ConstituentBreadthItem(BaseModel):
+    symbol: str
+    cmp: float
+    day_change_pct: float
+    volume: int
+    volume_ratio: float
+    volume_surge: bool
+    rsi_14: float
+    pct_from_52w_high: float
+    sector: str
+
+
+class MarketBreadthResponse(BaseModel):
+    timestamp: str
+    total_constituents: int
+    advances: int
+    declines: int
+    unchanged: int
+    advance_decline_ratio: float
+    volume_surges: list[ConstituentBreadthItem]
+    top_gainers: list[ConstituentBreadthItem]
+    top_losers: list[ConstituentBreadthItem]
+    all_constituents: list[ConstituentBreadthItem]
+    disclaimer: str
