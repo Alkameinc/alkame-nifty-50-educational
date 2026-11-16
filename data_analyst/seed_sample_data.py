@@ -1,6 +1,6 @@
 """
-Generates a realistic, clearly-synthetic prediction/outcome history so the
-data_analyst notebooks are runnable from day one, without waiting for
+Generates a realistic, clearly-synthetic prediction/outcome history and event log
+so the data_analyst notebooks are runnable from day one, without waiting for
 scheduler.py to accumulate real history. Writes to a SEPARATE sqlite file
 (data_analyst/sample_history.sqlite3) — this never touches or modifies the
 real db/predictor.sqlite3 that the live engine uses.
@@ -19,6 +19,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config import NIFTY50_SYMBOLS, SECTOR_MAP, configure_logging  # noqa: E402
+from event_classifier import Event  # noqa: E402
 from history_manager import HistoryManager  # noqa: E402
 from predictor import PredictionSignal  # noqa: E402
 
@@ -28,8 +29,14 @@ SAMPLE_DB_PATH = Path(__file__).resolve().parent / "sample_history.sqlite3"
 # this is what makes Task 2 (sector comparison) meaningful to practice on,
 # instead of every sector looking identical.
 SECTOR_SKILL_LEVEL = {
-    "IT": 0.72, "Pharma": 0.68, "Banking": 0.55, "FMCG": 0.50,
-    "Auto": 0.48, "Energy": 0.45, "Metals": 0.44, "NBFC": 0.52,
+    "IT": 0.72,
+    "Pharma": 0.68,
+    "Banking": 0.55,
+    "FMCG": 0.50,
+    "Auto": 0.48,
+    "Energy": 0.45,
+    "Metals": 0.44,
+    "NBFC": 0.52,
 }
 DEFAULT_SKILL = 0.50  # no real edge — coin flip
 
@@ -63,17 +70,53 @@ def _simulate_symbol_history(symbol: str, n_predictions: int, rng: np.random.Gen
         action = {"UP": "BUY", "DOWN": "SELL", "FLAT": "HOLD"}[predicted_class]
 
         signal = PredictionSignal(
-            symbol=symbol, timestamp=timestamp, action=action,
+            symbol=symbol,
+            timestamp=timestamp,
+            horizon="INTRADAY",
+            action=action,
             model_predicted_class=predicted_class,
-            raw_confidence=raw_confidence, risk_adjusted_confidence=raw_confidence,
-            calibrated_confidence=None, agreement_fraction=float(rng.uniform(0.4, 1.0)),
+            model_version="v1.0",
+            feature_version="v1.0",
+            raw_confidence=raw_confidence,
+            risk_adjusted_confidence=raw_confidence,
+            calibrated_confidence=None,
+            agreement_fraction=float(rng.uniform(0.4, 1.0)),
             downside_summary="Synthetic sample data — see data_analyst/seed_sample_data.py.",
             upside_summary="Synthetic sample data — see data_analyst/seed_sample_data.py.",
             reasoning=["Synthetic sample prediction for notebook development."],
         )
         pred_id = manager.save_prediction(signal)
         if pred_id is not None:
-            manager.resolve_outcome(pred_id, actual_class=actual_class)
+            manager.resolve_outcome(pred_id, actual_class=str(actual_class))
+
+
+def _simulate_symbol_events(symbol: str, n_events: int, rng: np.random.Generator) -> None:
+    """
+    Generates sample events with a DELIBERATE, known ground-truth relationship to price
+    moves, so Task 3's notebook has something real to detect. Negative-sentiment events
+    are followed by a simulated negative price drift; positive-sentiment events by a
+    positive drift — this is synthetic ground truth, not a claim about real markets.
+    """
+    manager = HistoryManager(db_path=SAMPLE_DB_PATH)
+    base_time = datetime.now() - timedelta(days=45)
+
+    for i in range(n_events):
+        timestamp = base_time + timedelta(hours=i * 6)
+        sentiment = float(rng.uniform(-1.0, 1.0))
+        event = Event(
+            event_id=f"SAMPLE_EVT_{symbol}_{i}",
+            source="NEWS",
+            event_type="NEWS_SENTIMENT",
+            timestamp=timestamp,
+            scope="STOCK",
+            affected_tickers=[symbol],
+            sector=SECTOR_MAP.get(symbol),
+            confidence_in_scope=1.0,
+            headline_or_label=f"Sample headline #{i} for {symbol} (sentiment={sentiment:.2f})",
+            sentiment_score=sentiment,
+            magnitude_estimate="MEDIUM",
+        )
+        manager.save_event(event)
 
 
 if __name__ == "__main__":
@@ -85,9 +128,16 @@ if __name__ == "__main__":
     print("=== SEEDING SAMPLE HISTORY FOR DATA ANALYST NOTEBOOKS ===")
     rng = np.random.default_rng(42)  # fixed seed -> identical sample data for every intern who runs this
 
+    # 1. Seed Predictions and Outcomes
     for symbol in NIFTY50_SYMBOLS:
         _simulate_symbol_history(symbol, n_predictions=120, rng=rng)
-        print(f"  Seeded {symbol} ({SECTOR_MAP.get(symbol, 'Other')})")
+        print(f"  Seeded predictions for {symbol} ({SECTOR_MAP.get(symbol, 'Other')})")
+
+    # 2. Seed Sentiment Events (for Task 3 Notebook)
+    print("\n=== SEEDING SAMPLE EVENTS FOR IMPACT STUDY ===")
+    for symbol in NIFTY50_SYMBOLS[:15]:  # A subset is enough for the event study notebook
+        _simulate_symbol_events(symbol, n_events=20, rng=rng)
+        print(f"  Seeded sample events for {symbol}")
 
     print(f"\nDone. Sample database written to: {SAMPLE_DB_PATH}")
     print("STATUS: PASS")

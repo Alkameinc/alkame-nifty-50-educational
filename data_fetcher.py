@@ -1,9 +1,9 @@
 # 1. Standard library imports
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Dict, Optional
+from zoneinfo import ZoneInfo
 
 # 2. Third-party imports
 import pandas as pd
@@ -11,23 +11,30 @@ import yfinance as yf
 
 # 3. Local imports
 from config import (
+    BAR_HISTORY_PERIOD,
+    BAR_INTERVAL,
+    CACHE_DIR,
+    DATA_STALENESS_THRESHOLD_MINUTES,
+    DATA_STALENESS_THRESHOLD_TRADING_DAYS,
+    GLOBAL_TICKERS,
     NIFTY50_YFINANCE_TICKERS,
     NIFTY_INDEX_TICKER,
-    GLOBAL_TICKERS,
-    BAR_INTERVAL,
-    BAR_HISTORY_PERIOD,
-    DATA_STALENESS_THRESHOLD_MINUTES,
-    CACHE_DIR,
-    to_yfinance_ticker,
-    ensure_directories,
     configure_logging,
+    ensure_directories,
+)
+from health_monitor import registry as health_registry
+from market_data_provider import (
+    DataStatus,
+    MarketDataProvider,
+    MarketDataResult,
+    YFinanceMarketDataProvider,
 )
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# 5. Constants
+# 5. Constants & Models
 # ---------------------------------------------------------------------------
 MAX_RETRIES = 3
 RETRY_BACKOFF_SECONDS = 2
@@ -39,35 +46,77 @@ REQUIRED_COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
 # ---------------------------------------------------------------------------
 class DataFetcher:
     """
-    Single interface to yfinance for OHLCV bars. Every fetch goes through
-    retry logic; on total failure it falls back to the last good cached CSV
-    for that ticker (if one exists) so the pipeline degrades gracefully
-    instead of crashing.
+    Interface for OHLCV bars and fundamentals, wrapping an underlying
+    MarketDataProvider (DATA-005) with caching, quality verification,
+    and staleness detection.
     """
 
-    def __init__(self, cache_dir: Path = CACHE_DIR):
+    def __init__(self, cache_dir: Path = CACHE_DIR, provider: MarketDataProvider | None = None):
         self.cache_dir = cache_dir
+        self.provider = provider or YFinanceMarketDataProvider(cache_dir=cache_dir)
         ensure_directories()
 
-    def _cache_path(self, ticker: str) -> Path:
+    def _cache_path(self, ticker: str, interval: str = BAR_INTERVAL) -> Path:
+        """Primary cache path with interval suffix (current standard)."""
+        safe_name = ticker.replace("=", "_").replace("^", "IDX_").replace(".", "_")
+        return self.cache_dir / f"{safe_name}_{interval}.csv"
+
+    def _legacy_cache_path(self, ticker: str) -> Path:
+        """Legacy cache path WITHOUT interval suffix (pre-multi-interval compatibility)."""
         safe_name = ticker.replace("=", "_").replace("^", "IDX_").replace(".", "_")
         return self.cache_dir / f"{safe_name}.csv"
 
-    def _save_cache(self, ticker: str, df: pd.DataFrame) -> None:
+    def _save_cache(self, ticker: str, df: pd.DataFrame, interval: str = BAR_INTERVAL) -> None:
         try:
-            df.to_csv(self._cache_path(ticker))
+            df.to_csv(self._cache_path(ticker, interval=interval))
         except Exception as e:
-            logger.error(f"Failed to write cache for {ticker}: {e}")
+            logger.error(f"Failed to write cache for {ticker} ({interval}): {e}")
 
-    def _load_cache(self, ticker: str) -> Optional[pd.DataFrame]:
-        path = self._cache_path(ticker)
+    def _load_cache(self, ticker: str, interval: str = BAR_INTERVAL) -> pd.DataFrame | None:
+        """
+        Load OHLCV cache with 2-tier fallback:
+        1. Interval-suffixed path (current standard)
+        2. Un-suffixed legacy path (pre-multi-interval compatibility with warnings)
+        """
+        # TIER 1: Try interval-suffixed path first
+        path = self._cache_path(ticker, interval=interval)
         try:
             if path.exists():
                 df = pd.read_csv(path, index_col=0, parse_dates=True)
-                logger.warning(f"Loaded stale CACHED data for {ticker} from {path}")
+                # DATA-004: Standardize internal timestamps on timezone-aware UTC
+                if df.index.tz is None:
+                    df.index = df.index.tz_localize("UTC")
+                else:
+                    try:
+                        df.index = df.index.tz_convert("UTC")
+                    except Exception:
+                        pass
+                logger.info(f"Loaded CACHED data for {ticker} ({interval}) from {path}")
                 return df
         except Exception as e:
-            logger.error(f"Failed to load cache for {ticker}: {e}")
+            logger.error(f"Failed to load interval-suffixed cache for {ticker} ({interval}): {e}")
+
+        # TIER 2: Fall back to legacy unsuffixed path
+        legacy_path = self._legacy_cache_path(ticker)
+        try:
+            if legacy_path.exists():
+                df = pd.read_csv(legacy_path, index_col=0, parse_dates=True)
+                if df.index.tz is None:
+                    df.index = df.index.tz_localize("UTC")
+                else:
+                    try:
+                        df.index = df.index.tz_convert("UTC")
+                    except Exception:
+                        pass
+                logger.warning(
+                    f"LEGACY CACHE COMPATIBILITY: Loaded {ticker} from unsuffixed path {legacy_path.name}. "
+                    f"Requested interval={interval} but legacy cache has no interval metadata. "
+                    f"Data may be 5m, 1d, or other interval. Consider re-fetching to create interval-tagged cache."
+                )
+                return df
+        except Exception as e:
+            logger.error(f"Failed to load legacy unsuffixed cache for {ticker}: {e}")
+
         return None
 
     def fetch_ohlcv(
@@ -75,12 +124,42 @@ class DataFetcher:
         ticker: str,
         interval: str = BAR_INTERVAL,
         period: str = BAR_HISTORY_PERIOD,
-    ) -> Optional[pd.DataFrame]:
+        return_metadata: bool = False,
+        allow_stale: bool = False,
+    ) -> pd.DataFrame | None | MarketDataResult:
         """
-        Fetch OHLCV bars for a single ticker with retry logic. Returns None
-        only if both live fetch and cache fallback fail — callers must handle
-        that case (e.g. by suppressing signals for that ticker).
+        Fetch OHLCV bars for a single ticker with retry logic.
+        DATA-001: Returns MarketDataResult if return_metadata=True, or DataFrame/None.
+        If return_metadata=False and cache is stale, returns None unless allow_stale=True.
         """
+        now_utc = pd.Timestamp.now(tz=UTC).to_pydatetime()
+
+        # Clamp 1m granularity requests to maximum supported Yahoo period (7d)
+        if interval == "1m" and period not in ["1d", "5d", "7d"]:
+            period = "7d"
+
+        # FIRST: Check if we have a fresh cache
+        cached = self._load_cache(ticker, interval=interval)
+        if cached is not None and not self.check_staleness(cached, ticker):
+            logger.info(f"Using fresh cache for {ticker}")
+            health_registry.report("data_fetcher", ok=True, detail=f"Served cached data for {ticker}")
+            age_sec = 0.0
+            if len(cached) > 0 and hasattr(cached.index[-1], "to_pydatetime"):
+                last_dt = cached.index[-1].to_pydatetime()
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=UTC)
+                age_sec = max(0.0, (now_utc - last_dt).total_seconds())
+
+            if return_metadata:
+                return MarketDataResult(
+                    data=cached,
+                    status=DataStatus.CACHED_FRESH,
+                    source="cache",
+                    fetched_at=now_utc,
+                    age_seconds=age_sec,
+                )
+            return cached
+
         last_error = None
         for attempt in range(1, MAX_RETRIES + 1):
             try:
@@ -93,7 +172,20 @@ class DataFetcher:
                     raise ValueError(f"Missing expected columns {missing_cols} for {ticker}")
 
                 df = df[REQUIRED_COLUMNS].copy()
-                self._save_cache(ticker, df)
+                # DATA-004: Standardize internal timestamps on timezone-aware UTC
+                if df.index.tz is None:
+                    df.index = df.index.tz_localize("UTC")
+
+                self._save_cache(ticker, df, interval=interval)
+                health_registry.report("data_fetcher", ok=True, detail=f"Fetched live data for {ticker}")
+                if return_metadata:
+                    return MarketDataResult(
+                        data=df,
+                        status=DataStatus.LIVE,
+                        source="yahoo",
+                        fetched_at=now_utc,
+                        age_seconds=0.0,
+                    )
                 return df
 
             except Exception as e:
@@ -106,21 +198,83 @@ class DataFetcher:
                     time.sleep(RETRY_BACKOFF_SECONDS * attempt)
 
         logger.error(f"All {MAX_RETRIES} live fetch attempts failed for {ticker}: {last_error}")
-        cached = self._load_cache(ticker)
+        cached = self._load_cache(ticker, interval=interval)
         if cached is not None:
+            is_stale = self.check_staleness(cached, ticker)
+            status = DataStatus.CACHED_STALE if is_stale else DataStatus.CACHED_FRESH
+            age_sec = 0.0
+            if len(cached) > 0 and hasattr(cached.index[-1], "to_pydatetime"):
+                last_dt = cached.index[-1].to_pydatetime()
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=UTC)
+                age_sec = max(0.0, (now_utc - last_dt).total_seconds())
+
+            if return_metadata:
+                return MarketDataResult(
+                    data=cached,
+                    status=status,
+                    source="cache",
+                    fetched_at=now_utc,
+                    age_seconds=age_sec,
+                    error=str(last_error) if last_error else None,
+                )
+            if is_stale and not allow_stale:
+                logger.warning(
+                    f"DATA-001: Rejecting stale cache for {ticker} in plain DataFrame path (allow_stale=False)."
+                )
+                return None
             return cached
 
-        logger.error(f"No cache available for {ticker} either — returning None.")
+        logger.error(f"No cache available for {ticker} ({interval}) either — returning None.")
+        health_registry.report(
+            "data_fetcher", ok=False, detail=f"No live or cached data for {ticker}", error=str(last_error)
+        )
+        if return_metadata:
+            return MarketDataResult(
+                data=None,
+                status=DataStatus.UNAVAILABLE,
+                source="unavailable",
+                fetched_at=now_utc,
+                error=str(last_error) if last_error else "Data unavailable",
+            )
         return None
+
+    def fetch_daily_ohlcv(self, ticker: str, period: str = "5y") -> pd.DataFrame | None:
+        """Fetch full historical daily OHLCV bars for a single ticker."""
+        return self.fetch_ohlcv(ticker, interval="1d", period=period)
+
+    def fetch_daily_ohlcv_incremental(self, ticker: str, full_period: str = "5y") -> pd.DataFrame | None:
+        """Fetch daily OHLCV bars using an incremental update strategy if cache exists."""
+        cached = self._load_cache(ticker, interval="1d")
+        if cached is None or cached.empty:
+            return self.fetch_daily_ohlcv(ticker, period=full_period)
+
+        last_cached_date = cached.index[-1]
+        start_date = (last_cached_date + timedelta(days=1)).strftime("%Y-%m-%d")
+
+        try:
+            new_data = yf.Ticker(ticker).history(start=start_date, interval="1d", auto_adjust=False)
+            if new_data is not None and not new_data.empty:
+                missing_cols = [c for c in REQUIRED_COLUMNS if c not in new_data.columns]
+                if not missing_cols:
+                    new_data = new_data[REQUIRED_COLUMNS].copy()
+                    combined = pd.concat([cached, new_data]).sort_index()
+                    combined = combined[~combined.index.duplicated(keep="last")]
+                    self._save_cache(ticker, combined, interval="1d")
+                    return combined
+        except Exception as e:
+            logger.error(f"Incremental daily fetch failed for {ticker}, returning cached data: {e}")
+
+        return cached
 
     def fetch_all_nifty50(
         self,
         interval: str = BAR_INTERVAL,
         period: str = BAR_HISTORY_PERIOD,
-    ) -> Dict[str, pd.DataFrame]:
+    ) -> dict[str, pd.DataFrame]:
         """Fetch OHLCV bars for all 50 NIFTY constituents. Skips (with a logged error)
         any ticker that fails both live fetch and cache fallback."""
-        results: Dict[str, pd.DataFrame] = {}
+        results: dict[str, pd.DataFrame] = {}
         for ticker in NIFTY50_YFINANCE_TICKERS:
             df = self.fetch_ohlcv(ticker, interval=interval, period=period)
             if df is not None:
@@ -130,13 +284,25 @@ class DataFetcher:
         logger.info(f"Fetched OHLCV for {len(results)}/{len(NIFTY50_YFINANCE_TICKERS)} NIFTY50 tickers.")
         return results
 
+    def fetch_all_nifty50_daily(self, period: str = "5y") -> dict[str, pd.DataFrame]:
+        """Fetch daily OHLCV bars for all 50 NIFTY constituents incrementally."""
+        results: dict[str, pd.DataFrame] = {}
+        for ticker in NIFTY50_YFINANCE_TICKERS:
+            df = self.fetch_daily_ohlcv_incremental(ticker, full_period=period)
+            if df is not None:
+                results[ticker] = df
+            else:
+                logger.error(f"Skipping {ticker} entirely — no live or cached daily data available.")
+        logger.info(f"Fetched daily OHLCV for {len(results)}/{len(NIFTY50_YFINANCE_TICKERS)} NIFTY50 tickers.")
+        return results
+
     def fetch_global_tickers(
         self,
         interval: str = BAR_INTERVAL,
         period: str = BAR_HISTORY_PERIOD,
-    ) -> Dict[str, pd.DataFrame]:
+    ) -> dict[str, pd.DataFrame]:
         """Fetch OHLCV bars for the global cross-asset tickers (DXY, Gold, Crude, VIX, etc.)."""
-        results: Dict[str, pd.DataFrame] = {}
+        results: dict[str, pd.DataFrame] = {}
         for name, ticker in GLOBAL_TICKERS.items():
             df = self.fetch_ohlcv(ticker, interval=interval, period=period)
             if df is not None:
@@ -150,37 +316,288 @@ class DataFetcher:
         self,
         interval: str = BAR_INTERVAL,
         period: str = BAR_HISTORY_PERIOD,
-    ) -> Optional[pd.DataFrame]:
+        return_metadata: bool = False,
+        allow_stale: bool = False,
+    ) -> pd.DataFrame | None | MarketDataResult:
         """Fetch the NIFTY 50 index itself — used as the baseline for edge/outperformance checks."""
-        return self.fetch_ohlcv(NIFTY_INDEX_TICKER, interval=interval, period=period)
+        return self.fetch_ohlcv(
+            NIFTY_INDEX_TICKER,
+            interval=interval,
+            period=period,
+            return_metadata=return_metadata,
+            allow_stale=allow_stale,
+        )
 
-    def check_staleness(self, df: pd.DataFrame, ticker: str) -> bool:
+    def fetch_stock_fundamentals(self, ticker: str) -> dict[str, object]:
+        """Fetch fundamental metrics (P/E, P/B, Market Cap, EPS, Div Yield, 52W High/Low) with safe fallbacks."""
+        try:
+            t = yf.Ticker(ticker)
+            info = t.info or {}
+
+            # Format Market Cap to INR Crores
+            mcap = info.get("marketCap")
+            mcap_cr = f"₹{mcap / 1e7:,.2f} Cr" if mcap else "N/A"
+
+            pe = info.get("trailingPE") or info.get("forwardPE")
+            pe_str = f"{pe:.2f}" if pe else "N/A"
+
+            pb = info.get("priceToBook")
+            pb_str = f"{pb:.2f}" if pb else "N/A"
+
+            eps = info.get("trailingEps")
+            eps_str = f"₹{eps:.2f}" if eps else "N/A"
+
+            div = info.get("dividendYield")
+            div_str = f"{div * 100:.2f}%" if div is not None else "N/A"
+
+            high52 = info.get("fiftyTwoWeekHigh")
+            low52 = info.get("fiftyTwoWeekLow")
+            cmp_raw = info.get("currentPrice") or info.get("regularMarketPrice")
+
+            # Calculate valuation assessment
+            # Scoring factors:
+            # 1. P/E vs typical baseline (under 18 attractive, 18-32 fair, >32 premium/growth)
+            # 2. P/B vs baseline (under 2.5 attractive, 2.5-5.0 fair, >5.0 premium)
+            # 3. 52-week range percentile (position between 52W low and 52W high)
+            valuation_status = "FAIR PRICED"
+            valuation_badge = "🟡 FAIR PRICED"
+            valuation_details = []
+
+            pe_val = float(pe) if pe and pe > 0 else None
+            pb_val = float(pb) if pb and pb > 0 else None
+            range_pct = None
+            if cmp_raw and high52 and low52 and (high52 > low52):
+                range_pct = max(0.0, min(1.0, (cmp_raw - low52) / (high52 - low52)))
+
+            score = 0  # <0 towards underpriced, >0 towards overpriced
+            if pe_val is not None:
+                if pe_val < 18.0:
+                    score -= 1
+                    valuation_details.append(f"P/E ({pe_val:.1f}x) is below typical market average (<18x)")
+                elif pe_val > 35.0:
+                    score += 1
+                    valuation_details.append(f"P/E ({pe_val:.1f}x) trades at a premium (>35x)")
+                else:
+                    valuation_details.append(f"P/E ({pe_val:.1f}x) is within reasonable range (18-35x)")
+
+            if pb_val is not None:
+                if pb_val < 2.0:
+                    score -= 1
+                    valuation_details.append(f"P/B ({pb_val:.1f}x) offers tangible asset cushion (<2.0x)")
+                elif pb_val > 6.0:
+                    score += 1
+                    valuation_details.append(f"P/B ({pb_val:.1f}x) reflects high asset premium (>6.0x)")
+
+            if range_pct is not None:
+                if range_pct < 0.25:
+                    score -= 1
+                    valuation_details.append(f"Price is in lower quartile of 52W range ({range_pct*100:.0f}%)")
+                elif range_pct > 0.85:
+                    score += 1
+                    valuation_details.append(f"Price is near 52W high ({range_pct*100:.0f}% of range)")
+
+            if score <= -1:
+                valuation_status = "UNDERPRICED"
+                valuation_badge = "🟢 UNDERPRICED (Attractive Valuation)"
+                valuation_rationale = (
+                    "Valuation metrics suggest stock is trading at an attractive discount relative to earnings, assets, or historical range. "
+                    + " • ".join(valuation_details)
+                )
+            elif score >= 2:
+                valuation_status = "OVERPRICED"
+                valuation_badge = "🔴 OVERPRICED (Premium Valuation)"
+                valuation_rationale = (
+                    "Valuation metrics reflect premium pricing or high growth expectations baked into price. "
+                    + " • ".join(valuation_details)
+                )
+            else:
+                valuation_status = "FAIR PRICED"
+                valuation_badge = "🟡 FAIR PRICED (Fair Value)"
+                valuation_rationale = (
+                    "Valuation metrics align closely with historical and market baseline norms. "
+                    + " • ".join(valuation_details)
+                )
+
+            return {
+                "pe_ratio": pe_str,
+                "price_to_book": pb_str,
+                "market_cap": mcap_cr,
+                "eps": eps_str,
+                "dividend_yield": div_str,
+                "fifty_two_week_high": f"₹{high52:,.2f}" if high52 else "N/A",
+                "fifty_two_week_low": f"₹{low52:,.2f}" if low52 else "N/A",
+                "sector": info.get("sector", "N/A"),
+                "industry": info.get("industry", "N/A"),
+                "valuation_status": valuation_status,
+                "valuation_badge": valuation_badge,
+                "valuation_rationale": valuation_rationale,
+                "raw_pe": pe_val,
+                "raw_pb": pb_val,
+                "raw_range_pct": range_pct,
+            }
+        except Exception as e:
+            logger.warning(f"Could not fetch fundamentals for {ticker}: {e}")
+            return {
+                "pe_ratio": "N/A",
+                "price_to_book": "N/A",
+                "market_cap": "N/A",
+                "eps": "N/A",
+                "dividend_yield": "N/A",
+                "fifty_two_week_high": "N/A",
+                "fifty_two_week_low": "N/A",
+                "sector": "N/A",
+                "industry": "N/A",
+                "valuation_status": "FAIR PRICED",
+                "valuation_badge": "🟡 FAIR PRICED (Neutral Data)",
+                "valuation_rationale": "Insufficient fundamental data to establish over/under-pricing. Evaluated as Neutral/Fair.",
+                "raw_pe": None,
+                "raw_pb": None,
+                "raw_range_pct": None,
+            }
+
+    def is_market_open(self, now: datetime | None = None) -> bool:
+        from market_calendar import is_market_open as _is_open
+
+        return _is_open(now)
+
+    def check_staleness(
+        self,
+        df: pd.DataFrame,
+        ticker: str,
+        now: datetime | None = None,
+        max_age_minutes: float = DATA_STALENESS_THRESHOLD_MINUTES,
+    ) -> bool:
         """
-        Returns True if the data is STALE (last bar older than the configured
-        threshold). Callers should suppress signals for a ticker when this is True.
+        DATA-002: Session-aware staleness checking.
+        Returns True if the data is STALE:
+        - Market is open: last bar is not from today or older than threshold.
+        - Market is closed: data does not reach the close of the most recently
+          completed trading session.
         """
         try:
             if df is None or df.empty:
                 logger.warning(f"Staleness check: {ticker} has no data at all — treating as stale.")
                 return True
 
-            last_ts = df.index[-1]
-            if last_ts.tzinfo is not None:
-                now = pd.Timestamp.now(tz=last_ts.tzinfo)
-            else:
-                now = pd.Timestamp.now()
+            from config import MARKET_TIMEZONE
+            from market_calendar import previous_market_close
 
-            age_minutes = (now - last_ts).total_seconds() / 60.0
-            is_stale = age_minutes > DATA_STALENESS_THRESHOLD_MINUTES
+            tz_ist = ZoneInfo(MARKET_TIMEZONE)
+            if now is None:
+                now_ist = pd.Timestamp.now(tz=tz_ist).to_pydatetime()
+            else:
+                now_ist = now.astimezone(tz_ist) if now.tzinfo is not None else now.replace(tzinfo=tz_ist)
+
+            last_ts = df.index[-1]
+            if hasattr(last_ts, "to_pydatetime"):
+                last_ts = last_ts.to_pydatetime()
+            if last_ts.tzinfo is None:
+                last_bar_ist = last_ts.replace(tzinfo=tz_ist)
+            else:
+                last_bar_ist = last_ts.astimezone(tz_ist)
+
+            # 1. During market open:
+            if self.is_market_open(now_ist):
+                if last_bar_ist.date() != now_ist.date():
+                    logger.warning(
+                        f"{ticker} data is STALE: market is open today ({now_ist.date()}), "
+                        f"but last bar is from {last_bar_ist.date()}"
+                    )
+                    return True
+
+                age_minutes = (now_ist - last_bar_ist).total_seconds() / 60.0
+                is_stale = age_minutes > max_age_minutes
+                if is_stale:
+                    logger.warning(
+                        f"{ticker} data is STALE: last bar is {age_minutes:.1f} minutes old "
+                        f"(threshold={max_age_minutes}m)"
+                    )
+                return bool(is_stale)
+
+            # 2. When market is closed (pre-market, post-market, weekend, holiday):
+            last_close = previous_market_close(now_ist)
+            if last_bar_ist.date() < last_close.date():
+                logger.warning(
+                    f"{ticker} data is STALE: market is closed, expected latest session date {last_close.date()}, "
+                    f"but last bar is from {last_bar_ist.date()}"
+                )
+                return True
+
+            # If on the date of last_close, check that it didn't terminate prematurely
+            close_age_minutes = (last_close - last_bar_ist).total_seconds() / 60.0
+            allowed_gap = max(max_age_minutes, 35.0)
+            if close_age_minutes > allowed_gap:
+                logger.warning(
+                    f"{ticker} data is STALE: session ended at {last_close.time()}, "
+                    f"but last bar is from {last_bar_ist.time()} ({close_age_minutes:.1f}m gap)"
+                )
+                return True
+
+            return False
+        except Exception as e:
+            logger.error(f"Failed session-aware staleness check for {ticker}: {e}")
+            return True
+
+    def check_staleness_daily(
+        self,
+        df: pd.DataFrame,
+        ticker: str,
+        now: datetime | None = None,
+        max_trading_days: int = DATA_STALENESS_THRESHOLD_TRADING_DAYS,
+    ) -> bool:
+        """
+        DATA-002: Session-aware daily staleness check.
+        Counts elapsed trading days (excluding weekends and official holidays).
+        """
+        try:
+            if df is None or df.empty:
+                logger.warning(f"Staleness check daily: {ticker} has no data at all — treating as stale.")
+                return True
+
+            from config import MARKET_TIMEZONE
+            from market_calendar import is_trading_day, previous_market_close
+
+            tz_ist = ZoneInfo(MARKET_TIMEZONE)
+            if now is None:
+                now_ist = pd.Timestamp.now(tz=tz_ist).to_pydatetime()
+            else:
+                now_ist = now.astimezone(tz_ist) if now.tzinfo is not None else now.replace(tzinfo=tz_ist)
+
+            last_ts = df.index[-1]
+            if hasattr(last_ts, "to_pydatetime"):
+                last_ts = last_ts.to_pydatetime()
+            if last_ts.tzinfo is None:
+                last_bar_ist = last_ts.replace(tzinfo=tz_ist)
+            else:
+                last_bar_ist = last_ts.astimezone(tz_ist)
+
+            last_close = previous_market_close(now_ist)
+
+            trading_days = 0
+            curr_date = last_bar_ist.date() + timedelta(days=1)
+            target_date = last_close.date()
+
+            while curr_date <= target_date:
+                if is_trading_day(curr_date):
+                    trading_days += 1
+                curr_date += timedelta(days=1)
+
+            is_stale = trading_days > max_trading_days
             if is_stale:
                 logger.warning(
-                    f"{ticker} data is STALE: last bar is {age_minutes:.1f} minutes old "
-                    f"(threshold={DATA_STALENESS_THRESHOLD_MINUTES}m)"
+                    f"{ticker} daily data is STALE: last bar is {trading_days} trading days old "
+                    f"(threshold={max_trading_days})"
                 )
-            return is_stale
+            return bool(is_stale)
         except Exception as e:
-            logger.error(f"Failed staleness check for {ticker}: {e}")
-            return True  # fail safe: treat unknown state as stale/unsafe
+            logger.error(f"Failed daily staleness check for {ticker}: {e}")
+            return True
+
+    def check_alignment(self, stock_df: pd.DataFrame, index_df: pd.DataFrame, min_ratio: float = 0.95):
+        """DATA-003: Check stock-to-index timestamp alignment coverage."""
+        from feature_engineer import FeatureEngineer
+
+        return FeatureEngineer.check_alignment(stock_df, index_df, min_ratio=min_ratio)
 
 
 # ---------------------------------------------------------------------------
@@ -197,10 +614,21 @@ if __name__ == "__main__":
         print("\n=== DATA FETCHER SELF-TEST RESULT ===")
 
         # Test 1: single ticker fetch
-        df = fetcher.fetch_ohlcv(test_symbol)
+        raw_df = fetcher.fetch_ohlcv(test_symbol)
+        df = raw_df if isinstance(raw_df, pd.DataFrame) else None
         single_ok = df is not None and not df.empty
-        print(f"Single ticker fetch ({test_symbol}): {'OK' if single_ok else 'FAILED'}"
-              f" — rows={0 if df is None else len(df)}")
+        print(
+            f"Single ticker fetch ({test_symbol}): {'OK' if single_ok else 'FAILED'}"
+            f" — rows={0 if df is None else len(df)}"
+        )
+
+        # Test 1.5: fetch with metadata
+        res = fetcher.fetch_ohlcv(test_symbol, return_metadata=True)
+        meta_ok = isinstance(res, MarketDataResult) and res.status in DataStatus
+        print(
+            f"Fetch with metadata ({test_symbol}): {'OK' if meta_ok else 'FAILED'}"
+            f" — status={getattr(res, 'status', 'UNKNOWN')}"
+        )
 
         # Test 2: staleness check runs without error
         if df is not None:
@@ -208,23 +636,52 @@ if __name__ == "__main__":
             print(f"Staleness check ran successfully. Stale={stale}")
 
         # Test 3: NIFTY index fetch
-        index_df = fetcher.fetch_nifty_index()
+        raw_index = fetcher.fetch_nifty_index()
+        index_df = raw_index if isinstance(raw_index, pd.DataFrame) else None
         index_ok = index_df is not None and not index_df.empty
-        print(f"NIFTY index fetch: {'OK' if index_ok else 'FAILED'}"
-              f" — rows={0 if index_df is None else len(index_df)}")
+        print(
+            f"NIFTY index fetch: {'OK' if index_ok else 'FAILED'}" f" — rows={0 if index_df is None else len(index_df)}"
+        )
 
         # Test 4: one global ticker fetch (Gold) to confirm the mapping works
-        gold_df = fetcher.fetch_ohlcv(GLOBAL_TICKERS["GOLD"])
+        raw_gold = fetcher.fetch_ohlcv(GLOBAL_TICKERS["GOLD"])
+        gold_df = raw_gold if isinstance(raw_gold, pd.DataFrame) else None
         gold_ok = gold_df is not None and not gold_df.empty
-        print(f"Global ticker fetch (Gold, {GLOBAL_TICKERS['GOLD']}): {'OK' if gold_ok else 'FAILED'}"
-              f" — rows={0 if gold_df is None else len(gold_df)}")
+        print(
+            f"Global ticker fetch (Gold, {GLOBAL_TICKERS['GOLD']}): {'OK' if gold_ok else 'FAILED'}"
+            f" — rows={0 if gold_df is None else len(gold_df)}"
+        )
 
         # Test 5: cache fallback works by loading whatever we just cached
         cached = fetcher._load_cache(test_symbol)
         cache_ok = cached is not None and not cached.empty
         print(f"Cache read-back for {test_symbol}: {'OK' if cache_ok else 'FAILED'}")
 
-        overall_pass = single_ok and index_ok and gold_ok and cache_ok
+        # Test 6: Daily bar fetch
+        daily_df = fetcher.fetch_daily_ohlcv(test_symbol, period="1y")
+        daily_ok = daily_df is not None and not daily_df.empty
+        print(
+            f"Daily ticker fetch ({test_symbol}): {'OK' if daily_ok else 'FAILED'}"
+            f" — rows={0 if daily_df is None else len(daily_df)}"
+        )
+
+        # Test 7: Incremental daily fetch
+        daily_inc_df = fetcher.fetch_daily_ohlcv_incremental(test_symbol, full_period="1y")
+        inc_ok = daily_inc_df is not None and len(daily_inc_df) >= len(daily_df) if daily_df is not None else False
+        print(
+            f"Incremental daily fetch ({test_symbol}): {'OK' if inc_ok else 'FAILED'}"
+            f" — rows={0 if daily_inc_df is None else len(daily_inc_df)}"
+        )
+
+        # Test 8: Cache collision test
+        cache_5m = fetcher._cache_path(test_symbol, interval="5m").exists()
+        cache_1d = fetcher._cache_path(test_symbol, interval="1d").exists()
+        collision_ok = cache_5m and cache_1d
+        print(f"Cache collision test (distinct files exist): {'OK' if collision_ok else 'FAILED'}")
+
+        overall_pass = (
+            single_ok and meta_ok and index_ok and gold_ok and cache_ok and daily_ok and inc_ok and collision_ok
+        )
         print("STATUS: PASS" if overall_pass else "STATUS: FAIL — see details above")
 
         if not overall_pass:

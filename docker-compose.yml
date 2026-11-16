@@ -1,0 +1,49 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nifty50_app
+    ports:
+      - "8000:8000"
+    environment:
+      - ALKAME_API_AUTH_ENABLED=true
+      - ALKAME_ADMIN_KEY=dev-alkame-admin-key
+      - ALKAME_READONLY_KEY=dev-alkame-readonly-key
+      - LOG_FORMAT=json
+    volumes:
+      - ./data:/app/data
+      - ./db:/app/db
+      - ./logs:/app/logs
+      - ./models:/app/models
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  nginx:
+    image: nginx:alpine
+    container_name: nifty50_nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: nifty50_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - app
+    restart: unless-stopped

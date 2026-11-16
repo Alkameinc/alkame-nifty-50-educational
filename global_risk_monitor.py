@@ -1,29 +1,28 @@
 # 1. Standard library imports
 import json
 import logging
-from dataclasses import dataclass, asdict
-from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+
+import numpy as np
 
 # 2. Third-party imports
 import pandas as pd
-import numpy as np
 
 # 3. Local imports
 from config import (
-    GLOBAL_TICKERS,
-    GLOBAL_RISK_ZSCORE_WARN_THRESHOLD,
-    GLOBAL_RISK_ZSCORE_CRISIS_THRESHOLD,
-    GLOBAL_RISK_CONFIDENCE_DOWNGRADE_ELEVATED,
-    GLOBAL_RISK_CONFIDENCE_DOWNGRADE_CRISIS,
-    GLOBAL_RISK_LOOKBACK_DAYS,
     CRUDE_SENSITIVE_SECTORS,
     DATA_DIR,
-    ensure_directories,
+    GLOBAL_RISK_CONFIDENCE_DOWNGRADE_CRISIS,
+    GLOBAL_RISK_CONFIDENCE_DOWNGRADE_ELEVATED,
+    GLOBAL_RISK_LOOKBACK_DAYS,
+    GLOBAL_RISK_ZSCORE_CRISIS_THRESHOLD,
+    GLOBAL_RISK_ZSCORE_WARN_THRESHOLD,
     configure_logging,
+    ensure_directories,
 )
 from data_fetcher import DataFetcher
+from health_monitor import registry as health_registry
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -34,6 +33,7 @@ logger = logging.getLogger(__name__)
 RISK_LEVEL_NORMAL = "NORMAL"
 RISK_LEVEL_ELEVATED = "ELEVATED"
 RISK_LEVEL_CRISIS = "CRISIS"
+RISK_LEVEL_UNAVAILABLE = "UNAVAILABLE"
 
 TOGGLE_STATE_PATH = DATA_DIR / "global_risk_toggle_state.json"
 
@@ -57,18 +57,21 @@ class GlobalRiskReading:
     timestamp: datetime
     composite_zscore: float
     risk_level: str
-    dominant_driver: Optional[str]
-    driver_details: Dict[str, float]
+    dominant_driver: str | None
+    driver_details: dict[str, float]
     banner_message: str
+    is_available: bool = True
 
 
 @dataclass
 class ToggleState:
     enabled: bool
     reason: str
-    level_at_activation: Optional[str]
-    activated_at: Optional[str]
+    level_at_activation: str | None
+    activated_at: str | None
     updated_at: str
+    changed_by: str = "system"
+    version: int = 1
 
 
 class GlobalRiskMonitor:
@@ -77,27 +80,88 @@ class GlobalRiskMonitor:
     moves every cycle and classifies risk level. Never changes prediction
     behavior by itself — only surfaces a banner. The actual risk-adjustment
     only applies once a human explicitly enables the toggle via set_toggle().
+    Persists risk state to shared database (SEC-004, SEC-005) with optimistic versioning.
     """
 
-    def __init__(self, data_fetcher: Optional[DataFetcher] = None):
+    def __init__(self, data_fetcher: DataFetcher | None = None):
         self.data_fetcher = data_fetcher or DataFetcher()
         ensure_directories()
+        self._ensure_db_table()
         self._toggle_state = self._load_toggle_state()
+        self._cached_reading: GlobalRiskReading | None = None
+        self._cached_time: datetime | None = None
+
+    def _ensure_db_table(self) -> None:
+        try:
+            from database import engine
+            from models import Base
+
+            Base.metadata.create_all(bind=engine)
+        except Exception as e:
+            logger.warning(f"Could not auto-create database tables: {e}")
 
     # -----------------------------------------------------------------
-    # Toggle state persistence
+    # Toggle state persistence (SEC-004, SEC-005)
     # -----------------------------------------------------------------
     def _load_toggle_state(self) -> ToggleState:
+        # 1. Try DB first for multi-worker shared state
+        try:
+            from database import SessionLocal
+            from models import RiskState
+
+            with SessionLocal() as db:
+                row = db.query(RiskState).filter(RiskState.id == 1).first()
+                if row:
+                    return ToggleState(
+                        enabled=row.enabled,
+                        reason=row.reason or "",
+                        level_at_activation=row.level_at_activation,
+                        activated_at=row.activated_at,
+                        updated_at=row.updated_at,
+                        changed_by=row.changed_by or "system",
+                        version=row.version or 1,
+                    )
+                # Seed row if missing
+                initial_row = RiskState(
+                    id=1,
+                    enabled=False,
+                    reason="",
+                    level_at_activation=None,
+                    activated_at=None,
+                    updated_at=datetime.now(UTC).isoformat(),
+                    changed_by="system",
+                    version=1,
+                )
+                db.add(initial_row)
+                db.commit()
+                return ToggleState(
+                    enabled=False,
+                    reason="",
+                    level_at_activation=None,
+                    activated_at=None,
+                    updated_at=initial_row.updated_at,
+                    changed_by="system",
+                    version=1,
+                )
+        except Exception as e:
+            logger.warning(f"DB load for toggle state failed ({e}), falling back to file cache")
+
+        # 2. File fallback
         try:
             if TOGGLE_STATE_PATH.exists():
-                with open(TOGGLE_STATE_PATH, "r", encoding="utf-8") as f:
+                with open(TOGGLE_STATE_PATH, encoding="utf-8") as f:
                     data = json.load(f)
                 return ToggleState(**data)
         except Exception as e:
-            logger.error(f"Failed loading toggle state, defaulting to OFF: {e}")
+            logger.error(f"Failed loading toggle state file, defaulting to OFF: {e}")
         return ToggleState(
-            enabled=False, reason="", level_at_activation=None,
-            activated_at=None, updated_at=datetime.now().isoformat(),
+            enabled=False,
+            reason="",
+            level_at_activation=None,
+            activated_at=None,
+            updated_at=datetime.now(UTC).isoformat(),
+            changed_by="system",
+            version=1,
         )
 
     def _save_toggle_state(self) -> None:
@@ -106,35 +170,87 @@ class GlobalRiskMonitor:
             f = open(TOGGLE_STATE_PATH, "w", encoding="utf-8")
             json.dump(asdict(self._toggle_state), f, indent=2)
         except Exception as e:
-            logger.error(f"Failed saving toggle state: {e}")
+            logger.error(f"Failed saving toggle state file: {e}")
         finally:
             if f is not None:
                 f.close()
 
-    def set_toggle(self, enabled: bool, reason: str = "", current_level: Optional[str] = None) -> ToggleState:
-        """Human-gated override switch. Nothing in this system flips this automatically."""
+    def set_toggle(
+        self,
+        enabled: bool,
+        reason: str = "",
+        current_level: str | None = None,
+        changed_by: str = "system",
+        expected_version: int | None = None,
+    ) -> ToggleState:
+        """Human-gated override switch. Persists to shared DB with optimistic versioning."""
+        now_iso = datetime.now(UTC).isoformat()
+        new_version = (self._toggle_state.version + 1) if self._toggle_state else 1
+
+        # 1. Update shared DB
         try:
-            now_iso = datetime.now().isoformat()
-            self._toggle_state = ToggleState(
-                enabled=enabled,
-                reason=reason,
-                level_at_activation=current_level if enabled else self._toggle_state.level_at_activation,
-                activated_at=now_iso if enabled else self._toggle_state.activated_at,
-                updated_at=now_iso,
-            )
-            self._save_toggle_state()
-            logger.info(f"Global risk toggle set to {enabled} by human. Reason: {reason or '(none given)'}")
+            from database import SessionLocal
+            from models import RiskState
+
+            with SessionLocal() as db:
+                row = db.query(RiskState).filter(RiskState.id == 1).first()
+                if row:
+                    if expected_version is not None and row.version != expected_version:
+                        raise ValueError(
+                            f"Concurrent update conflict: expected version {expected_version}, found {row.version}"
+                        )
+                    row.enabled = enabled
+                    row.reason = reason
+                    if enabled:
+                        row.level_at_activation = current_level
+                        row.activated_at = now_iso
+                    row.updated_at = now_iso
+                    row.changed_by = changed_by
+                    row.version = (row.version or 1) + 1
+                    new_version = row.version
+                    db.commit()
+                else:
+                    new_row = RiskState(
+                        id=1,
+                        enabled=enabled,
+                        reason=reason,
+                        level_at_activation=current_level if enabled else None,
+                        activated_at=now_iso if enabled else None,
+                        updated_at=now_iso,
+                        changed_by=changed_by,
+                        version=1,
+                    )
+                    db.add(new_row)
+                    db.commit()
+                    new_version = 1
+        except ValueError:
+            raise
         except Exception as e:
-            logger.error(f"Failed setting toggle state: {e}")
+            logger.error(f"Failed setting toggle state in DB: {e}")
+
+        # 2. Update memory and file backup
+        self._toggle_state = ToggleState(
+            enabled=enabled,
+            reason=reason,
+            level_at_activation=current_level if enabled else self._toggle_state.level_at_activation,
+            activated_at=now_iso if enabled else self._toggle_state.activated_at,
+            updated_at=now_iso,
+            changed_by=changed_by,
+            version=new_version,
+        )
+        self._save_toggle_state()
+        logger.info(f"Global risk toggle set to {enabled} by {changed_by}. Reason: {reason or '(none given)'}")
         return self._toggle_state
 
-    def get_toggle_state(self) -> ToggleState:
+    def get_toggle_state(self, force_refresh: bool = True) -> ToggleState:
+        if force_refresh:
+            self._toggle_state = self._load_toggle_state()
         return self._toggle_state
 
     # -----------------------------------------------------------------
     # Composite risk computation
     # -----------------------------------------------------------------
-    def _pct_change_zscore(self, df: pd.DataFrame) -> Optional[float]:
+    def _pct_change_zscore(self, df: pd.DataFrame) -> float | None:
         """Compute the z-score of the most recent bar's % change relative to
         its own rolling history — i.e. 'how unusual is today's move'."""
         try:
@@ -161,7 +277,12 @@ class GlobalRiskMonitor:
         Missing tickers are excluded from the composite rather than crashing
         the whole computation — degrades gracefully.
         """
-        driver_zscores: Dict[str, float] = {}
+        now = datetime.now(UTC)
+        if self._cached_reading is not None and self._cached_time is not None:
+            if (now - self._cached_time).total_seconds() < 300:  # 5 minutes
+                return self._cached_reading
+
+        driver_zscores: dict[str, float] = {}
         try:
             global_data = self.data_fetcher.fetch_global_tickers()
             for name in ["VIX", "DOLLAR_INDEX", "GOLD", "CRUDE_BRENT"]:
@@ -173,11 +294,16 @@ class GlobalRiskMonitor:
                     logger.warning(f"Could not compute z-score for {name} — excluding from composite.")
 
             if not driver_zscores:
-                logger.error("No global risk drivers available at all — returning NORMAL as a safe default.")
+                logger.error("No global risk drivers available at all — failing closed to UNAVAILABLE.")
+                health_registry.report("global_risk_monitor", ok=False, detail="No global risk drivers available")
                 return GlobalRiskReading(
-                    timestamp=datetime.now(), composite_zscore=0.0, risk_level=RISK_LEVEL_NORMAL,
-                    dominant_driver=None, driver_details={},
-                    banner_message="Global risk data unavailable — monitor could not compute a reading.",
+                    timestamp=datetime.now(UTC),
+                    composite_zscore=0.0,
+                    risk_level=RISK_LEVEL_UNAVAILABLE,
+                    dominant_driver=None,
+                    driver_details={},
+                    banner_message="Global risk data unavailable — operating in conservative fail-closed mode.",
+                    is_available=False,
                 )
 
             composite = float(np.mean([abs(z) for z in driver_zscores.values()]))
@@ -191,22 +317,43 @@ class GlobalRiskMonitor:
                 level = RISK_LEVEL_NORMAL
 
             banner = self._build_banner_message(level, dominant_driver, driver_zscores)
+            health_registry.report("global_risk_monitor", ok=True)
 
-            return GlobalRiskReading(
-                timestamp=datetime.now(), composite_zscore=composite, risk_level=level,
-                dominant_driver=dominant_driver, driver_details=driver_zscores, banner_message=banner,
+            result = GlobalRiskReading(
+                timestamp=datetime.now(UTC),
+                composite_zscore=composite,
+                risk_level=level,
+                dominant_driver=dominant_driver,
+                driver_details=driver_zscores,
+                banner_message=banner,
+                is_available=True,
             )
+            self._cached_reading = result
+            self._cached_time = now
+            return result
 
         except Exception as e:
             logger.error(f"Failed computing composite global risk: {e}")
-            return GlobalRiskReading(
-                timestamp=datetime.now(), composite_zscore=0.0, risk_level=RISK_LEVEL_NORMAL,
-                dominant_driver=None, driver_details={},
-                banner_message=f"Global risk monitor error — defaulting to NORMAL. ({e})",
+            health_registry.report(
+                "global_risk_monitor", ok=False, detail="Failed computing composite risk", error=str(e)
             )
+            result = GlobalRiskReading(
+                timestamp=datetime.now(UTC),
+                composite_zscore=0.0,
+                risk_level=RISK_LEVEL_UNAVAILABLE,
+                dominant_driver=None,
+                driver_details={},
+                banner_message=f"Global risk monitor error — risk state UNAVAILABLE ({e}).",
+                is_available=False,
+            )
+            self._cached_reading = result
+            self._cached_time = now
+            return result
 
     @staticmethod
-    def _build_banner_message(level: str, dominant_driver: Optional[str], driver_zscores: Dict[str, float]) -> str:
+    def _build_banner_message(level: str, dominant_driver: str | None, driver_zscores: dict[str, float]) -> str:
+        if level == RISK_LEVEL_UNAVAILABLE:
+            return "Global risk data unavailable — operating in conservative fail-closed mode."
         if level == RISK_LEVEL_NORMAL:
             return "Global market conditions normal."
         driver_label = dominant_driver.replace("_", " ").title() if dominant_driver else "market conditions"
@@ -226,7 +373,7 @@ class GlobalRiskMonitor:
     # -----------------------------------------------------------------
     # Confidence adjustment (only applied by predictor.py when toggle is ON)
     # -----------------------------------------------------------------
-    def get_confidence_multiplier(self, sector: Optional[str], reading: GlobalRiskReading) -> float:
+    def get_confidence_multiplier(self, sector: str | None, reading: GlobalRiskReading) -> float:
         """
         Returns the multiplier predictor.py should apply to a stock's confidence
         score, based on the CURRENT toggle state and the stock's sector exposure
@@ -239,7 +386,7 @@ class GlobalRiskMonitor:
 
             if reading.risk_level == RISK_LEVEL_CRISIS:
                 base_multiplier = GLOBAL_RISK_CONFIDENCE_DOWNGRADE_CRISIS
-            elif reading.risk_level == RISK_LEVEL_ELEVATED:
+            elif reading.risk_level in (RISK_LEVEL_ELEVATED, RISK_LEVEL_UNAVAILABLE):
                 base_multiplier = GLOBAL_RISK_CONFIDENCE_DOWNGRADE_ELEVATED
             else:
                 return 1.0
@@ -289,16 +436,21 @@ if __name__ == "__main__":
         # Force a synthetic CRISIS reading to test the multiplier logic deterministically
         # (we don't rely on live data actually being in a crisis state for this test)
         synthetic_reading = GlobalRiskReading(
-            timestamp=datetime.now(), composite_zscore=3.0, risk_level=RISK_LEVEL_CRISIS,
-            dominant_driver="CRUDE_BRENT", driver_details={"CRUDE_BRENT": 3.0},
+            timestamp=datetime.now(UTC),
+            composite_zscore=3.0,
+            risk_level=RISK_LEVEL_CRISIS,
+            dominant_driver="CRUDE_BRENT",
+            driver_details={"CRUDE_BRENT": 3.0},
             banner_message="synthetic test reading",
         )
-        exposed_multiplier = monitor.get_confidence_multiplier("Energy", synthetic_reading)   # Energy IS crude-sensitive
-        unexposed_multiplier = monitor.get_confidence_multiplier("IT", synthetic_reading)     # IT is NOT crude-sensitive
+        exposed_multiplier = monitor.get_confidence_multiplier("Energy", synthetic_reading)  # Energy IS crude-sensitive
+        unexposed_multiplier = monitor.get_confidence_multiplier("IT", synthetic_reading)  # IT is NOT crude-sensitive
         print(f"Exposed sector (Energy) multiplier during synthetic crude CRISIS: {exposed_multiplier}")
         print(f"Unexposed sector (IT) multiplier during synthetic crude CRISIS: {unexposed_multiplier}")
         assert exposed_multiplier == GLOBAL_RISK_CONFIDENCE_DOWNGRADE_CRISIS
-        assert unexposed_multiplier > exposed_multiplier, "Unexposed sector should be downgraded less than exposed sector"
+        assert (
+            unexposed_multiplier > exposed_multiplier
+        ), "Unexposed sector should be downgraded less than exposed sector"
 
         # Reset toggle back off so repeated test runs start clean
         monitor.set_toggle(False, reason="Self-test cleanup")

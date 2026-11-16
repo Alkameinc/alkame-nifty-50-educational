@@ -1,0 +1,50 @@
+{
+  "signal_as_of": "2026-09-10T04:30:00Z",
+  "normal": {
+    "macro_events": [
+      {
+        "event_date": "2026-09-10",
+        "event_type": "RBI_POLICY",
+        "label": "Fixture RBI policy decision",
+        "scope": "MARKET",
+        "sector_hint": "ALL",
+        "impact_window_days_before": 1,
+        "impact_window_days_after": 1,
+        "notes": "F23 offline fixture"
+      }
+    ],
+    "corporate_events": [
+      {
+        "symbol": "RELIANCE",
+        "category": "CORPORATE_ANNOUNCEMENT",
+        "fetched_at": "2026-09-10T04:25:00Z",
+        "raw": {
+          "subject": "RELIANCE board meeting fixture",
+          "source_id": "fixture-123",
+          "published_at": "2026-09-10T04:25:00Z"
+        }
+      }
+    ],
+    "news_articles": [
+      {
+        "symbol": "RELIANCE",
+        "title": "RELIANCE eligible news fixture",
+        "published_at": "2026-09-10T04:29:59Z",
+        "available_at": "2026-09-10T04:29:59Z",
+        "sentiment_score": 0.2
+      },
+      {
+        "symbol": "RELIANCE",
+        "title": "RELIANCE future news fixture",
+        "published_at": "2026-09-10T04:30:01Z",
+        "available_at": "2026-09-10T04:30:01Z",
+        "sentiment_score": 0.4
+      }
+    ]
+  },
+  "failure": {
+    "corporate_status": "EVENT_SOURCE_UNAVAILABLE",
+    "corporate_errors": ["fixture corporate source failed"],
+    "news_status": "NO_EVENTS"
+  }
+}

@@ -3,6 +3,7 @@ Shared helper so every notebook connects to a SQLite database the exact same
 way, and so switching from sample data to the real live database is a
 one-line change in each notebook, not a copy-pasted block re-written three times.
 """
+ main
 import sqlite3
 import sys
 from pathlib import Path

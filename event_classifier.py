@@ -2,24 +2,27 @@
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, date
-from typing import Dict, List, Optional
+from datetime import UTC, date, datetime
 
 # 2. Third-party imports
 # (none required)
-
 # 3. Local imports
 from config import (
-    NIFTY50_SYMBOLS,
-    SECTOR_MAP,
     CRUDE_SENSITIVE_SECTORS,
+    EVENT_IMPACT_HORIZON,
+    HORIZON_30D,
+    HORIZON_INTRADAY,
     INR_WEAKNESS_BENEFICIARY_SECTORS,
     INR_WEAKNESS_HURT_SECTORS,
     MONSOON_SENSITIVE_SECTORS,
+    NIFTY50_SYMBOLS,
     RATE_SENSITIVE_SECTORS,
+    SECTOR_MAP,
     configure_logging,
 )
+from health_monitor import registry as health_registry
 from macro_calendar import MacroCalendar, MacroEvent
+from sector_provider import sector_map_provider
 
 # 4. Logger setup
 logger = logging.getLogger(__name__)
@@ -33,7 +36,7 @@ SCOPE_STOCK = "STOCK"
 VALID_SCOPES = {SCOPE_MARKET, SCOPE_SECTOR, SCOPE_STOCK}
 
 # Reverse index: sector -> [symbols], built once from config.SECTOR_MAP
-SECTOR_TO_SYMBOLS: Dict[str, List[str]] = {}
+SECTOR_TO_SYMBOLS: dict[str, list[str]] = {}
 for _sym, _sector in SECTOR_MAP.items():
     SECTOR_TO_SYMBOLS.setdefault(_sector, []).append(_sym)
 
@@ -44,9 +47,12 @@ MACRO_EVENT_TYPE_TO_SECTORS = {
     "GDP_RELEASE": ["ALL"],
     "UNION_BUDGET": ["ALL"],
     "ELECTION": ["ALL"],
-    "FESTIVE_WINDOW": None,   # sector comes from the macro event's own sector_hint field
+    "FESTIVE_WINDOW": None,  # sector comes from the macro event's own sector_hint field
     "MONSOON_STATUS": MONSOON_SENSITIVE_SECTORS,
     "FDI_FLOW_RELEASE": ["ALL"],
+    "GEOPOLITICAL": ["ALL"],
+    "QUARTERLY_EARNINGS": None,
+    "REGULATORY_CHANGE": None,
     "MACRO_OTHER": None,
 }
 
@@ -61,32 +67,87 @@ NEWS_KEYWORD_SECTOR_HINTS = {
     "rainfall": MONSOON_SENSITIVE_SECTORS,
     "interest rate": RATE_SENSITIVE_SECTORS,
     "repo rate": RATE_SENSITIVE_SECTORS,
+    "rate cut": RATE_SENSITIVE_SECTORS,
+    "rate hike": RATE_SENSITIVE_SECTORS,
+    "rbi rate": RATE_SENSITIVE_SECTORS,
     "war": ["ALL"],
     "sanction": ["ALL"],
     "blockade": ["ALL"],
     "tariff": ["ALL"],
 }
 
+# EVENT-002: Disambiguation phrases that override a keyword match to prevent false positives
+NEWS_KEYWORD_NEGATIVE_PATTERNS = {
+    "crude": ["crude joke", "crude jokes", "crude language", "crude behavior", "crude remark", "crude remarks"],
+    "war": ["price war", "culture war", "turf war"],
+    "tariff": ["telecom tariff", "mobile tariff", "tariff plan", "5g tariff", "recharge tariff", "prepaid tariff"],
+    "oil": ["oilfield services", "palm oil", "essential oil"],
+    "oil price": ["palm oil", "essential oil"],
+}
+
+# EVENT-002: Entity extraction mapping common corporate names to NSE tickers
+COMPANY_NAME_TO_SYMBOL = {
+    "reliance": "RELIANCE",
+    "infosys": "INFY",
+    "tcs": "TCS",
+    "tata consultancy": "TCS",
+    "hdfc bank": "HDFCBANK",
+    "icici bank": "ICICIBANK",
+    "state bank of india": "SBIN",
+    "sbi": "SBIN",
+    "bharti airtel": "BHARTIARTL",
+    "airtel": "BHARTIARTL",
+    "itc": "ITC",
+    "larsen & toubro": "LT",
+    "larsen": "LT",
+    "l&t": "LT",
+    "tata motors": "TATAMOTORS",
+    "wipro": "WIPRO",
+    "hcl tech": "HCLTECH",
+    "sun pharma": "SUNPHARMA",
+    "maruti": "MARUTI",
+}
+
+
+INVALID_EVENT_TIMESTAMP = datetime(1970, 1, 1, 0, 0, tzinfo=UTC)
+
 
 @dataclass
 class Event:
     """Unified event schema used across the whole system, regardless of
     which source (macro calendar, corporate announcement, or news) it came from."""
+
     event_id: str
-    source: str                          # "MACRO", "CORPORATE", "NEWS"
-    event_type: str                      # e.g. "RBI_POLICY", "CORPORATE_ANNOUNCEMENT", "NEWS_HEADLINE"
+    source: str  # "MACRO", "CORPORATE", "NEWS"
+    event_type: str  # e.g. "RBI_POLICY", "CORPORATE_ANNOUNCEMENT", "NEWS_HEADLINE"
     timestamp: datetime
-    scope: str                           # MARKET | SECTOR | STOCK
-    affected_tickers: List[str]          # explicit list, never implied
-    sector: Optional[str] = None
-    confidence_in_scope: float = 1.0     # 1.0 = certain, lower = ambiguous, needs human review
+    scope: str  # MARKET | SECTOR | STOCK
+    affected_tickers: list[str]  # explicit list, never implied
+    sector: str | None = None
+    confidence_in_scope: float = 1.0  # 1.0 = certain, lower = ambiguous, needs human review
     headline_or_label: str = ""
-    sentiment_score: Optional[float] = None
-    magnitude_estimate: str = "MEDIUM"   # "LOW" | "MEDIUM" | "HIGH"
-    raw: Optional[dict] = field(default=None, repr=False)
+    sentiment_score: float | None = None
+    magnitude_estimate: str = "MEDIUM"  # "LOW" | "MEDIUM" | "HIGH"
+    impact_horizon: str = HORIZON_INTRADAY
+    raw: dict | None = field(default=None, repr=False)
+    source_confidence: float = 1.0  # keyword=0.5, entity=0.8, curated=1.0
+
+    def __post_init__(self):
+        # DATA-004: Standardize internal timestamps on timezone-aware UTC
+        if self.timestamp.tzinfo is None:
+            raise ValueError(
+                f"Naive datetime rejected in Event.timestamp: {self.timestamp}. Must be timezone-aware UTC."
+            )
 
     def needs_human_review(self, low_confidence_threshold: float = 0.5) -> bool:
         return self.confidence_in_scope < low_confidence_threshold
+
+
+@dataclass
+class EventBatchResult:
+    events: list[Event]
+    status: str  # EVENTS_AVAILABLE, NO_EVENTS, EVENT_SOURCE_UNAVAILABLE, EVENT_SOURCE_PARTIAL
+    errors: list[str] = field(default_factory=list)
 
 
 class EventClassifier:
@@ -96,7 +157,7 @@ class EventClassifier:
     scope tag and explicit affected-ticker list.
     """
 
-    def __init__(self, macro_calendar: Optional[MacroCalendar] = None):
+    def __init__(self, macro_calendar: MacroCalendar | None = None):
         self.macro_calendar = macro_calendar or MacroCalendar()
         self._event_counter = 0
 
@@ -104,15 +165,18 @@ class EventClassifier:
         self._event_counter += 1
         return f"{prefix}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{self._event_counter}"
 
-    def _sectors_to_tickers(self, sectors: List[str]) -> List[str]:
-        """Expand a list of sector names (or ['ALL']) into a flat ticker list."""
+    def _sectors_to_tickers(self, sectors: list[str], as_of: datetime | date | str | None = None) -> list[str]:
+        """Expand a list of sector names (or ['ALL']) into a flat ticker list (DATA-007: optionally point-in-time)."""
         if not sectors:
             return []
         if "ALL" in sectors:
             return list(NIFTY50_SYMBOLS)
-        tickers: List[str] = []
+        tickers: list[str] = []
         for sector in sectors:
-            tickers.extend(SECTOR_TO_SYMBOLS.get(sector, []))
+            sec_tickers = sector_map_provider.get_symbols_for_sector(sector, as_of=as_of)
+            if not sec_tickers:
+                sec_tickers = SECTOR_TO_SYMBOLS.get(sector, [])
+            tickers.extend(sec_tickers)
         return sorted(set(tickers))
 
     # -----------------------------------------------------------------
@@ -129,82 +193,155 @@ class EventClassifier:
             if scope == SCOPE_STOCK:
                 tickers = sectors
             else:
-                tickers = self._sectors_to_tickers(sectors)
+                tickers = self._sectors_to_tickers(sectors, as_of=macro_event.event_date)
                 # If expansion only touches a subset (not literally ALL), this is really SECTOR scope
                 if "ALL" not in sectors and scope == SCOPE_MARKET:
                     scope = SCOPE_SECTOR
 
-            return Event(
+            evt = Event(
                 event_id=self._next_event_id("MACRO"),
                 source="MACRO",
                 event_type=macro_event.event_type,
-                timestamp=datetime.combine(macro_event.event_date, datetime.min.time()),
+                timestamp=datetime.combine(macro_event.event_date, datetime.min.time(), tzinfo=UTC),
                 scope=scope,
                 affected_tickers=tickers,
                 sector=sectors[0] if scope == SCOPE_SECTOR and sectors and sectors[0] != "ALL" else None,
                 confidence_in_scope=1.0,  # macro calendar entries are human-curated, high confidence
                 headline_or_label=macro_event.label,
                 sentiment_score=None,
-                magnitude_estimate="HIGH" if macro_event.event_type in
-                    {"RBI_POLICY", "UNION_BUDGET", "ELECTION"} else "MEDIUM",
+                magnitude_estimate=(
+                    "HIGH"
+                    if macro_event.event_type in {"RBI_POLICY", "UNION_BUDGET", "ELECTION", "GEOPOLITICAL"}
+                    else "MEDIUM"
+                ),
+                impact_horizon=EVENT_IMPACT_HORIZON.get(macro_event.event_type, HORIZON_30D),
                 raw=None,
+                source_confidence=1.0,
             )
+            health_registry.report("event_classifier", ok=True)
+            return evt
         except Exception as e:
             logger.error(f"Failed classifying macro event {macro_event}: {e}")
+            health_registry.report("event_classifier", ok=False, detail="Failed classifying macro event", error=str(e))
             return self._fallback_event("MACRO", macro_event.label)
 
-    def get_active_macro_events_classified(self, check_date: Optional[date] = None) -> List[Event]:
+    def get_active_macro_events_classified(self, check_date: date | None = None) -> list[Event]:
         try:
             raw_events = self.macro_calendar.get_active_macro_events(check_date)
-            return [self.classify_macro_event(e) for e in raw_events]
+            res = [self.classify_macro_event(e) for e in raw_events]
+            health_registry.report("event_classifier", ok=True)
+            return res
         except Exception as e:
             logger.error(f"Failed getting active classified macro events: {e}")
+            health_registry.report(
+                "event_classifier", ok=False, detail="Failed getting active classified macro events", error=str(e)
+            )
             return []
 
     # -----------------------------------------------------------------
     # Corporate events -> Event objects (always STOCK scope, single symbol)
     # -----------------------------------------------------------------
-    def classify_corporate_event(self, corporate_event: dict) -> Event:
+    def classify_corporate_event(self, corporate_event: dict, allow_invalid: bool = False) -> Event:
         try:
             symbol = corporate_event.get("symbol")
             category = corporate_event.get("category", "CORPORATE_ANNOUNCEMENT")
             raw = corporate_event.get("raw", {})
             label = raw.get("subject") or raw.get("desc") or raw.get("purpose") or category
 
+            source_timestamp = raw.get("published_at") or raw.get("timestamp") or corporate_event.get("fetched_at")
+            if isinstance(source_timestamp, str):
+                try:
+                    source_timestamp = datetime.fromisoformat(source_timestamp.replace("Z", "+00:00"))
+                except ValueError:
+                    source_timestamp = None
+
+            if not isinstance(source_timestamp, datetime):
+                # DATA-005: Never fallback to datetime.now()! Reject the event
+                logger.warning(
+                    f"DATA-005: Invalid/missing timestamp in corporate event {corporate_event}. Rejecting event."
+                )
+                if allow_invalid:
+                    source_timestamp = INVALID_EVENT_TIMESTAMP
+                else:
+                    raise ValueError(f"Invalid or missing corporate event timestamp for {symbol or 'UNKNOWN'}")
+
+            if source_timestamp.tzinfo is None:
+                source_timestamp = source_timestamp.replace(tzinfo=UTC)
+            else:
+                source_timestamp = source_timestamp.astimezone(UTC)
+
             affected = [symbol] if symbol else []
             scope = SCOPE_STOCK if symbol else SCOPE_MARKET  # market-wide block deals have no single symbol
 
-            return Event(
+            if source_timestamp:
+                sec = sector_map_provider.get_sector(symbol, as_of=source_timestamp) if symbol else None
+                sector_val = sec if sec and sec != "Unknown" else None
+            else:
+                sector_val = SECTOR_MAP.get(symbol) if symbol else None
+
+            evt = Event(
                 event_id=self._next_event_id("CORP"),
                 source="CORPORATE",
                 event_type=category,
-                timestamp=datetime.now(),
+                timestamp=source_timestamp,
                 scope=scope,
                 affected_tickers=affected,
-                sector=SECTOR_MAP.get(symbol) if symbol else None,
+                sector=sector_val,
                 confidence_in_scope=1.0,  # sourced directly from NSE, high confidence
                 headline_or_label=str(label),
                 sentiment_score=None,
                 magnitude_estimate="MEDIUM",
+                impact_horizon=EVENT_IMPACT_HORIZON.get(
+                    category, EVENT_IMPACT_HORIZON.get("CORPORATE_ANNOUNCEMENT", HORIZON_INTRADAY)
+                ),
                 raw=raw,
+                source_confidence=1.0,
             )
+            health_registry.report("event_classifier", ok=True)
+            return evt
         except Exception as e:
             logger.error(f"Failed classifying corporate event {corporate_event}: {e}")
+            health_registry.report(
+                "event_classifier", ok=False, detail="Failed classifying corporate event", error=str(e)
+            )
             return self._fallback_event("CORPORATE", str(corporate_event))
 
     # -----------------------------------------------------------------
     # News events -> Event objects (STOCK by default, escalated to SECTOR/MARKET
     # only when the headline text matches a known keyword hint)
     # -----------------------------------------------------------------
-    def classify_news_event(self, news_article: dict) -> Event:
+    def classify_news_event(self, news_article: dict, allow_invalid: bool = False) -> Event:
         try:
             symbol = news_article.get("symbol")
             title = news_article.get("title", "")
             title_lower = title.lower()
 
-            matched_sectors: Optional[List[str]] = None
+            pub_at = news_article.get("published_at")
+            if isinstance(pub_at, str):
+                try:
+                    pub_at = datetime.fromisoformat(pub_at.replace("Z", "+00:00"))
+                except ValueError:
+                    pub_at = None
+
+            if not isinstance(pub_at, datetime):
+                # DATA-005: Never fallback to datetime.now()! Reject the event
+                logger.warning(f"DATA-005: Invalid/missing published_at in news article {title}. Rejecting event.")
+                if allow_invalid:
+                    pub_at = INVALID_EVENT_TIMESTAMP
+                else:
+                    raise ValueError(f"Invalid or missing published_at in news article: {title}")
+
+            if pub_at.tzinfo is None:
+                pub_at = pub_at.replace(tzinfo=UTC)
+            else:
+                pub_at = pub_at.astimezone(UTC)
+
+            matched_sectors: list[str] | None = None
             for keyword, sectors in NEWS_KEYWORD_SECTOR_HINTS.items():
                 if keyword in title_lower:
+                    negatives = NEWS_KEYWORD_NEGATIVE_PATTERNS.get(keyword, [])
+                    if any(neg in title_lower for neg in negatives):
+                        continue
                     if keyword == "rupee":
                         matched_sectors = self._classify_currency_headline(title_lower)
                     else:
@@ -213,21 +350,39 @@ class EventClassifier:
 
             if matched_sectors:
                 scope = SCOPE_MARKET if "ALL" in matched_sectors else SCOPE_SECTOR
-                tickers = self._sectors_to_tickers(matched_sectors)
+                tickers = self._sectors_to_tickers(matched_sectors, as_of=pub_at)
                 confidence = 0.6  # keyword-matched macro-relevance is inherently less certain than a direct tag
+                source_confidence = 0.5
                 sector_val = None if scope == SCOPE_MARKET else matched_sectors[0]
             else:
-                # No macro keyword matched -> stays scoped to the single stock it was fetched for
+                # No macro keyword matched -> check company name entity extraction if symbol not explicit
+                if not symbol:
+                    for c_name, c_sym in COMPANY_NAME_TO_SYMBOL.items():
+                        if re.search(r"\b" + re.escape(c_name) + r"\b", title_lower):
+                            symbol = c_sym
+                            break
+                    if not symbol:
+                        for sym in NIFTY50_SYMBOLS:
+                            if re.search(r"\b" + re.escape(sym.lower()) + r"\b", title_lower):
+                                symbol = sym
+                                break
+
+                # Stays scoped to the single stock it was fetched for or recognized by entity
                 scope = SCOPE_STOCK
                 tickers = [symbol] if symbol else []
                 confidence = 1.0 if symbol else 0.3
-                sector_val = SECTOR_MAP.get(symbol) if symbol else None
+                source_confidence = 0.8 if symbol else 0.3
+                if pub_at:
+                    sec = sector_map_provider.get_sector(symbol, as_of=pub_at) if symbol else None
+                    sector_val = sec if sec and sec != "Unknown" else None
+                else:
+                    sector_val = SECTOR_MAP.get(symbol) if symbol else None
 
-            return Event(
+            evt = Event(
                 event_id=self._next_event_id("NEWS"),
                 source="NEWS",
                 event_type="NEWS_HEADLINE",
-                timestamp=news_article.get("published_at") or datetime.now(),
+                timestamp=pub_at,
                 scope=scope,
                 affected_tickers=tickers,
                 sector=sector_val,
@@ -235,14 +390,19 @@ class EventClassifier:
                 headline_or_label=title,
                 sentiment_score=news_article.get("sentiment_score"),
                 magnitude_estimate="HIGH" if scope == SCOPE_MARKET else "MEDIUM",
+                impact_horizon=EVENT_IMPACT_HORIZON.get("NEWS_HEADLINE", HORIZON_INTRADAY),
                 raw=news_article,
+                source_confidence=source_confidence,
             )
+            health_registry.report("event_classifier", ok=True)
+            return evt
         except Exception as e:
             logger.error(f"Failed classifying news event {news_article}: {e}")
+            health_registry.report("event_classifier", ok=False, detail="Failed classifying news event", error=str(e))
             return self._fallback_event("NEWS", news_article.get("title", ""))
 
     @staticmethod
-    def _classify_currency_headline(title_lower: str) -> List[str]:
+    def _classify_currency_headline(title_lower: str) -> list[str]:
         """USD/INR moves affect exporters and importers in opposite directions —
         this needs its own logic rather than a flat sector list."""
         if "weak" in title_lower or "depreciat" in title_lower or "falls" in title_lower:
@@ -255,12 +415,13 @@ class EventClassifier:
 
     def _fallback_event(self, source: str, label: str) -> Event:
         """Used only when classification itself throws — produces a safe,
-        low-confidence, STOCK-scoped-to-nothing event that human review will catch."""
+        low-confidence, STOCK-scoped-to-nothing event that human review will catch.
+        DATA-005: Uses INVALID_EVENT_TIMESTAMP, never datetime.now()."""
         return Event(
             event_id=self._next_event_id(f"{source}_FALLBACK"),
             source=source,
             event_type="CLASSIFICATION_ERROR",
-            timestamp=datetime.now(),
+            timestamp=INVALID_EVENT_TIMESTAMP,
             scope=SCOPE_STOCK,
             affected_tickers=[],
             sector=None,
@@ -268,27 +429,94 @@ class EventClassifier:
             headline_or_label=label,
             sentiment_score=None,
             magnitude_estimate="LOW",
+            impact_horizon=EVENT_IMPACT_HORIZON.get("CLASSIFICATION_ERROR", HORIZON_INTRADAY),
             raw=None,
+            source_confidence=0.0,
         )
 
     def classify_batch(
         self,
-        macro_events: Optional[List[MacroEvent]] = None,
-        corporate_events: Optional[List[dict]] = None,
-        news_articles: Optional[List[dict]] = None,
-    ) -> List[Event]:
+        macro_events: list[MacroEvent] | None = None,
+        corporate_events: list[dict] | None = None,
+        news_articles: list[dict] | None = None,
+    ) -> EventBatchResult:
         """Classify a mixed batch from all three sources into one unified Event list."""
-        results: List[Event] = []
-        try:
-            for m in (macro_events or []):
-                results.append(self.classify_macro_event(m))
-            for c in (corporate_events or []):
-                results.append(self.classify_corporate_event(c))
-            for n in (news_articles or []):
-                results.append(self.classify_news_event(n))
-        except Exception as e:
-            logger.error(f"Failed classifying event batch: {e}")
-        return results
+        results: list[Event] = []
+        errors: list[str] = []
+
+        sources_total = 3
+        sources_unavailable = 0
+
+        # Note: If the argument is explicitly passed as an empty list [], it means
+        # the source was available but yielded no events. If it is None, the source
+        # failed or was unavailable.
+        if macro_events is None:
+            sources_unavailable += 1
+            errors.append("Macro events source unavailable")
+        else:
+            for m in macro_events:
+                try:
+                    evt = self.classify_macro_event(m)
+                    if evt.timestamp != INVALID_EVENT_TIMESTAMP and evt.event_type != "CLASSIFICATION_ERROR":
+                        results.append(evt)
+                    else:
+                        errors.append(f"Rejected macro event with invalid timestamp: {m.label}")
+                except Exception as e:
+                    errors.append(f"Error classifying macro event: {e}")
+
+        if corporate_events is None:
+            sources_unavailable += 1
+            errors.append("Corporate events source unavailable")
+        else:
+            for c in corporate_events:
+                try:
+                    evt = self.classify_corporate_event(c)
+                    if evt.timestamp != INVALID_EVENT_TIMESTAMP and evt.event_type != "CLASSIFICATION_ERROR":
+                        results.append(evt)
+                    else:
+                        errors.append(
+                            f"Rejected corporate event with invalid timestamp or classification error: {c.get('symbol', 'UNKNOWN')}"
+                        )
+                except Exception as e:
+                    errors.append(f"Error classifying corporate event: {e}")
+
+        if news_articles is None:
+            sources_unavailable += 1
+            errors.append("News articles source unavailable")
+        else:
+            for n in news_articles:
+                try:
+                    evt = self.classify_news_event(n)
+                    if evt.timestamp != INVALID_EVENT_TIMESTAMP and evt.event_type != "CLASSIFICATION_ERROR":
+                        results.append(evt)
+                    else:
+                        errors.append(
+                            f"Rejected news event with invalid timestamp or classification error: {n.get('title', '')}"
+                        )
+                except Exception as e:
+                    errors.append(f"Error classifying news event: {e}")
+
+        if sources_unavailable == sources_total:
+            status = "EVENT_SOURCE_UNAVAILABLE"
+        elif sources_unavailable > 0:
+            status = "EVENT_SOURCE_PARTIAL"
+        elif len(results) == 0:
+            status = "NO_EVENTS"
+        else:
+            status = "EVENTS_AVAILABLE"
+
+        if errors:
+            logger.error(f"Event classification encountered errors: {errors}")
+            health_registry.report(
+                "event_classifier",
+                ok=(status != "EVENT_SOURCE_UNAVAILABLE"),
+                detail="Errors in classify_batch",
+                error=str(errors),
+            )
+        else:
+            health_registry.report("event_classifier", ok=True)
+
+        return EventBatchResult(events=results, status=status, errors=errors)
 
 
 # ---------------------------------------------------------------------------
@@ -304,8 +532,13 @@ if __name__ == "__main__":
 
         # Test 1: macro event (RBI policy) -> should be SECTOR scope (rate-sensitive sectors only)
         rbi_macro = MacroEvent(
-            event_date=date(2026, 8, 5), event_type="RBI_POLICY", label="RBI MPC Policy Decision",
-            scope="MARKET", sector_hint="ALL", impact_window_days_before=1, impact_window_days_after=1,
+            event_date=date(2026, 8, 5),
+            event_type="RBI_POLICY",
+            label="RBI MPC Policy Decision",
+            scope="MARKET",
+            sector_hint="ALL",
+            impact_window_days_before=1,
+            impact_window_days_after=1,
         )
         rbi_event = classifier.classify_macro_event(rbi_macro)
         print(f"RBI macro event -> scope={rbi_event.scope}, affected_tickers={len(rbi_event.affected_tickers)}")
@@ -314,35 +547,54 @@ if __name__ == "__main__":
         assert "INFY" not in rbi_event.affected_tickers, "IT stocks should NOT be tagged for a pure rate event"
 
         # Test 2: corporate event -> should be STOCK scope, single ticker
-        corp_raw = {"symbol": "RELIANCE", "category": "CORPORATE_ANNOUNCEMENT",
-                    "raw": {"subject": "Board Meeting Intimation"}, "fetched_at": datetime.now().isoformat()}
+        corp_raw = {
+            "symbol": "RELIANCE",
+            "category": "CORPORATE_ANNOUNCEMENT",
+            "raw": {"subject": "Board Meeting Intimation"},
+            "fetched_at": datetime.now().isoformat(),
+        }
         corp_event = classifier.classify_corporate_event(corp_raw)
         print(f"Corporate event -> scope={corp_event.scope}, affected_tickers={corp_event.affected_tickers}")
         assert corp_event.scope == SCOPE_STOCK
         assert corp_event.affected_tickers == ["RELIANCE"]
 
         # Test 3: news headline with a sector keyword (crude) -> should escalate to SECTOR scope
-        news_crude = {"symbol": "RELIANCE", "title": "Crude oil prices spike 6% overnight on supply fears",
-                      "published_at": datetime.now(), "sentiment_score": -0.4}
+        news_crude = {
+            "symbol": "RELIANCE",
+            "title": "Crude oil prices spike 6% overnight on supply fears",
+            "published_at": datetime.now(),
+            "sentiment_score": -0.4,
+        }
         news_event = classifier.classify_news_event(news_crude)
-        print(f"Crude news event -> scope={news_event.scope}, sectors touched via tickers={len(news_event.affected_tickers)}")
+        print(
+            f"Crude news event -> scope={news_event.scope}, sectors touched via tickers={len(news_event.affected_tickers)}"
+        )
         assert news_event.scope == SCOPE_SECTOR
         assert "MARUTI" in news_event.affected_tickers  # Auto sector should be tagged for crude sensitivity
 
         # Test 4: plain single-stock news with no macro keyword -> should stay STOCK scope
-        news_plain = {"symbol": "TCS", "title": "TCS wins new multi-year contract with European client",
-                      "published_at": datetime.now(), "sentiment_score": 0.5}
+        news_plain = {
+            "symbol": "TCS",
+            "title": "TCS wins new multi-year contract with European client",
+            "published_at": datetime.now(),
+            "sentiment_score": 0.5,
+        }
         news_plain_event = classifier.classify_news_event(news_plain)
-        print(f"Plain company news -> scope={news_plain_event.scope}, affected_tickers={news_plain_event.affected_tickers}")
+        print(
+            f"Plain company news -> scope={news_plain_event.scope}, affected_tickers={news_plain_event.affected_tickers}"
+        )
         assert news_plain_event.scope == SCOPE_STOCK
         assert news_plain_event.affected_tickers == ["TCS"]
 
         # Test 5: batch classification combines all sources correctly
-        batch = classifier.classify_batch(
-            macro_events=[rbi_macro], corporate_events=[corp_raw], news_articles=[news_crude, news_plain],
+        batch_res = classifier.classify_batch(
+            macro_events=[rbi_macro],
+            corporate_events=[corp_raw],
+            news_articles=[news_crude, news_plain],
         )
-        print(f"Batch classification produced {len(batch)} unified events (expected 4)")
-        assert len(batch) == 4
+        print(f"Batch classification produced {len(batch_res.events)} unified events (expected 4)")
+        assert len(batch_res.events) == 4
+        assert batch_res.status == "EVENTS_AVAILABLE"
 
         print("STATUS: PASS")
         logger.info("event_classifier.py self-test passed.")

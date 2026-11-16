@@ -1,0 +1,62 @@
+symbol,sector,industry,effective_from,effective_to,source,notes
+RELIANCE,Energy,Oil & Gas - Integrated,2020-01-01,,NSE Sector Classification,Core index constituent
+ONGC,Energy,Oil & Gas - Exploration & Production,2020-01-01,,NSE Sector Classification,Core index constituent
+BPCL,Energy,Oil & Gas - Refining & Marketing,2020-01-01,,NSE Sector Classification,Core index constituent
+COALINDIA,Energy,Coal Mining,2020-01-01,,NSE Sector Classification,Core index constituent
+NTPC,Power,Electric Utilities,2020-01-01,,NSE Sector Classification,Core index constituent
+POWERGRID,Power,Electric Utilities - Transmission,2020-01-01,,NSE Sector Classification,Core index constituent
+ADANIENT,Conglomerate,Diversified Trading & Operations,2022-09-30,,NSE Sector Classification,Included on 2022-09-30
+ADANIPORTS,Infra,Ports & Logistics,2020-01-01,,NSE Sector Classification,Core index constituent
+HDFCBANK,Banking,Private Sector Bank,2020-01-01,,NSE Sector Classification,Core index constituent
+ICICIBANK,Banking,Private Sector Bank,2020-01-01,,NSE Sector Classification,Core index constituent
+SBIN,Banking,Public Sector Bank,2020-01-01,,NSE Sector Classification,Core index constituent
+KOTAKBANK,Banking,Private Sector Bank,2020-01-01,,NSE Sector Classification,Core index constituent
+AXISBANK,Banking,Private Sector Bank,2020-01-01,,NSE Sector Classification,Core index constituent
+INDUSINDBK,Banking,Private Sector Bank,2020-01-01,,NSE Sector Classification,Core index constituent
+BAJFINANCE,NBFC,Consumer Finance,2020-01-01,,NSE Sector Classification,Core index constituent
+BAJAJFINSV,NBFC,Financial Services Holding,2020-01-01,,NSE Sector Classification,Core index constituent
+SHRIRAMFIN,AutoFinance,Commercial Vehicle Finance,2020-01-01,2022-11-29,NSE Historical Review,Pre-merger Shriram Transport Finance
+SHRIRAMFIN,NBFC,Commercial Vehicle & Consumer Finance,2022-11-30,,NSE Sector Classification,Post-merger Shriram Finance
+SBILIFE,Insurance,Life Insurance,2020-09-25,,NSE Sector Classification,Included on 2020-09-25
+HDFCLIFE,Insurance,Life Insurance,2020-01-01,,NSE Sector Classification,Core index constituent
+INFY,IT,IT Services & Consulting,2020-01-01,,NSE Sector Classification,Core index constituent
+TCS,IT,IT Services & Consulting,2020-01-01,,NSE Sector Classification,Core index constituent
+HCLTECH,IT,IT Services & Consulting,2020-01-01,,NSE Sector Classification,Core index constituent
+WIPRO,IT,IT Services & Consulting,2020-01-01,,NSE Sector Classification,Core index constituent
+TECHM,IT,IT Services & Telecom Solutions,2020-01-01,,NSE Sector Classification,Core index constituent
+BHARTIARTL,Telecom,Wireless Telecommunication Services,2020-01-01,,NSE Sector Classification,Core index constituent
+LT,Infra,Engineering & Construction,2020-01-01,,NSE Sector Classification,Core index constituent
+ULTRACEMCO,Cement,Cement & Building Materials,2020-01-01,,NSE Sector Classification,Core index constituent
+GRASIM,Cement,Diversified Materials & Chemicals,2020-01-01,,NSE Sector Classification,Core index constituent
+ITC,FMCG,Diversified Consumer Goods & Tobacco,2020-01-01,,NSE Sector Classification,Core index constituent
+HINDUNILVR,FMCG,Personal & Home Care,2020-01-01,,NSE Sector Classification,Core index constituent
+NESTLEIND,FMCG,Packaged Foods,2020-01-01,,NSE Sector Classification,Core index constituent
+BRITANNIA,FMCG,Bakery & Food Products,2020-01-01,,NSE Sector Classification,Core index constituent
+TATACONSUM,Beverages,Tea & Coffee,2020-01-01,2021-02-28,NSE Historical Review,Tata Global Beverages pre-merger reclassification
+TATACONSUM,FMCG,Tea Coffee & Consumer Staples,2021-03-01,,NSE Sector Classification,Post-merger consumer products business
+MARUTI,Auto,Passenger Vehicles,2020-01-01,,NSE Sector Classification,Core index constituent
+M&M,Auto,Commercial & Passenger Vehicles / Farm,2020-01-01,,NSE Sector Classification,Core index constituent
+EICHERMOT,Auto,Motorcycles & Commercial Vehicles,2020-01-01,,NSE Sector Classification,Core index constituent
+HEROMOTOCO,Auto,Two Wheelers,2020-01-01,,NSE Sector Classification,Core index constituent
+BAJAJ-AUTO,Auto,Two & Three Wheelers,2020-01-01,,NSE Sector Classification,Core index constituent
+TATAMOTORS,Auto,Passenger & Commercial Vehicles,2020-01-01,,NSE Sector Classification,Core index constituent
+SUNPHARMA,Pharma,Pharmaceuticals & Generics,2020-01-01,,NSE Sector Classification,Core index constituent
+CIPLA,Pharma,Pharmaceuticals & Generics,2020-01-01,,NSE Sector Classification,Core index constituent
+DRREDDY,Pharma,Pharmaceuticals & Active Ingredients,2020-01-01,,NSE Sector Classification,Core index constituent
+DIVISLAB,Pharma,Active Pharmaceutical Ingredients (API),2020-09-25,2024-09-29,NSE Sector Classification,In index from 2020-09-25 to 2024-09-29
+APOLLOHOSP,Healthcare,Hospitals & Healthcare Services,2022-03-31,,NSE Sector Classification,Included on 2022-03-31
+TITAN,ConsumerDurables,Jewelry & Watches,2020-01-01,,NSE Sector Classification,Core index constituent
+ASIANPAINT,ConsumerDurables,Paints & Home Decor,2020-01-01,,NSE Sector Classification,Core index constituent
+JSWSTEEL,Metals,Steel Manufacturing,2020-01-01,,NSE Sector Classification,Core index constituent
+TATASTEEL,Metals,Steel & Iron Products,2020-01-01,,NSE Sector Classification,Core index constituent
+HINDALCO,Metals,Aluminum & Copper,2020-01-01,,NSE Sector Classification,Core index constituent
+BEL,CapitalGoods,Defense & Aerospace Electronics,2024-09-30,,NSE Sector Classification,Included on 2024-09-30
+TRENT,Retail,Apparel & Departmental Stores,2024-09-30,,NSE Sector Classification,Included on 2024-09-30
+HDFC,NBFC,Housing Finance,2020-01-01,2023-07-12,NSE Sector Classification,Merged with HDFC Bank on 2023-07-13
+LTIM,IT,IT Services & Consulting,2023-07-13,2024-09-29,NSE Sector Classification,In index from 2023-07-13 to 2024-09-29
+UPL,Chemicals,Agrochemicals & Crop Protection,2020-01-01,2024-03-27,NSE Sector Classification,In index until 2024-03-27
+SHREECEM,Cement,Cement & Building Materials,2020-01-01,2022-09-29,NSE Sector Classification,In index until 2022-09-29
+IOC,Energy,Oil & Gas - Refining & Marketing,2020-01-01,2022-03-30,NSE Sector Classification,In index until 2022-03-30
+GAIL,Utilities,Natural Gas Transmission & Distribution,2020-01-01,2021-03-30,NSE Sector Classification,In index until 2021-03-30
+ZEEL,Media,Broadcasting & Media Entertainment,2020-01-01,2020-09-24,NSE Sector Classification,In index until 2020-09-24
+INFRATEL,Telecom,Telecom Infrastructure & Towers,2020-01-01,2020-09-24,NSE Sector Classification,In index until 2020-09-24

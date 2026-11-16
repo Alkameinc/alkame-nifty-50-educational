@@ -1,0 +1,14 @@
+﻿date,holiday_name,day_of_week,holiday_type
+2027-01-26,Republic Day,Tuesday,TRADING_HOLIDAY
+2027-03-22,Holi,Monday,TRADING_HOLIDAY
+2027-03-26,Good Friday,Friday,TRADING_HOLIDAY
+2027-04-14,Dr. Baba Saheb Ambedkar Jayanti,Wednesday,TRADING_HOLIDAY
+2027-04-19,Shri Mahavir Jayanti,Monday,TRADING_HOLIDAY
+2027-05-01,Maharashtra Day,Saturday,WEEKEND_HOLIDAY
+2027-08-15,Independence Day,Sunday,WEEKEND_HOLIDAY
+2027-10-02,Mahatma Gandhi Jayanti,Saturday,WEEKEND_HOLIDAY
+2027-10-11,Dussehra,Monday,TRADING_HOLIDAY
+2027-10-29,Diwali Laxmi Pujan,Friday,SPECIAL_MUHURAT_SESSION
+2027-11-01,Diwali-Balipratipada,Monday,TRADING_HOLIDAY
+2027-11-14,Guru Nanak Jayanti,Sunday,WEEKEND_HOLIDAY
+2027-12-25,Christmas,Saturday,WEEKEND_HOLIDAY

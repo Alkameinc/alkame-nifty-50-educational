@@ -1,0 +1,29 @@
+﻿groups:
+  - name: alkame_api_alerts
+    rules:
+      - alert: HighErrorRate
+        expr: rate(fastapi_responses_total{status=~"5.."}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High API Error Rate"
+          description: "API is returning 5xx errors for more than 5% of requests."
+
+      - alert: InstanceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Instance Down"
+          description: "Prometheus could not scrape the Alkame API instance."
+          
+      - alert: ModelLoadFailures
+        expr: rate(model_load_failures_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Model Load Failures Detected"
+          description: "The predictor is failing to load models, possibly due to corruption."

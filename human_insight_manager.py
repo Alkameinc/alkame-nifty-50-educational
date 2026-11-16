@@ -4,13 +4,12 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
 
 # 2. Third-party imports
 # (none required — stdlib sqlite3 only)
-
 # 3. Local imports
-from config import DB_PATH, ensure_directories, configure_logging
+from config import DB_PATH, configure_logging, ensure_directories
+from health_monitor import registry as health_registry
 from predictor import PredictionSignal
 
 # 4. Logger setup
@@ -29,7 +28,7 @@ class NoteRecord:
     symbol: str
     timestamp: str
     note_text: str
-    related_action: Optional[str]
+    related_action: str | None
     created_by: str
 
 
@@ -50,7 +49,7 @@ class FeedbackRecord:
     symbol: str
     signal_timestamp: str
     original_action: str
-    was_helpful: Optional[bool]
+    was_helpful: bool | None
     outcome_notes: str
     rated_at: str
 
@@ -124,8 +123,9 @@ class HumanInsightManager:
     # -----------------------------------------------------------------
     # Notes
     # -----------------------------------------------------------------
-    def add_note(self, symbol: str, note_text: str, related_action: Optional[str] = None,
-                 created_by: str = DEFAULT_CREATED_BY) -> Optional[int]:
+    def add_note(
+        self, symbol: str, note_text: str, related_action: str | None = None, created_by: str = DEFAULT_CREATED_BY
+    ) -> int | None:
         conn = None
         try:
             conn = self._get_connection()
@@ -138,15 +138,17 @@ class HumanInsightManager:
             conn.commit()
             note_id = cursor.lastrowid
             logger.info(f"Added note #{note_id} for {symbol}: {note_text[:60]}")
+            health_registry.report("human_insight_manager", ok=True, detail=f"Added note for {symbol}")
             return note_id
         except Exception as e:
             logger.error(f"Failed adding note for {symbol}: {e}")
+            health_registry.report("human_insight_manager", ok=False, detail="Failed adding note", error=str(e))
             return None
         finally:
             if conn is not None:
                 conn.close()
 
-    def get_notes(self, symbol: Optional[str] = None, limit: int = 50) -> List[NoteRecord]:
+    def get_notes(self, symbol: str | None = None, limit: int = 50) -> list[NoteRecord]:
         conn = None
         try:
             conn = self._get_connection()
@@ -164,9 +166,11 @@ class HumanInsightManager:
                     (limit,),
                 )
             rows = cursor.fetchall()
+            health_registry.report("human_insight_manager", ok=True)
             return [NoteRecord(*row) for row in rows]
         except Exception as e:
             logger.error(f"Failed fetching notes for symbol={symbol}: {e}")
+            health_registry.report("human_insight_manager", ok=False, detail="Failed fetching notes", error=str(e))
             return []
         finally:
             if conn is not None:
@@ -175,8 +179,14 @@ class HumanInsightManager:
     # -----------------------------------------------------------------
     # Overrides
     # -----------------------------------------------------------------
-    def record_override(self, symbol: str, original_action: str, overridden_action: str, reason: str,
-                         created_by: str = DEFAULT_CREATED_BY) -> Optional[int]:
+    def record_override(
+        self,
+        symbol: str,
+        original_action: str,
+        overridden_action: str,
+        reason: str,
+        created_by: str = DEFAULT_CREATED_BY,
+    ) -> int | None:
         if not reason or not reason.strip():
             logger.error(f"Refusing to record override for {symbol} without a reason — reason is mandatory.")
             return None
@@ -195,15 +205,17 @@ class HumanInsightManager:
                 f"Recorded override #{override_id} for {symbol}: {original_action} -> {overridden_action} "
                 f"(reason: {reason[:60]})"
             )
+            health_registry.report("human_insight_manager", ok=True, detail=f"Recorded override for {symbol}")
             return override_id
         except Exception as e:
             logger.error(f"Failed recording override for {symbol}: {e}")
+            health_registry.report("human_insight_manager", ok=False, detail="Failed recording override", error=str(e))
             return None
         finally:
             if conn is not None:
                 conn.close()
 
-    def get_overrides(self, symbol: Optional[str] = None, limit: int = 50) -> List[OverrideRecord]:
+    def get_overrides(self, symbol: str | None = None, limit: int = 50) -> list[OverrideRecord]:
         conn = None
         try:
             conn = self._get_connection()
@@ -221,16 +233,22 @@ class HumanInsightManager:
                     (limit,),
                 )
             rows = cursor.fetchall()
+            health_registry.report("human_insight_manager", ok=True)
             return [OverrideRecord(*row) for row in rows]
         except Exception as e:
             logger.error(f"Failed fetching overrides for symbol={symbol}: {e}")
+            health_registry.report("human_insight_manager", ok=False, detail="Failed fetching overrides", error=str(e))
             return []
         finally:
             if conn is not None:
                 conn.close()
 
     def apply_override_to_signal(
-        self, signal: PredictionSignal, overridden_action: str, reason: str, created_by: str = DEFAULT_CREATED_BY,
+        self,
+        signal: PredictionSignal,
+        overridden_action: str,
+        reason: str,
+        created_by: str = DEFAULT_CREATED_BY,
     ) -> PredictionSignal:
         """
         Records the override for audit purposes AND returns a new
@@ -238,27 +256,45 @@ class HumanInsightManager:
         original output is preserved in reasoning, never silently erased.
         """
         self.record_override(signal.symbol, signal.action, overridden_action, reason, created_by)
-        updated_reasoning = list(signal.reasoning) + [
+        new_reasoning = list(signal.reasoning) + [
             f"HUMAN OVERRIDE by {created_by}: changed action from {signal.action} to {overridden_action}. "
             f"Reason: {reason}"
         ]
         return PredictionSignal(
-            symbol=signal.symbol, timestamp=signal.timestamp, action=overridden_action,
-            model_predicted_class=signal.model_predicted_class, raw_confidence=signal.raw_confidence,
+            symbol=signal.symbol,
+            timestamp=signal.timestamp,
+            horizon=signal.horizon,
+            action=overridden_action,
+            model_predicted_class=signal.model_predicted_class,
+            model_version=signal.model_version,
+            feature_version=signal.feature_version,
+            raw_confidence=signal.raw_confidence,
             risk_adjusted_confidence=signal.risk_adjusted_confidence,
-            calibrated_confidence=signal.calibrated_confidence, agreement_fraction=signal.agreement_fraction,
-            downside_summary=signal.downside_summary, upside_summary=signal.upside_summary,
-            reasoning=updated_reasoning, contributing_events=signal.contributing_events,
-            global_risk_level=signal.global_risk_level, risk_toggle_enabled=signal.risk_toggle_enabled,
-            is_safe_to_trade_live=signal.is_safe_to_trade_live, data_stale=signal.data_stale,
-            suppressed=signal.suppressed, suppression_reasons=signal.suppression_reasons,
+            calibrated_confidence=signal.calibrated_confidence,
+            agreement_fraction=signal.agreement_fraction,
+            downside_summary=signal.downside_summary,
+            upside_summary=signal.upside_summary,
+            reasoning=new_reasoning,
+            contributing_events=signal.contributing_events,
+            global_risk_level=signal.global_risk_level,
+            risk_toggle_enabled=signal.risk_toggle_enabled,
+            is_safe_to_trade_live=signal.is_safe_to_trade_live,
+            data_stale=signal.data_stale,
+            suppressed=signal.suppressed,
+            suppression_reasons=signal.suppression_reasons,
         )
 
     # -----------------------------------------------------------------
     # Feedback
     # -----------------------------------------------------------------
-    def record_feedback(self, symbol: str, signal_timestamp: str, original_action: str,
-                         was_helpful: Optional[bool], outcome_notes: str = "") -> Optional[int]:
+    def record_feedback(
+        self,
+        symbol: str,
+        signal_timestamp: str,
+        original_action: str,
+        was_helpful: bool | None,
+        outcome_notes: str = "",
+    ) -> int | None:
         conn = None
         try:
             conn = self._get_connection()
@@ -272,15 +308,17 @@ class HumanInsightManager:
             conn.commit()
             feedback_id = cursor.lastrowid
             logger.info(f"Recorded feedback #{feedback_id} for {symbol} ({original_action}): helpful={was_helpful}")
+            health_registry.report("human_insight_manager", ok=True, detail=f"Recorded feedback for {symbol}")
             return feedback_id
         except Exception as e:
             logger.error(f"Failed recording feedback for {symbol}: {e}")
+            health_registry.report("human_insight_manager", ok=False, detail="Failed recording feedback", error=str(e))
             return None
         finally:
             if conn is not None:
                 conn.close()
 
-    def get_feedback(self, symbol: Optional[str] = None, limit: int = 50) -> List[FeedbackRecord]:
+    def get_feedback(self, symbol: str | None = None, limit: int = 50) -> list[FeedbackRecord]:
         conn = None
         try:
             conn = self._get_connection()
@@ -302,15 +340,17 @@ class HumanInsightManager:
             for row in rows:
                 helpful = None if row[4] is None else bool(row[4])
                 records.append(FeedbackRecord(row[0], row[1], row[2], row[3], helpful, row[5], row[6]))
+            health_registry.report("human_insight_manager", ok=True)
             return records
         except Exception as e:
             logger.error(f"Failed fetching feedback for symbol={symbol}: {e}")
+            health_registry.report("human_insight_manager", ok=False, detail="Failed fetching feedback", error=str(e))
             return []
         finally:
             if conn is not None:
                 conn.close()
 
-    def get_feedback_summary(self, symbol: Optional[str] = None) -> dict:
+    def get_feedback_summary(self, symbol: str | None = None) -> dict:
         records = self.get_feedback(symbol=symbol, limit=10_000)
         rated = [r for r in records if r.was_helpful is not None]
         if not rated:
@@ -328,6 +368,7 @@ class HumanInsightManager:
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     import os
+
     from config import DB_DIR
 
     configure_logging(log_filename="human_insight_manager_selftest.log")
@@ -346,7 +387,9 @@ if __name__ == "__main__":
         # Notes
         note_id = manager.add_note(test_symbol, "Watching for RBI policy reaction this week.", related_action="HOLD")
         notes = manager.get_notes(test_symbol)
-        print(f"Note added and retrieved: id={note_id}, count={len(notes)}, text='{notes[0].note_text if notes else None}'")
+        print(
+            f"Note added and retrieved: id={note_id}, count={len(notes)}, text='{notes[0].note_text if notes else None}'"
+        )
         assert note_id is not None and len(notes) == 1
 
         # Overrides — mandatory reason enforcement
@@ -358,29 +401,47 @@ if __name__ == "__main__":
             test_symbol, "BUY", "HOLD", reason="Waiting for board meeting outcome before acting."
         )
         overrides = manager.get_overrides(test_symbol)
-        print(f"Valid override recorded: id={override_id}, count={len(overrides)}, "
-              f"{overrides[0].original_action if overrides else None} -> {overrides[0].overridden_action if overrides else None}")
+        print(
+            f"Valid override recorded: id={override_id}, count={len(overrides)}, "
+            f"{overrides[0].original_action if overrides else None} -> {overrides[0].overridden_action if overrides else None}"
+        )
         assert override_id is not None and len(overrides) == 1
 
         # apply_override_to_signal — build a minimal fake PredictionSignal and override it
         fake_signal = PredictionSignal(
-            symbol=test_symbol, timestamp=datetime.now(), action="BUY", model_predicted_class="UP",
-            raw_confidence=0.7, risk_adjusted_confidence=0.7, calibrated_confidence=0.65, agreement_fraction=0.66,
-            downside_summary="Some downside.", upside_summary="Some upside.", reasoning=["Model said BUY."],
+            symbol=test_symbol,
+            timestamp=datetime.now(),
+            horizon="INTRADAY",
+            action="BUY",
+            model_predicted_class="UP",
+            model_version="UNKNOWN",
+            feature_version="UNKNOWN",
+            raw_confidence=0.7,
+            risk_adjusted_confidence=0.7,
+            calibrated_confidence=0.65,
+            agreement_fraction=0.66,
+            downside_summary="Some downside.",
+            upside_summary="Some upside.",
+            reasoning=["Model said BUY."],
         )
         overridden_signal = manager.apply_override_to_signal(
             fake_signal, overridden_action="HOLD", reason="Human wants to wait for confirmation."
         )
         print(f"Signal action after override: {overridden_signal.action} (was {fake_signal.action})")
-        print(f"Override reasoning preserved in signal: "
-              f"{'HUMAN OVERRIDE' in overridden_signal.reasoning[-1]}")
+        print(f"Override reasoning preserved in signal: " f"{'HUMAN OVERRIDE' in overridden_signal.reasoning[-1]}")
         assert overridden_signal.action == "HOLD"
         assert "HUMAN OVERRIDE" in overridden_signal.reasoning[-1]
 
         # Feedback + summary calculation
-        manager.record_feedback(test_symbol, datetime.now().isoformat(), "BUY", was_helpful=True, outcome_notes="Worked out well.")
-        manager.record_feedback(test_symbol, datetime.now().isoformat(), "SELL", was_helpful=False, outcome_notes="Missed the reversal.")
-        manager.record_feedback(test_symbol, datetime.now().isoformat(), "HOLD", was_helpful=None, outcome_notes="Not rated yet.")
+        manager.record_feedback(
+            test_symbol, datetime.now().isoformat(), "BUY", was_helpful=True, outcome_notes="Worked out well."
+        )
+        manager.record_feedback(
+            test_symbol, datetime.now().isoformat(), "SELL", was_helpful=False, outcome_notes="Missed the reversal."
+        )
+        manager.record_feedback(
+            test_symbol, datetime.now().isoformat(), "HOLD", was_helpful=None, outcome_notes="Not rated yet."
+        )
         summary = manager.get_feedback_summary(test_symbol)
         print(f"Feedback summary: {summary}")
         assert summary["total_feedback"] == 3

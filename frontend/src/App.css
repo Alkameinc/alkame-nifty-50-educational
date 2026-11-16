@@ -1,0 +1,49 @@
+.app-container {
+  max-width: 700px;
+  margin: 0 auto;
+  padding: 24px;
+  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.tagline {
+  color: #57606a;
+  font-size: 0.9rem;
+}
+
+.signal-card {
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  padding: 20px;
+  margin-top: 20px;
+}
+
+.signal-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.action-badge {
+  color: white;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-weight: bold;
+}
+
+.confidence-warning {
+  background: #fff8c5;
+  border: 1px solid #d4a72c;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+
+.suppressed-notice {
+  background: #ffebe9;
+  border: 1px solid #cf222e;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+
+.signal-card-error {
+  color: #cf222e;
+}
