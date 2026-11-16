@@ -5,7 +5,8 @@ scheduler.py to accumulate real history. Writes to a SEPARATE sqlite file
 (data_analyst/sample_history.sqlite3) — this never touches or modifies the
 real db/predictor.sqlite3 that the live engine uses.
 
-Run once with: python data_analyst/seed_sample_data.py
+Run once with:
+python data_analyst/seed_sample_data.py
 """
 
 import sys
@@ -62,7 +63,9 @@ def _simulate_symbol_history(symbol: str, n_predictions: int, rng: np.random.Gen
         # which is exactly what makes miscalibration visible in the reliability diagram
         # for low-skill sectors (confidence and real accuracy diverge).
         is_correct = rng.uniform(0, 1) < skill
-        actual_class = predicted_class if is_correct else rng.choice([c for c in CLASSES if c != predicted_class])
+        actual_class = predicted_class if is_correct else rng.choice(
+            [c for c in CLASSES if c != predicted_class]
+        )
 
         action = {"UP": "BUY", "DOWN": "SELL", "FLAT": "HOLD"}[predicted_class]
 
