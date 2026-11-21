@@ -183,20 +183,27 @@ class MarketCalendar:
 
         self.tz = ZoneInfo(timezone_str)
 
+    def _exchange_datetime(self, dt: datetime | None) -> datetime:
+        if dt is None:
+            return datetime.now(self.tz)
+        if dt.utcoffset() is None:
+            return dt.replace(tzinfo=self.tz)
+        return dt.astimezone(self.tz)
+
     def is_holiday(self, d: date | datetime | str) -> bool:
-        """Return True if the date is a recognized exchange holiday."""
+        """Return True if the exchange-local date is a recognized holiday."""
         if isinstance(d, datetime):
-            d_str = d.strftime("%Y-%m-%d")
+            d_str = self._exchange_datetime(d).date().isoformat()
         elif isinstance(d, date):
-            d_str = d.strftime("%Y-%m-%d")
+            d_str = d.isoformat()
         else:
             d_str = str(d)
         return d_str in self.holidays
 
     def is_trading_day(self, d: date | datetime | str) -> bool:
-        """Return True if `d` is a valid NSE trading day (weekday and non-holiday)."""
+        """Return True if the exchange-local date is a weekday and non-holiday."""
         if isinstance(d, datetime):
-            check_date = d.date()
+            check_date = self._exchange_datetime(d).date()
         elif isinstance(d, date):
             check_date = d
         else:
@@ -216,10 +223,7 @@ class MarketCalendar:
         - Must be between MARKET_OPEN_TIME and MARKET_CLOSE_TIME in IST
         """
         try:
-            if now is None:
-                current_dt = datetime.now(self.tz)
-            else:
-                current_dt = now.astimezone(self.tz) if now.tzinfo is not None else now.replace(tzinfo=self.tz)
+            current_dt = self._exchange_datetime(now)
 
             if not self.is_trading_day(current_dt.date()):
                 return False
@@ -232,10 +236,7 @@ class MarketCalendar:
 
     def next_market_open(self, dt: datetime | None = None) -> datetime:
         """Return the next NSE market open timestamp (timezone-aware in IST)."""
-        if dt is None:
-            current_dt = datetime.now(self.tz)
-        else:
-            current_dt = dt.astimezone(self.tz) if dt.tzinfo is not None else dt.replace(tzinfo=self.tz)
+        current_dt = self._exchange_datetime(dt)
 
         check_date = current_dt.date()
 
@@ -253,10 +254,7 @@ class MarketCalendar:
 
     def next_market_close(self, dt: datetime | None = None) -> datetime:
         """Return the market close timestamp for the current or next open trading session."""
-        if dt is None:
-            current_dt = datetime.now(self.tz)
-        else:
-            current_dt = dt.astimezone(self.tz) if dt.tzinfo is not None else dt.replace(tzinfo=self.tz)
+        current_dt = self._exchange_datetime(dt)
 
         check_date = current_dt.date()
 
@@ -270,10 +268,7 @@ class MarketCalendar:
 
     def previous_market_close(self, dt: datetime | None = None) -> datetime:
         """Return the market close timestamp for the most recently completed trading session (IST)."""
-        if dt is None:
-            current_dt = datetime.now(self.tz)
-        else:
-            current_dt = dt.astimezone(self.tz) if dt.tzinfo is not None else dt.replace(tzinfo=self.tz)
+        current_dt = self._exchange_datetime(dt)
 
         check_date = current_dt.date()
 
