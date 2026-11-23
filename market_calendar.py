@@ -296,9 +296,9 @@ class MarketCalendar:
             Number of trading days in the period (excludes weekends and holidays)
 
         Example:
-            >>> cal = MarketCalendar()
-            >>> cal.count_trading_days(date(2026, 9, 14), 7)  # Monday + 7 days
-            5  # Mon, Tue, Wed, Thu, Fri (excludes Sat, Sun)
+            >>> cal = MarketCalendar(holidays={"2026-07-14"})
+            >>> cal.count_trading_days(date(2026, 7, 13), 7)
+            4
         """
         trading_days = 0
         current = start_date

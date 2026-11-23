@@ -227,6 +227,33 @@ Open [`http://localhost:8501`](http://localhost:8501) in your browser.
 
 ## 🧪 Automated Testing & Verification
 
+### Verify exchange-local calendar dates
+
+Pass timezone-aware feed timestamps straight to `MarketCalendar.is_trading_day()` and
+`MarketCalendar.is_holiday()`. The calendar converts them to the exchange timezone before
+checking the date. Calling `.date()` on a UTC timestamp first can give the wrong trading
+day near midnight. Use a `date` or `YYYY-MM-DD` string for an exchange date you already
+know. The calendar treats naive datetimes as exchange-local.
+
+You can run this example without fetching market data. It uses a fixed holiday so the
+result is reproducible:
+
+```python
+from datetime import UTC, date, datetime
+
+from market_calendar import MarketCalendar
+
+calendar = MarketCalendar(holidays={"2026-07-14"})
+timestamp = datetime(2026, 7, 13, 20, tzinfo=UTC)  # 14 July, 01:30 IST
+
+assert calendar.is_holiday(timestamp)
+assert not calendar.is_trading_day(timestamp)
+assert calendar.count_trading_days(date(2026, 7, 13), 7) == 4
+```
+
+Run the calendar regression cases with
+`python -m unittest discover -s tests -p test_market_calendar_timezone.py -v`.
+
 Run the test suite to verify analytical computations and API contract compliance:
 ```bash
 # Run core test suite
