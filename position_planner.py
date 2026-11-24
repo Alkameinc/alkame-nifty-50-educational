@@ -55,11 +55,14 @@ class PositionPlanner:
         support_level: Optional[float] = None,
         stop_price: Optional[float] = None,
         atr: Optional[float] = None,
+        account_cash: Optional[float] = None,
+        committed_cash: Optional[float] = None,
     ) -> PositionPlan:
         """
         Generates a dynamic DCA ladder for BUY signals based on technical levels.
-        If SELL or HOLD, returns a zero-allocation plan or signals an exit.
-        Computes planned_capital, stop_price, max_loss, and risk_pct.
+        If SELL or HOLD, returns a zero-allocation plan or signals an exit/reduction.
+        Computes planned_capital, stop_price, max_loss, and risk_pct based on
+        free account cash and remaining symbol capacity.
         """
         try:
             symbol = multi_signal.symbol
@@ -78,9 +81,16 @@ class PositionPlanner:
                     planned_capital=0.0, stop_price=stop_price, max_loss=0.0, risk_pct=0.0
                 )
 
-            remaining_allocation = max(0.0, self.max_position_inr - current_position_inr)
+            # Cap 1: Remaining symbol position capacity
+            remaining_symbol_cap = max(0.0, self.max_position_inr - current_position_inr)
+
+            # Cap 2: Available free account cash (defaults to portfolio_capital if not specified)
+            effective_cash = self.portfolio_capital if account_cash is None else account_cash
+            free_account_cash = max(0.0, effective_cash - (committed_cash or 0.0))
+            remaining_allocation = min(remaining_symbol_cap, free_account_cash)
+
             if remaining_allocation <= 0:
-                logger.info(f"Position maxed out for {symbol}, cannot add more.")
+                logger.info(f"Position or cash capacity maxed out for {symbol}, cannot add more.")
                 return PositionPlan(
                     symbol=symbol, action=ACTION_HOLD, total_allocated_inr=0.0, 
                     max_allowed_inr=self.max_position_inr, ladder=[],
@@ -186,7 +196,7 @@ if __name__ == "__main__":
     # Scenario A: BUY signal, no existing position, valid technical levels below CMP
     plan_a = planner.generate_plan(
         multi_signal=multi_buy, current_price=2500.0, current_position_inr=0.0,
-        ma_level=2400.0, support_level=2300.0
+        ma_level=2400.0, support_level=2300.0, account_cash=10_00_000.0
     )
     print(f"Scenario A (BUY, new position): Action={plan_a.action}, Total Allocated={plan_a.total_allocated_inr}")
     for i, step in enumerate(plan_a.ladder):
@@ -202,7 +212,7 @@ if __name__ == "__main__":
     # Scenario B: BUY signal, half position already filled, only 1 technical level below CMP
     plan_b = planner.generate_plan(
         multi_signal=multi_buy, current_price=2500.0, current_position_inr=50_000.0,
-        ma_level=2400.0, support_level=2600.0 # Support is above CMP, should be ignored
+        ma_level=2400.0, support_level=2600.0, account_cash=10_00_000.0 # Support is above CMP, should be ignored
     )
     print(f"\nScenario B (BUY, existing position): Action={plan_b.action}, Total Allocated={plan_b.total_allocated_inr}")
     for i, step in enumerate(plan_b.ladder):

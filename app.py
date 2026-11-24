@@ -209,6 +209,9 @@ def render_dashboard() -> None:
         multi_sig = None
         active_signal = signal
 
+    if f"override_{symbol}" in st.session_state:
+        active_signal = st.session_state[f"override_{symbol}"]
+
     # --- Signal panel: downside ALWAYS before upside ---
     st.subheader(f"{symbol} — {format_action_label(active_signal.action)}")
     st.caption(format_confidence_display(active_signal))
@@ -253,7 +256,7 @@ def render_dashboard() -> None:
                 "Model Lean": lean_badge,
                 "Expected Target": f"{target_str}{expected_change}",
                 "Risk Threshold / Stop": stop_str,
-                "AI Confidence": f"{h_sig.raw_confidence:.0%}",
+                "Raw Model Score": f"{h_sig.raw_confidence:.0%}",
                 "Safety Gate": "Safe to Trade" if h_sig.is_safe_to_trade_live and not h_sig.suppressed else "Held (Educational)",
             })
             
@@ -297,8 +300,13 @@ def render_dashboard() -> None:
             if not override_reason.strip():
                 st.error("A reason is required to record an override.")
             else:
-                human_insight_manager.apply_override_to_signal(active_signal, override_action, override_reason)
-                st.success(f"Override recorded: {active_signal.action} -> {override_action}")
+                try:
+                    overridden = human_insight_manager.apply_override_to_signal(active_signal, override_action, override_reason)
+                    st.session_state[f"override_{symbol}"] = overridden
+                    st.success(f"Override recorded: {active_signal.action} -> {override_action}")
+                    st.rerun()
+                except Exception as ex:
+                    st.error(f"Failed to record override: {ex}")
 
     st.divider()
 

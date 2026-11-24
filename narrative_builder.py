@@ -48,19 +48,22 @@ class NarrativeBuilder:
             horizon_parts = []
             for h, sig in multi_signal.signals.items():
                 if sig.suppressed:
-                    horizon_parts.append(f"The {h} signal is suppressed ({sig.suppression_reasons[0]}).")
+                    reason_msg = sig.suppression_reasons[0] if sig.suppression_reasons else "evidence unavailable"
+                    horizon_parts.append(f"The {h} signal is suppressed ({reason_msg}).")
                 else:
-                    conf = f"{sig.raw_confidence*100:.1f}%"
-                    horizon_parts.append(f"Over {h}, models lean {sig.model_predicted_class} with {conf} confidence.")
+                    if sig.calibrated_confidence is not None:
+                        horizon_parts.append(f"Over {h}, models lean {sig.model_predicted_class} with calibrated probability {sig.calibrated_confidence*100:.1f}%.")
+                    else:
+                        horizon_parts.append(f"Over {h}, models lean {sig.model_predicted_class} with raw model score {sig.raw_confidence*100:.1f}% (calibrated probability: unavailable).")
             
-            horizon_summary = " " .join(horizon_parts)
+            horizon_summary = " ".join(horizon_parts)
             
             # --- Paragraph 3: Price Levels (Phase 7 Outcomes) ---
             level_parts = []
             if level_outcomes:
                 for outcome in level_outcomes:
                     if outcome.predicted_level != "NONE":
-                        level_parts.append(f"In the {outcome.horizon} window, price is most likely to test {outcome.predicted_level} first (Confidence: {outcome.confidence*100:.1f}%).")
+                        level_parts.append(f"In the {outcome.horizon} window, price is most likely to test {outcome.predicted_level} first (Model score: {outcome.confidence*100:.1f}%).")
             
             level_summary = " ".join(level_parts) if level_parts else "No significant price level tests are immediately projected."
             

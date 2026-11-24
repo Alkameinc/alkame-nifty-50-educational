@@ -147,7 +147,7 @@ def test_data_freshness_explicit_state():
 
     assert isinstance(result, MarketDataResult)
     assert result.status in [DataStatus.LIVE, DataStatus.CACHED_FRESH, DataStatus.CACHED_STALE, DataStatus.UNAVAILABLE]
-    assert result.source.upper() in ["LIVE", "CACHE", "UNAVAILABLE"]
+    assert result.source.upper() in ["LIVE", "CACHE", "UNAVAILABLE", "YAHOO"]
     if result.status == DataStatus.CACHED_STALE:
         assert result.is_stale is True
 

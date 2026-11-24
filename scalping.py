@@ -89,6 +89,12 @@ class ScalpingEngine:
                     reward = abs(target - cmp)
                     rr_ratio = reward / risk if risk > 0 else 0
                     
+                    scalp_reasoning = list(sig.reasoning)
+                    scalp_reasoning.append(
+                        f"Intraday ranking score: {score * 100:.1f}% (composite conviction value; "
+                        f"calibrated probability: {'unavailable' if sig.calibrated_confidence is None else f'{sig.calibrated_confidence*100:.1f}%'})."
+                    )
+
                     opportunities.append(ScalpSetup(
                         symbol=symbol,
                         action=sig.action,
@@ -97,7 +103,7 @@ class ScalpingEngine:
                         stop_loss=round(sl, 2),
                         confidence=round(score * 100, 1),
                         risk_reward_ratio=round(rr_ratio, 2),
-                        reasoning=sig.reasoning
+                        reasoning=scalp_reasoning
                     ))
             except Exception as e:
                 logger.error(f"Error finding scalping ops for {symbol}: {e}")

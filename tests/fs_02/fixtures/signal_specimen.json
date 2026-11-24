@@ -1,0 +1,24 @@
+{
+  "symbol": "RELIANCE",
+  "timestamp": "2026-09-07T10:00:00+05:30",
+  "action": "HOLD",
+  "model_predicted_class": "UP",
+  "raw_confidence": 0.8,
+  "risk_adjusted_confidence": 0.64,
+  "calibrated_confidence": null,
+  "agreement_fraction": 0.75,
+  "downside_summary": "Fixture: loss remains possible.",
+  "upside_summary": "Fixture: model leans upward.",
+  "reasoning": [
+    "Fixture model score: 0.80"
+  ],
+  "contributing_events": [],
+  "global_risk_level": "NORMAL",
+  "risk_toggle_enabled": false,
+  "is_safe_to_trade_live": false,
+  "data_stale": false,
+  "suppressed": true,
+  "suppression_reasons": [
+    "Fixture: evidence unavailable"
+  ]
+}

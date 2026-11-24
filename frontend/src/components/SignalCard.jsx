@@ -28,22 +28,30 @@ export default function SignalCard({ symbol }) {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError(null);
 
-    fetchSignal(symbol)
-      .then((data) => {
-        if (!cancelled) setSignal(data);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err.message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    const loadSignalData = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await fetchSignal(symbol);
+        if (!cancelled) {
+          setSignal(data);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err.message || String(err));
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadSignalData();
 
     return () => {
-      cancelled = true; // avoids setting state on an unmounted component if the user navigates away mid-request
+      cancelled = true; // avoids setting state on an unmounted component or stale request
     };
   }, [symbol]);
 

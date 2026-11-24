@@ -443,7 +443,7 @@ class Predictor:
 
             reasoning = [
                 f"Ensemble model lean: {ensemble_pred.predicted_class} "
-                f"(raw confidence {ensemble_pred.confidence:.2f}, model agreement {ensemble_pred.agreement_fraction:.0%}).",
+                f"(raw model score {ensemble_pred.confidence:.2f}, model agreement {ensemble_pred.agreement_fraction:.0%}).",
                 f"Global risk level: {risk_reading.risk_level}"
                 + (f" — toggle ENABLED, confidence multiplier {risk_multiplier:.2f}x applied."
                    if self.global_risk_monitor.get_toggle_state().enabled else " — toggle OFF, no adjustment applied."),

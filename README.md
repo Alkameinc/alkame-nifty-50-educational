@@ -254,6 +254,9 @@ streamlit run app.py
 
 ---
 
+PROJECT CONTRIBUTION
+
+This is official part of DBERT open source contribution workflow
 ---
 
 ## Educational Research Framework Notice
