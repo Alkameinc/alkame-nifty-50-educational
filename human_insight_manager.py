@@ -246,7 +246,10 @@ class HumanInsightManager:
         PredictionSignal reflecting the human's final call — the model's
         original output is preserved in reasoning, never silently erased.
         """
-        self.record_override(signal.symbol, signal.action, overridden_action, reason, created_by)
+        override_id = self.record_override(signal.symbol, signal.action, overridden_action, reason, created_by)
+        if override_id is None:
+            raise ValueError(f"Failed to record override for {signal.symbol}: reason is mandatory and database record must succeed.")
+
         new_reasoning = list(signal.reasoning) + [
             f"HUMAN OVERRIDE by {created_by}: changed action from {signal.action} to {overridden_action}. "
             f"Reason: {reason}"
@@ -263,6 +266,8 @@ class HumanInsightManager:
             global_risk_level=signal.global_risk_level, risk_toggle_enabled=signal.risk_toggle_enabled,
             is_safe_to_trade_live=signal.is_safe_to_trade_live, data_stale=signal.data_stale,
             suppressed=signal.suppressed, suppression_reasons=signal.suppression_reasons,
+            target_price=signal.target_price, stop_loss=signal.stop_loss,
+            peak_potential_price=signal.peak_potential_price,
         )
 
     # -----------------------------------------------------------------
@@ -414,4 +419,5 @@ if __name__ == "__main__":
         print(f"STATUS: FAIL — {e}")
     finally:
         if test_db_path.exists():
-            os.remove(test_db_path)  # leave no test artifacts behind
+            os.remove(test_db_path)  
+    
